@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+release/
+out/
+
+# Local runtime data and diagnostics
+.env
+.env.*
+!.env.example
+*.log
+_diag.txt
+_fix_encoding.py
+_verify_final.py
+automation-merged.png
+.playwright-mcp/
+*.user.js
+学习助手实现文档.md
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Package manager cache
+.npm/
+.pnpm-store/
+
+# Electron builder cache/output
+*.blockmap
+*.asar

@@ -1,0 +1,501 @@
+import React, { useState } from 'react';
+import {
+  AlertTriangle,
+  BrainCircuit,
+  CheckCircle2,
+  Database,
+  FileQuestion,
+  ListChecks,
+  MousePointer2,
+  MousePointerClick,
+  Play,
+  ScanSearch,
+  Search,
+  ShieldCheck,
+  Wand2
+} from 'lucide-react';
+import { AIAnswerResult, appStore, QuestionItem, useAppStore } from '../store/appStore';
+
+const statusLabels: Record<string, string> = {
+  idle: '空闲',
+  scanning: '扫描中',
+  planning: '计划中',
+  awaiting_approval: '待批准',
+  executing: '执行中',
+  extracting_question: '抓题中',
+  calling_ai: 'AI 解析中',
+  done: '完成',
+  error: '错误'
+};
+
+const typeLabels: Record<string, string> = {
+  single: '单选',
+  multiple: '多选',
+  judgement: '判断',
+  completion: '填空',
+  essay: '问答',
+  unknown: '未知'
+};
+
+const riskLabels: Record<string, string> = {
+  low: '低风险',
+  medium: '中风险',
+  high: '高风险'
+};
+
+function buildPrompt(question: QuestionItem) {
+  return `你是一个学习辅助解析助手。请根据题目内容给出参考答案和解析。
+要求：
+1. 只返回 JSON，不要返回 Markdown 代码块。
+2. answer 字段写最可能的答案；选择题请返回选项字母和简短选项文本。
+3. choiceLabels 字段返回命中的选项字母数组，例如 ["A"] 或 ["A","C"]。
+4. matchedOptions 字段返回命中的完整选项文本数组。
+5. confidence 是 0 到 1 之间的小数。
+6. analysis 给出简洁解析。
+7. warnings 用数组提示不确定性或题目歧义。
+
+题号：${question.index || ''}
+题型：${question.type}
+题目：${question.question}
+${question.options.length ? `选项：\n${question.options.join('\n')}` : ''}
+
+JSON 格式：
+{
+  "answer": "...",
+  "choiceLabels": ["A"],
+  "matchedOptions": ["A. ..."],
+  "confidence": 0.9,
+  "analysis": "...",
+  "warnings": []
+}`;
+}
+
+function normalizeOptionText(text: string) {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/^[A-ZＡ-Ｄ][.\s:：、．。)]*/i, '')
+    .replace(/[，。,.、；;：:\s"'“”‘’【】\[\]（）()]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function extractChoiceLabels(answer: string) {
+  const labels = Array.from(String(answer || '').matchAll(/(?:答案|选项|选择|^|[^A-Z])([A-D])(?:[^A-Z]|$)/gi))
+    .map((match) => match[1].toUpperCase());
+  return Array.from(new Set(labels));
+}
+
+function textMatches(answer: string, option: string) {
+  const answerText = normalizeOptionText(answer);
+  const optionText = normalizeOptionText(option);
+  if (!answerText || !optionText) return false;
+  if (answerText.includes(optionText) || optionText.includes(answerText)) return true;
+  if (/正确|對|对|true|yes|是/.test(answerText) && /正确|對|对|true|yes|是/.test(optionText)) return true;
+  if (/错误|錯|错|false|no|否/.test(answerText) && /错误|錯|错|false|no|否/.test(optionText)) return true;
+  return false;
+}
+
+function normalizeAnswer(question: QuestionItem, rawAnswer: string, rawLabels?: unknown, rawMatched?: unknown) {
+  const answer = String(rawAnswer || '未识别到答案');
+  const labels = Array.isArray(rawLabels)
+    ? rawLabels.map((item) => String(item).trim().toUpperCase()).filter(Boolean)
+    : extractChoiceLabels(answer);
+
+  const byLabel = question.options.filter((option, index) => {
+    const fallbackLabel = String.fromCharCode(65 + index);
+    const optionLabel = option.match(/^\s*([A-Z])\s*[.\s:：、．。)]/i)?.[1]?.toUpperCase() || fallbackLabel;
+    return labels.includes(optionLabel);
+  });
+  const byText = question.options.filter((option) => textMatches(answer, option));
+
+  const providedMatched = Array.isArray(rawMatched) ? rawMatched.map((item) => String(item)).filter(Boolean) : [];
+  const matchedOptions = Array.from(new Set([...providedMatched, ...byLabel, ...byText]));
+  return { choiceLabels: labels, matchedOptions };
+}
+
+function demoAnswer(question: QuestionItem): AIAnswerResult {
+  const optionA = question.options.find((option) => option.startsWith('A.')) || question.options[0] || '请结合题干判断';
+  const normalized = normalizeAnswer(question, optionA);
+  return {
+    questionHash: question.hash,
+    provider: '本地演示',
+    model: 'demo',
+    answer: optionA,
+    choiceLabels: normalized.choiceLabels,
+    matchedOptions: normalized.matchedOptions,
+    confidence: 0.82,
+    analysis: '当前未配置 API Key，因此使用本地演示解析。配置 AI 服务后，将根据抓取到的题干和选项请求真实模型。',
+    warnings: ['演示结果仅用于验证题库、展示和填入流程。'],
+    createdAt: Date.now()
+  };
+}
+
+export function AIPanel() {
+  const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, snapshot, currentPlan } = useAppStore();
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [automationGoal, setAutomationGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
+  const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
+
+  const runAutomationAction = (action: 'extract-question' | 'scan-page' | 'build-plan' | 'execute-plan') => {
+    window.dispatchEvent(new CustomEvent('studypilot:automation-action', {
+      detail: { action, goal: automationGoal }
+    }));
+  };
+
+  const requestAI = async (question: QuestionItem): Promise<AIAnswerResult> => {
+    const bankAnswer = appStore.findQuestionBankAnswer(question);
+    if (bankAnswer) {
+      appStore.addLog('success', `题库命中第 ${question.index || currentQuestionIndex + 1} 题，已跳过 AI。`);
+      return bankAnswer;
+    }
+
+    if (!activeProvider.apiKey) {
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      const answer = demoAnswer(question);
+      appStore.upsertQuestionBank(question, answer);
+      return answer;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+    const response = await fetch(`${activeProvider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${activeProvider.apiKey}`
+      },
+      body: JSON.stringify({
+        model: activeProvider.model,
+        messages: [
+          { role: 'system', content: '你是严谨的学习辅助解析助手，只输出 JSON。' },
+          { role: 'user', content: buildPrompt(question) }
+        ],
+        temperature: 0.1,
+        response_format: { type: 'json_object' }
+      }),
+      signal: controller.signal
+    });
+    window.clearTimeout(timeoutId);
+
+    if (!response.ok) throw new Error(`接口返回 ${response.status}：${await response.text()}`);
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(String(content).replace(/```json|```/g, '').trim());
+    const answer = parsed.answer || '未识别到答案';
+    const normalized = normalizeAnswer(
+      question,
+      answer,
+      parsed.choiceLabels || parsed.choice_labels || parsed.labels,
+      parsed.matchedOptions || parsed.matched_options
+    );
+
+    const result = {
+      questionHash: question.hash,
+      provider: activeProvider.name,
+      model: activeProvider.model,
+      answer,
+      choiceLabels: normalized.choiceLabels,
+      matchedOptions: normalized.matchedOptions,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.75,
+      analysis: parsed.analysis || '模型未返回详细解析。',
+      warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+      createdAt: Date.now()
+    };
+    appStore.upsertQuestionBank(question, result);
+    return result;
+  };
+
+  const callCurrentAI = async () => {
+    if (!currentQuestion) {
+      appStore.setStatus('error', '请先抓取页面题目。');
+      return;
+    }
+    appStore.setStatus('calling_ai', `正在解析第 ${currentQuestion.index || currentQuestionIndex + 1} 题。`);
+    try {
+      const answer = await requestAI(currentQuestion);
+      appStore.setCurrentAnswer(answer);
+      appStore.setStatus('done', `第 ${currentQuestion.index || currentQuestionIndex + 1} 题解析完成。`);
+    } catch (error: any) {
+      appStore.setStatus('error', `AI 请求失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
+    }
+  };
+
+  const callAllAI = async () => {
+    if (questions.length === 0) {
+      appStore.setStatus('error', '请先抓取页面题目。');
+      return;
+    }
+    setBatchRunning(true);
+    try {
+      for (let index = 0; index < questions.length; index += 1) {
+        const question = questions[index];
+        if (answerMap[question.hash]) continue;
+        appStore.setCurrentQuestionIndex(index);
+        appStore.setStatus('calling_ai', `正在解析第 ${question.index || index + 1} / ${questions.length} 题，优先查询题库。`);
+        const answer = await requestAI(question);
+        appStore.setCurrentAnswer(answer);
+      }
+      appStore.setStatus('done', `已完成 ${questions.length} 道题的解析。`);
+    } catch (error: any) {
+      appStore.setStatus('error', `批量解析失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
+    } finally {
+      setBatchRunning(false);
+    }
+  };
+
+  const applyAnswersToPage = (items: { question: QuestionItem; answer: AIAnswerResult }[]) => {
+    if (items.length === 0) {
+      appStore.setStatus('error', '没有可填入网页的答案。');
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('studypilot:apply-answers', { detail: { items } }));
+  };
+
+  const applyCurrentAnswer = () => {
+    if (!currentQuestion || !currentAnswer) {
+      appStore.setStatus('error', '请先解析当前题答案。');
+      return;
+    }
+    applyAnswersToPage([{ question: currentQuestion, answer: currentAnswer }]);
+  };
+
+  const applyAllAnswers = () => {
+    const items = questions
+      .map((question) => ({ question, answer: answerMap[question.hash] }))
+      .filter((item): item is { question: QuestionItem; answer: AIAnswerResult } => Boolean(item.answer));
+    applyAnswersToPage(items);
+  };
+
+  return (
+    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, height: '100%', overflowY: 'auto' }}>
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <button
+          onClick={() => runAutomationAction('extract-question')}
+          style={{ background: 'rgba(16,185,129,0.15)', color: '#fff', padding: '12px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 8, alignItems: 'center', fontWeight: 900, fontSize: '0.88rem' }}
+        >
+          <FileQuestion size={16} /> 抓取页面题目
+        </button>
+
+        <div>
+          <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: 8 }}>自动化目标</h4>
+          <textarea
+            value={automationGoal}
+            onChange={(event) => setAutomationGoal(event.target.value)}
+            rows={4}
+            style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem' }}
+          />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <button
+            onClick={() => runAutomationAction('scan-page')}
+            style={{ background: 'rgba(99,102,241,0.15)', color: '#fff', padding: '10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 800 }}
+          >
+            <ScanSearch size={15} /> 扫描
+          </button>
+          <button
+            onClick={() => runAutomationAction('build-plan')}
+            style={{ background: 'rgba(168,85,247,0.15)', color: '#fff', padding: '10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 800 }}
+          >
+            <Wand2 size={15} /> 生成计划
+          </button>
+        </div>
+
+        {snapshot && (
+          <div className="glass-panel" style={{ padding: 12, borderRadius: 8 }}>
+            <h5 style={{ color: '#fff', fontSize: '0.78rem', marginBottom: 8 }}>已识别控件</h5>
+            {snapshot.controls.slice(0, 18).map((control) => (
+              <div key={control.selector} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                <span>{control.text || control.placeholder || control.tag}</span>
+                <code style={{ color: 'var(--text-muted)' }}>{control.tag}</code>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {currentPlan && (
+          <div className="glass-panel" style={{ padding: 12, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h5 style={{ color: '#fff', fontSize: '0.78rem' }}>执行计划</h5>
+              <span className={`badge ${currentPlan.risk === 'high' ? 'badge-danger' : currentPlan.risk === 'medium' ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '0.62rem' }}>{riskLabels[currentPlan.risk] || currentPlan.risk}</span>
+            </div>
+            {currentPlan.steps.map((step, index) => (
+              <div key={step.id} style={{ display: 'grid', gridTemplateColumns: '22px 1fr', gap: 8, color: 'var(--text-secondary)', fontSize: '0.74rem', lineHeight: 1.45 }}>
+                <span style={{ color: 'var(--primary-color)', fontWeight: 800 }}>{index + 1}</span>
+                <span>{step.label}</span>
+              </div>
+            ))}
+            <button onClick={() => appStore.approvePlan(!currentPlan.approved)} style={{ background: currentPlan.approved ? 'rgba(16,185,129,0.16)' : 'rgba(255,255,255,0.04)', color: currentPlan.approved ? 'var(--success-color)' : '#fff', padding: '9px 10px', borderRadius: 8, fontWeight: 800 }}>
+              {currentPlan.approved ? '已批准' : '批准计划'}
+            </button>
+            <button onClick={() => runAutomationAction('execute-plan')} style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 900, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7 }}>
+              <Play size={15} /> 执行
+            </button>
+          </div>
+        )}
+
+        <div className="glass-panel" style={{ padding: 12, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
+          <MousePointer2 size={14} style={{ color: 'var(--primary-color)', marginBottom: 6 }} />
+          多题页面会按题号、题型和选项边界拆分。真实页面抓题需要在设置中启用 WebView。
+        </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--primary-color)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <BrainCircuit size={18} style={{ color: 'var(--primary-color)' }} />
+          <h4 style={{ color: '#fff', fontSize: '0.95rem' }}>题目抓取与答案解析</h4>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+          抓题会过滤脚本和样式噪声。解析时优先查询本地题库，未命中才调用 AI，AI 结果会自动入库。
+        </p>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>当前状态</h5>
+          <span className="badge badge-primary">{statusLabels[status] || status}</span>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.5 }}>{statusText}</p>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>题库与 AI</h5>
+          {activeProvider.apiKey ? <CheckCircle2 size={16} style={{ color: 'var(--success-color)' }} /> : <AlertTriangle size={16} style={{ color: 'var(--warning-color)' }} />}
+        </div>
+        <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={13} /> 本地题库：{questionBank.length} 题</div>
+          <div>服务商：{activeProvider.name}</div>
+          <div>模型：{activeProvider.model}</div>
+          <div>状态：{activeProvider.apiKey ? '已配置 API Key' : '未配置 API Key，将使用演示答案'}</div>
+        </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>题目列表</h5>
+          <span className="badge badge-primary">{questions.length} 题</span>
+        </div>
+        {questions.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '28px 0', fontSize: '0.8rem' }}>
+            <FileQuestion size={28} style={{ marginBottom: 8 }} />
+            <div>还没有抓取题目。</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+            {questions.map((question, index) => {
+              const active = index === currentQuestionIndex;
+              const answered = Boolean(answerMap[question.hash]);
+              const bankHit = appStore.hasQuestionBankAnswer(question);
+              return (
+                <button
+                  key={question.hash}
+                  onClick={() => appStore.setCurrentQuestionIndex(index)}
+                  style={{
+                    textAlign: 'left',
+                    background: active ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
+                    border: active ? '1px solid var(--primary-color)' : '1px solid var(--border-glass)',
+                    color: '#fff',
+                    padding: 10,
+                    borderRadius: 8
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--primary-color)', fontWeight: 800 }}>第 {question.index || index + 1} 题 · {typeLabels[question.type] || question.type}</span>
+                    <span style={{ color: answered ? 'var(--success-color)' : bankHit ? 'var(--warning-color)' : 'var(--text-muted)', fontSize: '0.7rem' }}>{answered ? '已解析' : bankHit ? '题库' : '未解析'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                    {question.question.slice(0, 64)}{question.question.length > 64 ? '...' : ''}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {currentQuestion && (
+        <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>当前题目</h5>
+            <span className="badge badge-primary">{typeLabels[currentQuestion.type] || currentQuestion.type}</span>
+          </div>
+          <p style={{ color: '#fff', fontSize: '0.88rem', lineHeight: 1.55, fontWeight: 700 }}>{currentQuestion.question}</p>
+          {currentQuestion.options.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+              {currentQuestion.options.map((option) => (
+                <div key={option} style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', padding: '7px 9px', border: '1px solid var(--border-glass)', borderRadius: 6 }}>
+                  {option}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+            <button
+              onClick={callCurrentAI}
+              disabled={status === 'calling_ai'}
+              style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            >
+              <Search size={15} /> 查询/解析当前题
+            </button>
+            <button
+              onClick={callAllAI}
+              disabled={batchRunning || status === 'calling_ai'}
+              style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            >
+              <ListChecks size={15} /> 批量查询/解析
+            </button>
+          </div>
+        </div>
+      )}
+
+      {currentAnswer && (
+        <div className="glass-panel" style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>参考答案</h5>
+            <span style={{ color: 'var(--success-color)', fontWeight: 800, fontSize: '0.8rem' }}>{(currentAnswer.confidence * 100).toFixed(0)}%</span>
+          </div>
+          <div style={{ color: '#34d399', fontSize: '1rem', fontWeight: 900, padding: 12, border: '1px solid rgba(16,185,129,0.18)', borderRadius: 8, marginBottom: 12 }}>
+            {currentAnswer.answer}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+            <button
+              onClick={applyCurrentAnswer}
+              style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            >
+              <MousePointerClick size={15} /> 填入当前题
+            </button>
+            <button
+              onClick={applyAllAnswers}
+              style={{ background: 'rgba(99,102,241,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            >
+              <ListChecks size={15} /> 填入已解析
+            </button>
+          </div>
+          {currentAnswer.choiceLabels.length > 0 && (
+            <div style={{ color: 'var(--success-color)', fontSize: '0.78rem', fontWeight: 800, marginBottom: 10 }}>
+              命中选项：{currentAnswer.choiceLabels.join('、')}
+            </div>
+          )}
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            {currentAnswer.analysis}
+          </div>
+          {currentAnswer.warnings.length > 0 && (
+            <div style={{ color: 'var(--warning-color)', fontSize: '0.75rem', lineHeight: 1.5, marginTop: 12 }}>
+              {currentAnswer.warnings.map((warning) => <div key={warning}>提示：{warning}</div>)}
+            </div>
+          )}
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', marginTop: 12 }}>
+            来源：{currentAnswer.provider} / {currentAnswer.model}
+          </div>
+        </div>
+      )}
+
+      <div className="glass-panel" style={{ padding: 14, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
+        <ShieldCheck size={14} style={{ color: 'var(--primary-color)', marginBottom: 6 }} />
+        AI 返回的是学习参考答案。填入选项不会自动提交，请自行核对题目上下文、课程材料和平台规则。
+      </div>
+    </div>
+  );
+}
