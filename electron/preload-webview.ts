@@ -2618,58 +2618,18 @@ function parseJudgementValue(text: string): 'true' | 'false' | null {
   const value = String(text || '')
     .toLowerCase()
     .replace(/\s+/g, '')
-    .replace(/[：:，,。.;；、|/]/g, '');
+    .replace(/[\u3002\uff0c\uff1b,.;:?;\/]/g, '');
   if (!value) return null;
 
-  const trueValues = new Set([
-    'true',
-    't',
-    '1',
-    'yes',
-    'y',
-    'right',
-    'correct',
-    'ri',
-    '\u6b63\u786e',
-    '\u5bf9',
-    '\u662f',
-    '√',
-    '✓',
-    '✔',
-    '姝ｇ‘',
-    '瀵?',
-    '鈭?',
-    '鉁?'
-  ]);
-  const falseValues = new Set([
-    'false',
-    'f',
-    '0',
-    'no',
-    'n',
-    'wrong',
-    'incorrect',
-    'wr',
-    '\u9519\u8bef',
-    '\u9519',
-    '\u5426',
-    '×',
-    'x',
-    '✗',
-    '✘',
-    '閿欒',
-    '閿?',
-    '脳',
-    '鉁?'
-  ]);
+  const trueValues = new Set(['true', 't', '1', 'yes', 'y', 'right', 'correct', 'ri', '\u6b63\u786e', '\u5bf9', '\u662f']);
+  const falseValues = new Set(['false', 'f', '0', 'no', 'n', 'wrong', 'incorrect', 'wr', 'x', '\u9519\u8bef', '\u9519', '\u5426']);
 
   if (trueValues.has(value)) return 'true';
   if (falseValues.has(value)) return 'false';
-  if (/(\u6b63\u786e|\u5bf9|\u662f|姝ｇ‘|瀵|鈭|true|yes|right|correct)/i.test(value)) return 'true';
-  if (/(\u9519\u8bef|\u9519|\u5426|閿|脳|false|wrong|incorrect)/i.test(value)) return 'false';
+  if (/(\u6b63\u786e|\u5bf9|\u662f|true|yes|right|correct)/i.test(value)) return 'true';
+  if (/(\u9519\u8bef|\u9519|\u5426|false|wrong|incorrect)/i.test(value)) return 'false';
   return null;
 }
-
 function judgementValueFromOptionTarget(target: QuestionOptionTarget) {
   return parseJudgementValueStable(`${target.value || ''} ${target.text || ''} ${target.label || ''}`);
 }
