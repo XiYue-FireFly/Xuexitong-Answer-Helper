@@ -9,7 +9,40 @@
     "electron:build": "tsc -p tsconfig.electron.json",
     "electron": "npm run electron:build && electron .",
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",
-    "pack": "npm run build && npm run electron:build && electron-builder"
+    "pack": "npm run build && npm run electron:build && electron-builder",
+    "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=false"
+  },
+  "build": {
+    "appId": "com.studypilot.desktop",
+    "productName": "学习通答题辅助工具",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "学习通答题辅助工具"
+    }
   },
   "keywords": [
     "learning-assistant",
