@@ -62,6 +62,7 @@ export interface QuestionOptionTarget {
   selector?: string;
   inputSelector?: string;
   clickSelector?: string;
+  value?: string;
 }
 
 export interface AIAnswerResult {

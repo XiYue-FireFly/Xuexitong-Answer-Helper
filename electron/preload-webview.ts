@@ -151,6 +151,36 @@ const DEBUG_ATTRIBUTE_ALLOWLIST = new Set([
   'enc'
 ]);
 
+interface AppliedAnswerRecord {
+  qid: string;
+  answer: string;
+  labels: string[];
+  updatedAt: number;
+}
+
+function appliedAnswerStore(): Record<string, AppliedAnswerRecord> {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotAppliedAnswers) pageAny.__studyPilotAppliedAnswers = {};
+  return pageAny.__studyPilotAppliedAnswers;
+}
+
+function rememberAppliedAnswer(qid: string, answer: string, labels: string[]) {
+  if (!qid || !answer) return;
+  appliedAnswerStore()[qid] = {
+    qid,
+    answer,
+    labels,
+    updatedAt: Date.now()
+  };
+}
+
+function appliedAnswerFor(qid: string) {
+  const record = appliedAnswerStore()[qid];
+  if (!record) return null;
+  if (Date.now() - record.updatedAt > 30 * 60 * 1000) return null;
+  return record;
+}
+
 function compactDebugText(value: unknown, maxLength = 240) {
   const text = cleanText(String(value || ''));
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
@@ -1166,6 +1196,22 @@ function syncAnswersBeforeSave() {
     const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
     if (!hiddenAnswer) continue;
     const qtype = root.getAttribute('qtype') || root.querySelector('[qtype]')?.getAttribute('qtype') || '';
+    const appliedAnswer = appliedAnswerFor(qid);
+    if (appliedAnswer) {
+      if (hiddenAnswer.value !== appliedAnswer.answer) {
+        hiddenAnswer.value = appliedAnswer.answer;
+        dispatchInput(hiddenAnswer);
+        updated += 1;
+      }
+      details.push({
+        qid,
+        qtype,
+        value: hiddenAnswer.value,
+        lockedByStudyPilot: true,
+        labels: appliedAnswer.labels
+      });
+      continue;
+    }
     const optionElements = uniqueElements(Array.from(root.querySelectorAll([
       '.answerBg',
       '.workTextWrap',
@@ -1616,11 +1662,14 @@ function pickAnswerTargets(payload: AnswerApplyPayload) {
     .map((match) => match[1].toUpperCase())
     .forEach((label) => labelSet.add(label));
 
-  let selected = targets.filter((target) => labelSet.has(target.label.toUpperCase()));
-  if (selected.length === 0 && labelSet.size > 0) {
+  let selected: QuestionOptionTarget[] = [];
+  if (labelSet.size > 0) {
     selected = Array.from(labelSet)
       .map((label) => optionTargetByLabel(payload, label))
       .filter(Boolean) as QuestionOptionTarget[];
+  }
+  if (selected.length === 0) {
+    selected = targets.filter((target) => labelSet.has(target.label.toUpperCase()));
   }
   if (selected.length === 0 && labelSet.size > 0 && targets.length > 0) {
     selected = Array.from(labelSet)
@@ -1734,6 +1783,7 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
     hiddenAnswer.value = answer;
     dispatchInput(hiddenAnswer);
   }
+  rememberAppliedAnswer(qid, answer, labels);
   if (isJudgement) {
     reportWebviewError('webview:apply-answer-judgement', {
       level: 'info',
@@ -1762,6 +1812,15 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   for (const option of optionElements) {
     const value = isJudgement ? judgementValueFromElement(option) : (option.getAttribute('data') || '').toUpperCase();
     const selected = isJudgement ? value === answer : labels.includes(String(value || '').toUpperCase());
+    const input = option.matches('input[type="radio"], input[type="checkbox"]')
+      ? option as HTMLInputElement
+      : option.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
+    if (input) {
+      input.checked = selected;
+      input.setAttribute('checked', selected ? 'checked' : '');
+      if (!selected) input.removeAttribute('checked');
+      dispatchInput(input);
+    }
     option.setAttribute('aria-checked', selected ? 'true' : 'false');
     option.setAttribute('aria-pressed', selected ? 'true' : 'false');
     const singleMarker = option.querySelector('.num_option') as HTMLElement | null;
@@ -1777,6 +1836,38 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   if (typeof pageAny.loadAnswerSheet === 'function') pageAny.loadAnswerSheet(qid, answer);
   if (typeof pageAny.answerContentChange === 'function') pageAny.answerContentChange();
   return Boolean(hiddenAnswer || optionElements.length > 0);
+}
+
+function ensureAppliedAnswerValue(payload: AnswerApplyPayload, targets: QuestionOptionTarget[]) {
+  const answerText = `${payload.answer || ''} ${(payload.matchedOptions || []).join(' ')}`;
+  const judgementValue = isJudgementPayload(payload, targets) ? parseJudgementValueStable(answerText) : null;
+  const labels = judgementValue ? [] : (targets.length > 0 ? targets.map((target) => target.label.toUpperCase()) : labelsFromPayload(payload));
+  const qid = qidForPayload(payload);
+  if (!qid || (!judgementValue && labels.length === 0)) return true;
+
+  const root = questionRootForPayload(payload);
+  const isJudgement = Boolean(judgementValue) || root.getAttribute('qtype') === '3' || Boolean(root.querySelector('[qtype="3"]'));
+  const isMultiple = !isJudgement && (root.getAttribute('qtype') === '1' || Boolean(root.querySelector('[qtype="1"], [qtype="21"]')));
+  const expected = isJudgement && judgementValue ? judgementValue : (isMultiple ? labels.slice().sort() : labels).join('');
+  const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
+  if (!hiddenAnswer) {
+    rememberAppliedAnswer(qid, expected, labels);
+    return true;
+  }
+
+  if (hiddenAnswer.value !== expected) {
+    const previous = hiddenAnswer.value;
+    hiddenAnswer.value = expected;
+    dispatchInput(hiddenAnswer);
+    rememberAppliedAnswer(qid, expected, labels);
+    reportWebviewError('webview:apply-answer-correct-hidden-value', {
+      level: 'warn',
+      message: `Corrected hidden answer value from ${previous || 'empty'} to ${expected}`,
+      details: { qid, previous, expected, labels }
+    });
+  }
+
+  return hiddenAnswer.value === expected;
 }
 
 function selectedClassHit(element: HTMLElement) {
@@ -1891,6 +1982,7 @@ async function applyAnswerV2(payload: AnswerApplyPayload) {
   const targets = pickAnswerTargets(payload);
   if (targets.length === 0) {
     if (applyAnswerDirectly(payload, [])) {
+      if (!ensureAppliedAnswerValue(payload, [])) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
     const candidates = fallbackAnswerTargets(payload).slice(0, 8);
@@ -1903,6 +1995,7 @@ async function applyAnswerV2(payload: AnswerApplyPayload) {
   try {
     for (const target of targets) await clickAnswerTarget(target);
     applyAnswerDirectly(payload, targets, false);
+    if (!ensureAppliedAnswerValue(payload, targets)) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
     return {
       success: true,
       message: `已命中 ${targets.map((target) => target.label).join('、')} 选项。`,
@@ -1911,6 +2004,7 @@ async function applyAnswerV2(payload: AnswerApplyPayload) {
     };
   } catch (error: any) {
     if (isJudgementPayload(payload, targets) && applyAnswerDirectly(payload, targets, false)) {
+      if (!ensureAppliedAnswerValue(payload, targets)) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
     return { success: false, error: error.message };
