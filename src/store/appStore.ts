@@ -87,6 +87,14 @@ export interface QuestionBankEntry {
   hits: number;
 }
 
+export interface ManualQuestionBankInput {
+  question: string;
+  options: string[];
+  answer: string;
+  analysis?: string;
+  type?: QuestionType;
+}
+
 export interface AIProviderConfig {
   id: string;
   name: string;
@@ -257,6 +265,14 @@ class GlobalStore {
     localStorage.setItem('studypilot_question_bank_v1', JSON.stringify(bank));
   }
 
+  exportQuestionBank() {
+    return this.state.questionBank.map((entry) => ({
+      ...entry,
+      answer: { ...entry.answer },
+      options: [...entry.options]
+    }));
+  }
+
   private dedupeQuestionBank(bank: QuestionBankEntry[]) {
     const seen = new Set<string>();
     return (Array.isArray(bank) ? bank : []).filter((item) => {
@@ -374,6 +390,131 @@ class GlobalStore {
     const legacyKey = this.normalizeQuestionKey(question);
     return this.state.questionBank.some((item) => item.questionKey === contentKey || item.questionKey === legacyKey) ||
       Boolean(this.findFuzzyQuestionBankEntry(question));
+  }
+
+  private hashText(text: string) {
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  private optionLabelFor(index: number) {
+    return String.fromCharCode(65 + index);
+  }
+
+  private optionLabelFromText(option: string, index: number) {
+    return option.match(/^\s*([A-Z])\s*[.\s:：、。)]/i)?.[1]?.toUpperCase() || this.optionLabelFor(index);
+  }
+
+  private normalizeManualAnswer(input: ManualQuestionBankInput, questionHash: string): AIAnswerResult {
+    const answer = input.answer.trim();
+    const labels = new Set<string>();
+    Array.from(answer.matchAll(/(?:^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
+      .map((match) => match[1].toUpperCase())
+      .forEach((label) => labels.add(label));
+
+    const matchedOptions = input.options.filter((option, index) => {
+      const label = this.optionLabelFromText(option, index);
+      const optionBody = this.normalizeQuestionKey(option.replace(/^\s*[A-D]\s*[.\s:：、。)]*/i, ''));
+      const answerBody = this.normalizeQuestionKey(answer);
+      return labels.has(label) || (optionBody.length > 0 && answerBody.includes(optionBody));
+    });
+
+    return {
+      questionHash,
+      provider: '本地手动题库',
+      model: 'manual',
+      answer,
+      choiceLabels: Array.from(labels),
+      matchedOptions,
+      confidence: 1,
+      analysis: input.analysis?.trim() || '来自本地手动题库，未调用 AI。',
+      warnings: [],
+      createdAt: Date.now()
+    };
+  }
+
+  addManualQuestionBankItems(items: ManualQuestionBankInput[]) {
+    let added = 0;
+    let skipped = 0;
+    for (const item of items) {
+      const question = item.question.trim();
+      const answer = item.answer.trim();
+      if (!question || !answer) {
+        skipped += 1;
+        continue;
+      }
+      const options = (item.options || []).map((option) => option.trim()).filter(Boolean);
+      const hash = this.hashText(`${question}\n${options.join('\n')}`);
+      const questionItem: QuestionItem = {
+        id: `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        hash,
+        question,
+        options,
+        type: item.type || (options.length > 0 ? 'single' : 'completion'),
+        source: 'manual',
+        capturedAt: Date.now()
+      };
+      this.upsertQuestionBank(questionItem, this.normalizeManualAnswer({ ...item, question, options, answer }, hash));
+      added += 1;
+    }
+    this.addLog(added > 0 ? 'success' : 'warn', `手动题库导入完成：新增/更新 ${added} 条，跳过 ${skipped} 条。`);
+    return { added, skipped };
+  }
+
+  importQuestionBank(entries: unknown[]) {
+    let imported = 0;
+    let skipped = 0;
+    const nextEntries = [...this.state.questionBank];
+    for (const raw of entries) {
+      const item = raw as Partial<QuestionBankEntry>;
+      if (!item || typeof item !== 'object' || !item.question || !item.answer?.answer) {
+        skipped += 1;
+        continue;
+      }
+      const question = String(item.question).trim();
+      const options = Array.isArray(item.options) ? item.options.map((option) => String(option).trim()).filter(Boolean) : [];
+      const key = item.questionKey || this.normalizeQuestionContentKey({
+        id: 'import',
+        hash: '',
+        question,
+        options,
+        type: options.length > 0 ? 'single' : 'completion',
+        source: 'manual',
+        capturedAt: Date.now()
+      });
+      const entry: QuestionBankEntry = {
+        id: item.id || Math.random().toString(36).slice(2),
+        questionKey: key,
+        question,
+        options,
+        answer: {
+          questionHash: item.answer.questionHash || this.hashText(`${question}\n${options.join('\n')}`),
+          provider: item.answer.provider || '本地导入题库',
+          model: item.answer.model || 'import',
+          answer: String(item.answer.answer),
+          choiceLabels: Array.isArray(item.answer.choiceLabels) ? item.answer.choiceLabels.map(String) : [],
+          matchedOptions: Array.isArray(item.answer.matchedOptions) ? item.answer.matchedOptions.map(String) : [],
+          confidence: typeof item.answer.confidence === 'number' ? item.answer.confidence : 1,
+          analysis: item.answer.analysis || '来自本地导入题库，未调用 AI。',
+          warnings: Array.isArray(item.answer.warnings) ? item.answer.warnings.map(String) : [],
+          createdAt: typeof item.answer.createdAt === 'number' ? item.answer.createdAt : Date.now()
+        },
+        updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+        hits: typeof item.hits === 'number' ? item.hits : 0
+      };
+      const existingIndex = nextEntries.findIndex((entryItem) => entryItem.questionKey === entry.questionKey);
+      if (existingIndex >= 0) nextEntries[existingIndex] = entry;
+      else nextEntries.unshift(entry);
+      imported += 1;
+    }
+    this.state.questionBank = this.dedupeQuestionBank(nextEntries).slice(0, 1000);
+    this.saveQuestionBank(this.state.questionBank);
+    this.addLog(imported > 0 ? 'success' : 'warn', `题库文件导入完成：新增/更新 ${imported} 条，跳过 ${skipped} 条。`);
+    this.emit();
+    return { imported, skipped };
   }
 
   upsertQuestionBank(question: QuestionItem, answer: AIAnswerResult) {
