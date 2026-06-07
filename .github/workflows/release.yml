@@ -29,17 +29,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
-          npm run pack:win
-
-      - name: Rename Windows installer
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem -Path release -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
-          if (-not $installer) {
-            throw "Windows installer was not found in release/"
-          }
-          Copy-Item $installer.FullName "release/Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe"
+          npm run release:win
 
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
@@ -50,7 +40,7 @@ jobs:
           replacesArtifacts: true
           makeLatest: true
           artifactErrorsFailBuild: true
-          artifacts: release/Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe
+          artifacts: release/Xuexitong-Answer-Helper-*-win-x64-setup.exe
           body: |
             ## New Features
 

@@ -1,6 +1,6 @@
 {
   "name": "study-pilot",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "electron": "npm run electron:build && electron .",
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",
     "pack": "npm run build && npm run electron:build && electron-builder",
-    "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=false"
+    "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=false",
+    "release:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win-release.ps1"
   },
   "build": {
     "appId": "com.studypilot.desktop",

@@ -82,7 +82,7 @@ npm run electron
 
 ## 下载 Windows 安装包
 
-普通用户不需要克隆源码。打开 GitHub 仓库右侧的 Releases，下载最新版本里的 `学习通答题辅助工具 Setup x.x.x.exe`，双击安装即可。
+普通用户不需要克隆源码。打开 GitHub 仓库右侧的 Releases，下载最新版本里的 `Xuexitong-Answer-Helper-vx.x.x-win-x64-setup.exe`，双击安装即可。
 
 项目维护者发布新版本时，先更新 `package.json` 里的 `version`，然后创建并推送版本标签：
 
@@ -116,6 +116,14 @@ npm run electron:build
 ```bash
 npm run pack
 ```
+
+生成 Windows 发布安装包：
+
+```bash
+npm run release:win
+```
+
+该命令会先清理旧的 `release/` 目录，再重新构建前端、Electron 主进程和 NSIS 安装包，并校验安装包内是否包含 `dist/index.html`、前端资源和 Electron 预加载脚本，避免旧包残留或安装后白屏。
 
 ## AI 配置
 
