@@ -273,20 +273,54 @@ class GlobalStore {
     }));
   }
 
+  private questionBankSourcePriority(entry: QuestionBankEntry) {
+    const provider = entry.answer?.provider || '';
+    if (/本地手动题库/.test(provider)) return 4;
+    if (/本地导入题库/.test(provider)) return 3;
+    if (/本地题库/.test(provider)) return 2;
+    return 1;
+  }
+
+  private preferQuestionBankEntry(current: QuestionBankEntry, incoming: QuestionBankEntry) {
+    const currentPriority = this.questionBankSourcePriority(current);
+    const incomingPriority = this.questionBankSourcePriority(incoming);
+    if (incomingPriority !== currentPriority) return incomingPriority > currentPriority ? incoming : current;
+    if ((incoming.updatedAt || 0) !== (current.updatedAt || 0)) return (incoming.updatedAt || 0) > (current.updatedAt || 0) ? incoming : current;
+    return incoming;
+  }
+
   private dedupeQuestionBank(bank: QuestionBankEntry[]) {
-    const seen = new Set<string>();
-    return (Array.isArray(bank) ? bank : []).filter((item) => {
-      const key = item.questionKey || this.normalizeQuestionKey(item.question);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      item.questionKey = key;
-      return true;
-    });
+    const byKey = new Map<string, QuestionBankEntry>();
+    for (const item of Array.isArray(bank) ? bank : []) {
+      if (!item?.question) continue;
+      const key = this.normalizeQuestionContentKey({
+        id: item.id || 'bank',
+        hash: item.answer?.questionHash || '',
+        question: item.question,
+        options: Array.isArray(item.options) ? item.options : [],
+        type: 'unknown',
+        source: 'manual',
+        capturedAt: item.updatedAt || Date.now()
+      });
+      if (!key) continue;
+      const normalizedItem = { ...item, questionKey: key, options: Array.isArray(item.options) ? item.options : [] };
+      const existing = byKey.get(key);
+      byKey.set(key, existing ? this.preferQuestionBankEntry(existing, normalizedItem) : normalizedItem);
+    }
+    return Array.from(byKey.values());
+  }
+
+  private stripQuestionNoise(text: string) {
+    return text
+      .replace(/^\s*(?:第\s*)?\d+\s*[、.．)]\s*/g, '')
+      .replace(/^\s*[（(【[]?\s*(?:单选题|单选|多选题|多选|判断题|判断|填空题|填空|问答题|简答题|论述题|未知)\s*[】\])）)]?\s*/i, '')
+      .replace(/^\s*(?:题目|问题)\s*[:：]\s*/i, '')
+      .replace(/[（(]\s*[）)]/g, '');
   }
 
   normalizeQuestionKey(question: QuestionItem | string) {
     const text = typeof question === 'string' ? question : question.question;
-    return text
+    return this.stripQuestionNoise(text)
       .replace(/\s+/g, '')
       .replace(/[，。,.、；;：:？！?!"'“”‘’【】\[\]（）()]/g, '')
       .toLowerCase()
@@ -353,6 +387,35 @@ class GlobalStore {
     return Math.abs(questionOptionCount - entryOptionCount) <= 1;
   }
 
+  private questionBankEntryKey(entry: QuestionBankEntry) {
+    return this.normalizeQuestionContentKey({
+      id: entry.id || 'bank',
+      hash: entry.answer?.questionHash || '',
+      question: entry.question,
+      options: Array.isArray(entry.options) ? entry.options : [],
+      type: 'unknown',
+      source: 'manual',
+      capturedAt: entry.updatedAt || Date.now()
+    });
+  }
+
+  private findExactQuestionBankEntry(question: QuestionItem) {
+    const contentKey = this.normalizeQuestionContentKey(question);
+    const legacyKey = this.normalizeQuestionKey(question);
+    let best: QuestionBankEntry | null = null;
+    for (const entry of this.state.questionBank) {
+      const entryKey = this.questionBankEntryKey(entry);
+      const entryLegacyKey = this.normalizeQuestionKey(entry.question);
+      const matches = entry.questionKey === contentKey ||
+        entry.questionKey === legacyKey ||
+        entryKey === contentKey ||
+        entryLegacyKey === legacyKey;
+      if (!matches || !this.questionBankOptionsCompatible(question, entry)) continue;
+      best = best ? this.preferQuestionBankEntry(best, entry) : entry;
+    }
+    return best;
+  }
+
   private findFuzzyQuestionBankEntry(question: QuestionItem) {
     const questionKey = this.normalizeQuestionKey(question);
     if (questionKey.length < QUESTION_BANK_FUZZY_MIN_KEY_LENGTH) return null;
@@ -369,9 +432,7 @@ class GlobalStore {
   }
 
   findQuestionBankAnswer(question: QuestionItem) {
-    const contentKey = this.normalizeQuestionContentKey(question);
-    const legacyKey = this.normalizeQuestionKey(question);
-    const exactEntry = this.state.questionBank.find((item) => item.questionKey === contentKey || item.questionKey === legacyKey);
+    const exactEntry = this.findExactQuestionBankEntry(question);
     const fuzzyMatch = exactEntry ? null : this.findFuzzyQuestionBankEntry(question);
     const entry = exactEntry || fuzzyMatch?.entry;
     if (!entry) return null;
@@ -386,9 +447,7 @@ class GlobalStore {
   }
 
   hasQuestionBankAnswer(question: QuestionItem) {
-    const contentKey = this.normalizeQuestionContentKey(question);
-    const legacyKey = this.normalizeQuestionKey(question);
-    return this.state.questionBank.some((item) => item.questionKey === contentKey || item.questionKey === legacyKey) ||
+    return Boolean(this.findExactQuestionBankEntry(question)) ||
       Boolean(this.findFuzzyQuestionBankEntry(question));
   }
 
@@ -521,15 +580,26 @@ class GlobalStore {
 
   upsertQuestionBank(question: QuestionItem, answer: AIAnswerResult) {
     const key = this.normalizeQuestionContentKey(question);
-    const legacyKey = this.normalizeQuestionKey(question);
     const normalizedAnswer = { ...answer, questionHash: question.hash };
-    const existing = this.state.questionBank.find((item) => item.questionKey === key || item.questionKey === legacyKey);
+    const existing = this.findExactQuestionBankEntry(question);
     if (existing) {
+      const incomingEntry: QuestionBankEntry = {
+        id: existing.id,
+        questionKey: key,
+        question: question.question,
+        options: question.options,
+        answer: normalizedAnswer,
+        updatedAt: Date.now(),
+        hits: existing.hits
+      };
+      const preferred = this.preferQuestionBankEntry(existing, incomingEntry);
       existing.questionKey = key;
-      existing.question = question.question;
-      existing.options = question.options;
-      existing.answer = normalizedAnswer;
-      existing.updatedAt = Date.now();
+      if (preferred === incomingEntry) {
+        existing.question = question.question;
+        existing.options = question.options;
+        existing.answer = normalizedAnswer;
+        existing.updatedAt = incomingEntry.updatedAt;
+      }
     } else {
       this.state.questionBank = [{
         id: Math.random().toString(36).slice(2),
@@ -541,13 +611,7 @@ class GlobalStore {
         hits: 0
       }, ...this.state.questionBank].slice(0, 1000);
     }
-    const seen = new Set<string>();
-    this.state.questionBank = this.state.questionBank.filter((item) => {
-      const itemKey = item.questionKey || this.normalizeQuestionKey(item.question);
-      if (seen.has(itemKey)) return false;
-      seen.add(itemKey);
-      return true;
-    });
+    this.state.questionBank = this.dedupeQuestionBank(this.state.questionBank);
     this.saveQuestionBank(this.state.questionBank);
     this.emit();
   }
