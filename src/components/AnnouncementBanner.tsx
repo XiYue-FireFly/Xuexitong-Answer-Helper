@@ -47,7 +47,7 @@ export function AnnouncementBanner() {
       <div style={{ display: 'flex', gap: 12, paddingRight: 24 }}>
         <AlertCircle size={20} style={{ color: 'var(--primary-color)', flexShrink: 0, marginTop: 2 }} />
         <div style={{ flex: 1 }}>
-          <h4 style={{ color: '#fff', fontSize: '0.9rem', marginBottom: 8, fontWeight: 600 }}>
+          <h4 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: 8, fontWeight: 600 }}>
             使用说明
           </h4>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.7 }}>

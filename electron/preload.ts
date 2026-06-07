@@ -74,6 +74,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSettings: (settings: any) => ipcRenderer.invoke('settings:set', settings),
   getWebviewPreloadPath: () => ipcRenderer.invoke('settings:get-webview-preload'),
   getErrorLogPath: () => ipcRenderer.invoke('diagnostics:get-error-log-path'),
+  getRecentErrorLogs: (limit?: number) => ipcRenderer.invoke('diagnostics:get-recent-error-logs', limit),
+  checkForUpdates: () => ipcRenderer.invoke('app:check-update'),
+  openExternalUrl: (url: string) => ipcRenderer.invoke('app:open-url', url),
+  notify: (title: string, body: string) => ipcRenderer.invoke('app:notify', { title, body }),
+  getWebviewSessionState: () => ipcRenderer.invoke('session:get-webview-state'),
   clearWebviewSession: () => ipcRenderer.invoke('session:clear-webview-login'),
   
   // System logging

@@ -1,6 +1,6 @@
 {
   "name": "study-pilot",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -42,7 +42,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "学习通答题辅助工具"
+      "shortcutName": "学习通答题辅助工具",
+      "deleteAppDataOnUninstall": true,
+      "include": "build/installer.nsh",
+      "uninstallDisplayName": "学习通答题辅助工具"
     }
   },
   "keywords": [

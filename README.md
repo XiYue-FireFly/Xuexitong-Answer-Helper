@@ -39,13 +39,9 @@
 - **实时进度显示**：显示视频/音频播放进度、任务点完成情况
 
 ### AI 提供商配置
-- **阿里云 DashScope**：通义千问系列模型
-- **DeepSeek**：高性价比的国产大模型
-- **百度文心一言**：ERNIE系列模型
-- **小米AI**：小米大语言模型
-- **OpenAI**：GPT系列模型
-- **自定义接口**：支持任何OpenAI兼容的API接口
-- AI 测试聊天：设置页可直接发送测试消息，验证 Base URL、模型和 API Key 是否可用。
+- 内置 22 个服务商预设：阿里云百炼/Qwen、DeepSeek、硅基流动、OpenRouter、Google Gemini、Kimi、智谱 GLM、火山方舟/豆包、腾讯混元、百度千帆、MiniMax、阶跃星辰、Groq、Mistral、Together、xAI/Grok、小米 MiMo、OpenAI、Ollama、LM Studio、vLLM/LocalAI 和自定义兼容接口。
+- 支持 `Authorization: Bearer`、`api-key` 和本地服务“无需认证”三种认证方式。
+- AI 测试聊天：设置页可直接发送测试消息，支持流式输出，用于验证 Base URL、模型和 API Key 是否可用。
 
 ### 其他功能
 - 自动化控制：自动化页集成抓题、页面扫描、生成计划、批准计划和执行已批准计划。
@@ -104,6 +100,8 @@ npm run electron
 
 普通用户不需要克隆源码。打开 GitHub 仓库右侧的 Releases，下载最新版本里的 `Xuexitong-Answer-Helper-vx.x.x-win-x64-setup.exe`，双击安装即可。
 
+安装程序使用 NSIS，支持开始菜单快捷方式和控制面板卸载。卸载时会删除应用本体，并清理本机应用缓存、运行日志、内置浏览器登录态和本地题库等数据。升级安装时不会清理这些数据，只有正式卸载才会清理。
+
 项目维护者发布新版本时，先更新 `package.json` 里的 `version`，然后创建并推送版本标签：
 
 ```bash
@@ -147,48 +145,46 @@ npm run release:win
 
 ## AI 配置
 
-应用支持多种AI提供商，在设置页面可以添加和切换不同的API配置：
+应用支持多种 OpenAI 兼容接口，在设置页面可以通过下拉框选择服务商、Base URL 和模型。API Key 只保存在本机，不会写入仓库。
 
-### 阿里云 DashScope（通义千问）
-- **Base URL**: `https://dashscope.aliyuncs.com/compatible-mode/v1`
-- **模型**: `qwen-plus`、`qwen-turbo`、`qwen-max` 等
-- **获取API Key**: 访问 [阿里云DashScope控制台](https://dashscope.console.aliyun.com/)
+### 云端服务商
 
-### DeepSeek
-- **Base URL**: `https://api.deepseek.com/v1`
-- **模型**: `deepseek-chat`
-- **获取API Key**: 访问 [DeepSeek开放平台](https://platform.deepseek.com/)
+| 服务商 | 默认 Base URL | 默认模型 | 认证方式 |
+| --- | --- | --- | --- |
+| 阿里云百炼 / Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | Bearer |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-v4-flash` | Bearer |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `Qwen/Qwen3-8B` | Bearer |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` | Bearer |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` | Bearer |
+| 月之暗面 Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | Bearer |
+| 智谱 AI / GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` | Bearer |
+| 火山方舟 / 豆包 | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-1-6-flash-250615` | Bearer |
+| 腾讯混元 | `https://api.hunyuan.cloud.tencent.com/v1` | `hunyuan-lite` | Bearer |
+| 百度千帆 / 文心 | `https://qianfan.baidubce.com/v2` | `ernie-4.0-turbo-8k` | Bearer |
+| MiniMax | `https://api.minimax.chat/v1` | `MiniMax-Text-01` | Bearer |
+| 阶跃星辰 StepFun | `https://api.stepfun.com/v1` | `step-2-mini` | Bearer |
+| Groq | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` | Bearer |
+| Mistral AI | `https://api.mistral.ai/v1` | `mistral-small-latest` | Bearer |
+| Together AI | `https://api.together.xyz/v1` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` | Bearer |
+| xAI / Grok | `https://api.x.ai/v1` | `grok-3-mini` | Bearer |
+| 小米 MiMo | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-pro` | `api-key` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4.1-mini` | Bearer |
 
-### 百度文心一言
-- **Base URL**: `https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop`
-- **模型**: `ernie-4.0-8k`、`ernie-3.5-8k` 等
-- **获取API Key**: 访问 [百度智能云千帆平台](https://cloud.baidu.com/product/wenxinworkshop)
+### 本地模型服务
 
-### 小米AI
-- **Base URL**: `https://api.mixin.chat/v1`
-- **模型**: `xiaomi-llm`
-- **获取API Key**: 参考小米AI开放平台文档
+| 服务商 | 默认 Base URL | 默认模型 | 说明 |
+| --- | --- | --- | --- |
+| Ollama | `http://127.0.0.1:11434/v1` | `qwen2.5:7b` | 无需 API Key，需要先启动 Ollama 并拉取模型 |
+| LM Studio | `http://127.0.0.1:1234/v1` | `local-model` | 无需 API Key，需要开启 OpenAI Compatible Server |
+| vLLM / LocalAI | `http://127.0.0.1:8000/v1` | `local-model` | 无需 API Key，按服务端模型名填写 |
 
-### OpenAI
-- **Base URL**: `https://api.openai.com/v1`
-- **模型**: `gpt-4o-mini`、`gpt-4o`、`gpt-3.5-turbo` 等
-- **获取API Key**: 访问 [OpenAI平台](https://platform.openai.com/)
+### 配置步骤
 
-### 自定义兼容接口
-支持任何兼容OpenAI API格式的接口，包括但不限于：
-- Ollama 本地模型
-- LM Studio
-- vLLM
-- 各种第三方代理服务
-
-**配置步骤**：
-1. 打开”设置”标签页
-2. 选择或添加AI提供商
-3. 填写 Base URL、模型名称和 API Key
-4. 点击”测试连接”验证配置
-5. 保存配置并选为活跃提供商
-
-填写后可以先使用”AI 测试聊天”发送一句测试消息，确认配置可用，再保存配置。
+1. 打开“设置”标签页。
+2. 选择 AI 服务商、Base URL 和模型。
+3. 云端服务填写 API Key，本地服务可保持 API Key 为空。
+4. 使用“AI 测试聊天”发送一句测试消息，确认配置可用。
+5. 点击“保存 AI 配置”。
 
 ## 真实网页使用
 

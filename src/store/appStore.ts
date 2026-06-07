@@ -102,6 +102,27 @@ export interface AIProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  authHeader?: 'authorization' | 'api-key' | 'none';
+  supportsResponseFormat?: boolean;
+}
+
+export interface AIProviderOption {
+  label: string;
+  value: string;
+  note?: string;
+}
+
+export interface AIProviderPreset {
+  name: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  authHeader: 'authorization' | 'api-key' | 'none';
+  endpoints: AIProviderOption[];
+  models: AIProviderOption[];
+  allowCustomEndpoint?: boolean;
+  allowCustomModel?: boolean;
+  supportsResponseFormat?: boolean;
+  note?: string;
 }
 
 export interface AppLog {
@@ -178,50 +199,429 @@ export interface ChapterLearningState {
   running: boolean;
 }
 
-const defaultProviders: AIProviderConfig[] = [
-  {
-    id: 'dashscope',
-    name: '阿里云 DashScope',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiKey: '',
-    model: 'qwen-plus'
+export const AI_PROVIDER_PRESETS: Record<string, AIProviderPreset> = {
+  dashscope: {
+    name: '阿里云百炼 / Qwen',
+    defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    defaultModel: 'qwen-plus',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '中国内地（北京）', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      { label: '美国（弗吉尼亚）', value: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1' },
+      { label: '新加坡（替换 WorkspaceId）', value: 'https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1', note: '需要将 {WorkspaceId} 改成百炼控制台工作空间 ID。' }
+    ],
+    models: [
+      { label: 'qwen-plus（推荐）', value: 'qwen-plus' },
+      { label: 'qwen-plus-latest', value: 'qwen-plus-latest' },
+      { label: 'qwen-turbo', value: 'qwen-turbo' },
+      { label: 'qwen-flash', value: 'qwen-flash' },
+      { label: 'qwen-max', value: 'qwen-max' },
+      { label: 'qwen3.6-plus', value: 'qwen3.6-plus' },
+      { label: 'qwen3.6-flash', value: 'qwen3.6-flash' },
+      { label: 'qwen3.7-max', value: 'qwen3.7-max' },
+      { label: 'qwq-plus', value: 'qwq-plus' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    note: 'OpenAI 兼容接口，使用 Authorization: Bearer。'
   },
-  {
-    id: 'deepseek',
+  deepseek: {
     name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    apiKey: '',
-    model: 'deepseek-chat'
+    defaultBaseUrl: 'https://api.deepseek.com',
+    defaultModel: 'deepseek-v4-flash',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'DeepSeek OpenAI 兼容', value: 'https://api.deepseek.com' }
+    ],
+    models: [
+      { label: 'deepseek-v4-flash（推荐）', value: 'deepseek-v4-flash' },
+      { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    note: 'deepseek-chat / deepseek-reasoner 将于 2026-07-24 弃用，不再作为默认选项。'
   },
-  {
-    id: 'baidu',
-    name: '百度文心一言',
-    baseUrl: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop',
-    apiKey: '',
-    model: 'ernie-4.0-8k'
+  siliconflow: {
+    name: '硅基流动 SiliconFlow',
+    defaultBaseUrl: 'https://api.siliconflow.cn/v1',
+    defaultModel: 'Qwen/Qwen3-8B',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '中国区 API', value: 'https://api.siliconflow.cn/v1' }
+    ],
+    models: [
+      { label: 'Qwen/Qwen3-8B（推荐）', value: 'Qwen/Qwen3-8B' },
+      { label: 'Qwen/Qwen3-14B', value: 'Qwen/Qwen3-14B' },
+      { label: 'Qwen/Qwen2.5-7B-Instruct', value: 'Qwen/Qwen2.5-7B-Instruct' },
+      { label: 'deepseek-ai/DeepSeek-V3', value: 'deepseek-ai/DeepSeek-V3' },
+      { label: 'deepseek-ai/DeepSeek-R1', value: 'deepseek-ai/DeepSeek-R1' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: 'OpenAI 兼容接口，模型较多；如接口不支持 JSON response_format，应用会使用文本 JSON 解析。'
   },
-  {
-    id: 'xiaomi',
-    name: '小米AI',
-    baseUrl: 'https://api.mixin.chat/v1',
-    apiKey: '',
-    model: 'xiaomi-llm'
+  openrouter: {
+    name: 'OpenRouter',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openai/gpt-4o-mini',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'OpenRouter API', value: 'https://openrouter.ai/api/v1' }
+    ],
+    models: [
+      { label: 'openai/gpt-4o-mini（推荐）', value: 'openai/gpt-4o-mini' },
+      { label: 'google/gemini-2.0-flash-001', value: 'google/gemini-2.0-flash-001' },
+      { label: 'anthropic/claude-3.5-sonnet', value: 'anthropic/claude-3.5-sonnet' },
+      { label: 'deepseek/deepseek-chat', value: 'deepseek/deepseek-chat' },
+      { label: 'qwen/qwen-plus', value: 'qwen/qwen-plus' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '聚合平台，模型名需要按 OpenRouter 后台实际可用模型填写。'
   },
-  {
-    id: 'openai',
+  google: {
+    name: 'Google Gemini',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    defaultModel: 'gemini-2.0-flash',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'Gemini OpenAI 兼容接口', value: 'https://generativelanguage.googleapis.com/v1beta/openai' }
+    ],
+    models: [
+      { label: 'gemini-2.0-flash（推荐）', value: 'gemini-2.0-flash' },
+      { label: 'gemini-2.0-flash-lite', value: 'gemini-2.0-flash-lite' },
+      { label: 'gemini-1.5-flash', value: 'gemini-1.5-flash' },
+      { label: 'gemini-1.5-pro', value: 'gemini-1.5-pro' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '使用 Google AI Studio Key，OpenAI 兼容入口路径以 /openai 结尾。'
+  },
+  moonshot: {
+    name: '月之暗面 Kimi',
+    defaultBaseUrl: 'https://api.moonshot.cn/v1',
+    defaultModel: 'moonshot-v1-8k',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'Moonshot API', value: 'https://api.moonshot.cn/v1' }
+    ],
+    models: [
+      { label: 'moonshot-v1-8k（推荐）', value: 'moonshot-v1-8k' },
+      { label: 'moonshot-v1-32k', value: 'moonshot-v1-32k' },
+      { label: 'moonshot-v1-128k', value: 'moonshot-v1-128k' },
+      { label: 'kimi-k2-0711-preview', value: 'kimi-k2-0711-preview' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    note: 'OpenAI 兼容接口，使用 Authorization: Bearer。'
+  },
+  zhipu: {
+    name: '智谱 AI / GLM',
+    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-4-flash',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '智谱 OpenAI 兼容', value: 'https://open.bigmodel.cn/api/paas/v4' }
+    ],
+    models: [
+      { label: 'glm-4-flash（推荐）', value: 'glm-4-flash' },
+      { label: 'glm-4-plus', value: 'glm-4-plus' },
+      { label: 'glm-4-air', value: 'glm-4-air' },
+      { label: 'glm-4-long', value: 'glm-4-long' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '智谱开放平台兼容 OpenAI SDK，部分模型不支持 response_format。'
+  },
+  volcengine: {
+    name: '火山方舟 / 豆包',
+    defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    defaultModel: 'doubao-seed-1-6-flash-250615',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '中国区（北京）', value: 'https://ark.cn-beijing.volces.com/api/v3' },
+      { label: '国际区（新加坡）', value: 'https://ark.ap-southeast-1.volces.com/api/v3' }
+    ],
+    models: [
+      { label: 'doubao-seed-1-6-flash-250615（推荐）', value: 'doubao-seed-1-6-flash-250615' },
+      { label: 'doubao-seed-1-6-250615', value: 'doubao-seed-1-6-250615' },
+      { label: 'doubao-1-5-pro-32k-250115', value: 'doubao-1-5-pro-32k-250115' },
+      { label: 'doubao-1-5-lite-32k-250115', value: 'doubao-1-5-lite-32k-250115' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '方舟通常需要在控制台使用模型或推理接入点名称；若调用失败，请把模型改成控制台展示的 endpoint/model。'
+  },
+  tencent: {
+    name: '腾讯混元',
+    defaultBaseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
+    defaultModel: 'hunyuan-lite',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '混元 OpenAI 兼容', value: 'https://api.hunyuan.cloud.tencent.com/v1' }
+    ],
+    models: [
+      { label: 'hunyuan-lite（推荐）', value: 'hunyuan-lite' },
+      { label: 'hunyuan-standard', value: 'hunyuan-standard' },
+      { label: 'hunyuan-standard-256K', value: 'hunyuan-standard-256K' },
+      { label: 'hunyuan-turbo', value: 'hunyuan-turbo' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '使用混元 OpenAI 兼容接口；不同账号可用模型以腾讯云控制台为准。'
+  },
+  baidu: {
+    name: '百度千帆 / 文心',
+    defaultBaseUrl: 'https://qianfan.baidubce.com/v2',
+    defaultModel: 'ernie-4.0-turbo-8k',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '千帆 OpenAI 兼容', value: 'https://qianfan.baidubce.com/v2' }
+    ],
+    models: [
+      { label: 'ernie-4.0-turbo-8k（推荐）', value: 'ernie-4.0-turbo-8k' },
+      { label: 'ernie-3.5-8k', value: 'ernie-3.5-8k' },
+      { label: 'ernie-speed-8k', value: 'ernie-speed-8k' },
+      { label: 'ernie-lite-8k', value: 'ernie-lite-8k' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '千帆 v2 OpenAI 兼容接口，API Key 使用 Bearer。'
+  },
+  minimax: {
+    name: 'MiniMax',
+    defaultBaseUrl: 'https://api.minimax.chat/v1',
+    defaultModel: 'MiniMax-Text-01',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'MiniMax API', value: 'https://api.minimax.chat/v1' }
+    ],
+    models: [
+      { label: 'MiniMax-Text-01（推荐）', value: 'MiniMax-Text-01' },
+      { label: 'abab6.5s-chat', value: 'abab6.5s-chat' },
+      { label: 'abab6.5g-chat', value: 'abab6.5g-chat' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '如你的 MiniMax 账号使用 GroupId 路径，请改用自定义 Base URL。'
+  },
+  stepfun: {
+    name: '阶跃星辰 StepFun',
+    defaultBaseUrl: 'https://api.stepfun.com/v1',
+    defaultModel: 'step-2-mini',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'StepFun API', value: 'https://api.stepfun.com/v1' }
+    ],
+    models: [
+      { label: 'step-2-mini（推荐）', value: 'step-2-mini' },
+      { label: 'step-1-8k', value: 'step-1-8k' },
+      { label: 'step-1-32k', value: 'step-1-32k' },
+      { label: 'step-2-16k', value: 'step-2-16k' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: 'OpenAI 兼容接口，使用 Authorization: Bearer。'
+  },
+  groq: {
+    name: 'Groq',
+    defaultBaseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.1-8b-instant',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'Groq OpenAI 兼容', value: 'https://api.groq.com/openai/v1' }
+    ],
+    models: [
+      { label: 'llama-3.1-8b-instant（推荐）', value: 'llama-3.1-8b-instant' },
+      { label: 'llama-3.3-70b-versatile', value: 'llama-3.3-70b-versatile' },
+      { label: 'gemma2-9b-it', value: 'gemma2-9b-it' },
+      { label: 'mixtral-8x7b-32768', value: 'mixtral-8x7b-32768' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '海外服务，国内网络可能需要自行处理连通性。'
+  },
+  mistral: {
+    name: 'Mistral AI',
+    defaultBaseUrl: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-small-latest',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'Mistral API', value: 'https://api.mistral.ai/v1' }
+    ],
+    models: [
+      { label: 'mistral-small-latest（推荐）', value: 'mistral-small-latest' },
+      { label: 'mistral-large-latest', value: 'mistral-large-latest' },
+      { label: 'open-mistral-nemo', value: 'open-mistral-nemo' },
+      { label: 'codestral-latest', value: 'codestral-latest' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false
+  },
+  together: {
+    name: 'Together AI',
+    defaultBaseUrl: 'https://api.together.xyz/v1',
+    defaultModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'Together API', value: 'https://api.together.xyz/v1' }
+    ],
+    models: [
+      { label: 'Meta-Llama-3.1-8B-Instruct-Turbo（推荐）', value: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo' },
+      { label: 'Meta-Llama-3.1-70B-Instruct-Turbo', value: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
+      { label: 'Qwen2.5-7B-Instruct-Turbo', value: 'Qwen/Qwen2.5-7B-Instruct-Turbo' },
+      { label: 'DeepSeek-R1-Distill-Llama-70B', value: 'deepseek-ai/DeepSeek-R1-Distill-Llama-70B' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false
+  },
+  xai: {
+    name: 'xAI / Grok',
+    defaultBaseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-3-mini',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'xAI API', value: 'https://api.x.ai/v1' }
+    ],
+    models: [
+      { label: 'grok-3-mini（推荐）', value: 'grok-3-mini' },
+      { label: 'grok-3', value: 'grok-3' },
+      { label: 'grok-2-1212', value: 'grok-2-1212' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '海外服务，国内网络可能需要自行处理连通性。'
+  },
+  xiaomi: {
+    name: '小米 MiMo',
+    defaultBaseUrl: 'https://api.xiaomimimo.com/v1',
+    defaultModel: 'mimo-v2.5-pro',
+    authHeader: 'api-key',
+    endpoints: [
+      { label: '按量付费 API（sk-xxxxx）', value: 'https://api.xiaomimimo.com/v1' },
+      { label: 'Token Plan 中国集群（tp-xxxxx）', value: 'https://token-plan-cn.xiaomimimo.com/v1' },
+      { label: 'Token Plan 新加坡集群（tp-xxxxx）', value: 'https://token-plan-sgp.xiaomimimo.com/v1' },
+      { label: 'Token Plan 欧洲集群（tp-xxxxx）', value: 'https://token-plan-ams.xiaomimimo.com/v1' }
+    ],
+    models: [
+      { label: 'mimo-v2.5-pro（推荐）', value: 'mimo-v2.5-pro' },
+      { label: 'mimo-v2.5', value: 'mimo-v2.5' },
+      { label: 'mimo-v2-flash', value: 'mimo-v2-flash' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: false,
+    note: '小米 MiMo 使用 api-key 请求头；Token Plan 的 tp-key 与按量付费 sk-key 不可混用。'
+  },
+  openai: {
     name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'gpt-4o-mini'
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4.1-mini',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: 'OpenAI 官方', value: 'https://api.openai.com/v1' }
+    ],
+    models: [
+      { label: 'gpt-4.1-mini（推荐）', value: 'gpt-4.1-mini' },
+      { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+      { label: 'gpt-4o', value: 'gpt-4o' },
+      { label: 'gpt-4.1', value: 'gpt-4.1' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true
   },
-  {
-    id: 'custom',
+  ollama: {
+    name: 'Ollama 本地模型',
+    defaultBaseUrl: 'http://127.0.0.1:11434/v1',
+    defaultModel: 'qwen2.5:7b',
+    authHeader: 'none',
+    endpoints: [
+      { label: 'Ollama 本机', value: 'http://127.0.0.1:11434/v1' }
+    ],
+    models: [
+      { label: 'qwen2.5:7b（推荐）', value: 'qwen2.5:7b' },
+      { label: 'qwen2.5:14b', value: 'qwen2.5:14b' },
+      { label: 'llama3.1:8b', value: 'llama3.1:8b' },
+      { label: 'deepseek-r1:7b', value: 'deepseek-r1:7b' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '本地服务，无需 API Key；需要先在电脑上启动 Ollama 并拉取对应模型。'
+  },
+  lmstudio: {
+    name: 'LM Studio 本地模型',
+    defaultBaseUrl: 'http://127.0.0.1:1234/v1',
+    defaultModel: 'local-model',
+    authHeader: 'none',
+    endpoints: [
+      { label: 'LM Studio 本机', value: 'http://127.0.0.1:1234/v1' }
+    ],
+    models: [
+      { label: 'local-model（按 LM Studio 当前加载模型）', value: 'local-model' },
+      { label: 'qwen2.5-7b-instruct', value: 'qwen2.5-7b-instruct' },
+      { label: 'llama-3.1-8b-instruct', value: 'llama-3.1-8b-instruct' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '本地服务，无需 API Key；需要在 LM Studio 开启 OpenAI Compatible Server。'
+  },
+  vllm: {
+    name: 'vLLM / LocalAI 兼容服务',
+    defaultBaseUrl: 'http://127.0.0.1:8000/v1',
+    defaultModel: 'local-model',
+    authHeader: 'none',
+    endpoints: [
+      { label: 'vLLM 默认', value: 'http://127.0.0.1:8000/v1' },
+      { label: 'LocalAI 默认', value: 'http://127.0.0.1:8080/v1' }
+    ],
+    models: [
+      { label: 'local-model（按服务端模型名）', value: 'local-model' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false,
+    note: '适合自建 OpenAI 兼容服务；Base URL 和模型名按你的服务端配置填写。'
+  },
+  custom: {
     name: '自定义兼容接口',
-    baseUrl: 'https://example.com/v1',
-    apiKey: '',
-    model: 'custom-model'
+    defaultBaseUrl: 'https://example.com/v1',
+    defaultModel: 'custom-model',
+    authHeader: 'authorization',
+    endpoints: [
+      { label: '自定义 Base URL', value: 'https://example.com/v1' }
+    ],
+    models: [
+      { label: '自定义模型', value: 'custom-model' }
+    ],
+    allowCustomEndpoint: true,
+    allowCustomModel: true,
+    supportsResponseFormat: false
   }
-];
+};
+
+const defaultProviders: AIProviderConfig[] = Object.entries(AI_PROVIDER_PRESETS).map(([id, preset]) => ({
+  id,
+  name: preset.name,
+  baseUrl: preset.defaultBaseUrl,
+  apiKey: '',
+  model: preset.defaultModel,
+  authHeader: preset.authHeader,
+  supportsResponseFormat: preset.supportsResponseFormat
+}));
 
 const defaultSettings: AppSettings = {
   allowRealPageAutomation: false,
@@ -238,12 +638,52 @@ const defaultSettings: AppSettings = {
   activeProviderId: 'dashscope'
 };
 
+function normalizeProviders(inputProviders?: AIProviderConfig[]) {
+  const savedProviders = inputProviders?.length ? inputProviders : [];
+  const byId = new Map(savedProviders.map((provider) => [provider.id, provider]));
+  const merged = defaultProviders.map((defaults) => {
+    const saved = byId.get(defaults.id);
+    if (!saved) return defaults;
+    const preset = AI_PROVIDER_PRESETS[defaults.id];
+    const next: AIProviderConfig = {
+      ...defaults,
+      ...saved,
+      authHeader: saved.authHeader || defaults.authHeader || 'authorization',
+      supportsResponseFormat: saved.supportsResponseFormat ?? defaults.supportsResponseFormat
+    };
+    if (preset && !preset.endpoints.some((item) => item.value === next.baseUrl) && !saved.apiKey) {
+      next.baseUrl = preset.defaultBaseUrl;
+    }
+    if (preset && !preset.models.some((item) => item.value === next.model) && !saved.apiKey) {
+      next.model = preset.defaultModel;
+    }
+    if (next.id === 'xiaomi' && (!next.apiKey || next.baseUrl === 'https://api.mixin.chat/v1')) {
+      next.name = defaults.name;
+      next.baseUrl = defaults.baseUrl;
+      next.model = next.model === 'xiaomi-llm' ? defaults.model : next.model;
+      next.authHeader = defaults.authHeader;
+    }
+    if (next.id === 'deepseek' && (!next.apiKey || next.baseUrl === 'https://api.deepseek.com/v1')) {
+      next.baseUrl = defaults.baseUrl;
+      next.model = ['deepseek-chat', 'deepseek-reasoner'].includes(next.model) ? defaults.model : next.model;
+    }
+    next.authHeader = preset?.authHeader || next.authHeader;
+    next.supportsResponseFormat = preset?.supportsResponseFormat ?? next.supportsResponseFormat;
+    next.name = preset?.name || next.name;
+    return next;
+  });
+  const extraProviders = savedProviders
+    .filter((provider) => !defaultProviders.some((defaults) => defaults.id === provider.id))
+    .map((provider): AIProviderConfig => ({ ...provider, authHeader: provider.authHeader || 'authorization' }));
+  return [...merged, ...extraProviders];
+}
+
 function normalizeSettings(input: Partial<AppSettings> | null): AppSettings {
   if (!input) return defaultSettings;
   return {
     ...defaultSettings,
     ...input,
-    providers: input.providers?.length ? input.providers : defaultProviders,
+    providers: normalizeProviders(input.providers),
     activeProviderId: input.activeProviderId || defaultSettings.activeProviderId
   };
 }

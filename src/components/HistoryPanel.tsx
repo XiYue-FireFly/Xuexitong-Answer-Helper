@@ -14,7 +14,7 @@ export function HistoryPanel() {
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, height: '100%', overflowY: 'auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h5 style={{ color: '#fff', fontSize: '0.9rem' }}>历史记录</h5>
+        <h5 style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>历史记录</h5>
         <div style={{ display: 'flex', gap: 8 }}>
           {answerHistory.length > 0 && (
             <button onClick={() => appStore.clearAnswerHistory()} style={{ background: 'transparent', color: 'var(--warning-color)', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem' }}>
@@ -35,7 +35,7 @@ export function HistoryPanel() {
       </div>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <h6 style={{ color: '#fff', fontSize: '0.82rem' }}>答案搜索记录</h6>
+        <h6 style={{ color: 'var(--text-primary)', fontSize: '0.82rem' }}>答案搜索记录</h6>
         {answerHistory.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>还没有答案搜索记录。</div>
         ) : (
@@ -45,7 +45,7 @@ export function HistoryPanel() {
                 <span className="badge badge-success">{(entry.answer.confidence * 100).toFixed(0)}%</span>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{new Date(entry.answer.createdAt).toLocaleString()}</span>
               </div>
-              <p style={{ color: '#fff', fontSize: '0.8rem', lineHeight: 1.45 }}>{entry.question.question}</p>
+              <p style={{ color: 'var(--text-primary)', fontSize: '0.8rem', lineHeight: 1.45 }}>{entry.question.question}</p>
               <div style={{ color: 'var(--success-color)', fontSize: '0.82rem', fontWeight: 800 }}>{entry.answer.answer}</div>
             </div>
           ))
@@ -53,7 +53,7 @@ export function HistoryPanel() {
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <h6 style={{ color: '#fff', fontSize: '0.82rem' }}>自动化运行记录</h6>
+        <h6 style={{ color: 'var(--text-primary)', fontSize: '0.82rem' }}>自动化运行记录</h6>
         {filtered.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0', fontSize: '0.8rem' }}>
             没有找到自动化运行记录。
@@ -67,7 +67,7 @@ export function HistoryPanel() {
                   <Clock size={11} /> {new Date(plan.executedAt || plan.createdAt).toLocaleString()}
                 </span>
               </div>
-              <p style={{ color: '#fff', fontSize: '0.82rem', lineHeight: 1.45 }}>{plan.goal}</p>
+              <p style={{ color: 'var(--text-primary)', fontSize: '0.82rem', lineHeight: 1.45 }}>{plan.goal}</p>
               <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: 1.5 }}>
                 {plan.result || `已准备 ${plan.steps.length} 个步骤`}
               </div>

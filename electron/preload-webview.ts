@@ -1,5 +1,4 @@
 import { ipcRenderer } from 'electron';
-import iconv from 'iconv-lite';
 
 type AutomationAction = 'click' | 'fill' | 'select' | 'wait';
 type QuestionType = 'single' | 'multiple' | 'judgement' | 'completion' | 'essay' | 'unknown';
@@ -90,11 +89,12 @@ function serializeBridgeError(error: any) {
 
 function reportWebviewError(source: string, payload: any) {
   try {
+    const nextPayload = payload || {};
     ipcRenderer.sendToHost('studypilot:error-log', {
       source,
       level: 'error',
-      ...payload,
-      url: window.location.href,
+      ...nextPayload,
+      url: nextPayload.url || window.location.href,
       title: document.title
     });
   } catch {
@@ -282,6 +282,26 @@ function isSaveOrSubmitTarget(target: Element | null) {
     }
   }
   return false;
+}
+
+function saveOrSubmitActionKey(target: Element | null) {
+  const clickable = clickableAncestorFor(target);
+  const element = (clickable || target) as HTMLElement | null;
+  if (!element) return 'unknown';
+  const id = element.id || '';
+  const className = compactDebugText(element.className, 80);
+  const inlineHandler = element.getAttribute?.('onclick') || '';
+  const text = compactDebugText(element.textContent || '', 40);
+  return [element.tagName?.toLowerCase() || 'element', id, className, inlineHandler, text].join('|');
+}
+
+function shouldBlockDuplicateSaveOrSubmit(target: Element | null) {
+  const pageAny = window as any;
+  const now = Date.now();
+  const key = saveOrSubmitActionKey(target);
+  const previous = pageAny.__studyPilotLastSaveSubmitClick || {};
+  pageAny.__studyPilotLastSaveSubmitClick = { key, at: now };
+  return previous.key === key && now - Number(previous.at || 0) < 800;
 }
 
 function isNativeExamEntryTarget(target: Element | null) {
@@ -524,7 +544,7 @@ function buildExamNotesUrlFromGoTest(inlineHandler: string) {
 function isLikelyCourseNavigationUrl(url: string) {
   if (!/^https?:\/\//i.test(url)) return false;
   if (isBlockedInternalTabUrl(url)) return false;
-  if (isExamListUrl(url)) return false;
+  if (isIncompleteExamListUrl(url)) return false;
   if (/\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i.test(url)) return false;
   if (/\.(?:png|jpe?g|gif|webp|svg|ico)(?:[?#]|$)/i.test(url)) return false;
   if (/\/visit\/interaction(?:[?#]|$)/i.test(url)) return false;
@@ -616,6 +636,19 @@ function reportClickDebug(payload: any) {
   }
 }
 
+function reportPageDiagnostic(payload: any) {
+  if (!payload || typeof payload !== 'object') return;
+  const source = typeof payload.source === 'string' && payload.source
+    ? payload.source
+    : 'webview:page-diagnostic';
+  reportWebviewError(source, {
+    level: payload.level || 'info',
+    message: payload.message || source,
+    url: payload.url || window.location.href,
+    details: payload.details
+  });
+}
+
 function installBrowserNavigationPatch() {
   const requestOpenTab = (targetUrl: string | URL | undefined | null, title?: string) => {
     const raw = String(targetUrl || '').trim();
@@ -624,7 +657,7 @@ function installBrowserNavigationPatch() {
       const url = new URL(raw, window.location.href).toString();
       if (!/^https?:\/\//i.test(url)) return '';
       if (isBlockedInternalTabUrl(url)) return '';
-      if (isExamListUrl(url)) return '';
+      if (isIncompleteExamListUrl(url)) return '';
       ipcRenderer.sendToHost('studypilot:open-tab', { url, title: title || document.title || url });
       return url;
     } catch {
@@ -733,12 +766,22 @@ function installBrowserNavigationPatch() {
           return false;
         }
       };
-      const requestOpenTab = (targetUrl, title) => {
+      const isHandledInternalNavigationUrl = (url) => {
+        if (!/^https?:\\/\\//i.test(String(url || ''))) return false;
+        if (isBlockedInternalTabUrl(url)) return false;
+        if (isIncompleteExamListUrl(url)) return false;
+        if (/\\/\\/stat\\d*-ans\\.chaoxing\\.com\\/study-knowledge\\/ans/i.test(url)) return false;
+        if (/\\.(?:png|jpe?g|gif|webp|svg|ico)(?:[?#]|$)/i.test(url)) return false;
+        if (/\\/visit\\/interaction(?:[?#]|$)/i.test(url)) return false;
+        return /(chaoxing\\.com|mooc2-ans|mooc-ans|exam-ans|exam\\/test\\/examcode\\/examnotes|exam\\/test\\/reVersionTestStartNew|exam\\/test\\/look|exam-ans\\/nycourse\\/transfer|mycourse\\/stu(?:[?#]|$)|mooc2\\/work\\/dowork|stucoursemiddle|courseid=|courseId=|clazzid=|clazzId=|classId=|workId=|answerId=|examAnswerId=|examId=)/i.test(url);
+      };
+      const requestOpenTab = (targetUrl, title, options = {}) => {
         const nextUrl = normalizeUrl(targetUrl);
         if (!nextUrl) return false;
         if (!/^https?:\\/\\//i.test(nextUrl)) return false;
         if (isBlockedInternalTabUrl(nextUrl)) return false;
-        if (isExamListUrl(nextUrl)) return false;
+        if (isIncompleteExamListUrl(nextUrl)) return false;
+        if (!options.force && !isHandledInternalNavigationUrl(nextUrl)) return false;
         window.dispatchEvent(new CustomEvent('studypilot:open-tab-request', {
           detail: { url: nextUrl, title: title || document.title || nextUrl }
         }));
@@ -767,13 +810,201 @@ function installBrowserNavigationPatch() {
         });
         return popupProxy;
       };
+      const cleanText = (value, maxLength = 360) => {
+        const text = String(value || '').replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+        return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
+      };
+      const shouldLogSubmitUrl = (url) => /(addStudentWorkNewWeb|saveWork|submit|work|answer|mooc-ans|exam-ans)/i.test(String(url || ''));
+      const reportDiagnostic = (payload) => {
+        try {
+          window.dispatchEvent(new CustomEvent('studypilot:page-diagnostic', {
+            detail: {
+              level: 'info',
+              url: window.location.href,
+              title: document.title,
+              ...payload
+            }
+          }));
+        } catch (_) {}
+      };
+      const summarizeForm = (form) => {
+        const fields = [];
+        try {
+          const elements = Array.from(form.elements || []);
+          for (const element of elements) {
+            const name = element.name || element.id || '';
+            if (!name) continue;
+            if (!/^(answer\\d+|answerId|workId|courseId|courseid|classId|clazzid|cpi|enc|standardEnc|token|totalQuestionNum|pyFlag|api|jobid)/i.test(name)) continue;
+            const value = 'value' in element ? element.value : '';
+            fields.push({
+              name,
+              value: cleanText(value, /^answer\\d+$/i.test(name) ? 120 : 240)
+            });
+            if (fields.length >= 80) break;
+          }
+        } catch (_) {}
+        return {
+          action: normalizeUrl(form.getAttribute('action') || form.action || window.location.href) || String(form.getAttribute('action') || form.action || ''),
+          method: String(form.getAttribute('method') || form.method || 'GET').toUpperCase(),
+          target: form.getAttribute('target') || form.target || '',
+          fieldCount: fields.length,
+          fields
+        };
+      };
+      try {
+        const originalFetch = window.fetch && window.fetch.bind(window);
+        if (originalFetch) {
+          window.fetch = async (...args) => {
+            const requestUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+            try {
+              const response = await originalFetch(...args);
+              if (shouldLogSubmitUrl(requestUrl)) {
+                let responseText = '';
+                try {
+                  responseText = await response.clone().text();
+                } catch (_) {}
+                reportDiagnostic({
+                  source: 'webview:page-fetch-result',
+                  level: response.ok ? 'info' : 'warn',
+                  message: '页面 fetch 返回 ' + response.status + ' ' + (response.statusText || ''),
+                  url: normalizeUrl(requestUrl) || window.location.href,
+                  details: {
+                    requestUrl: String(requestUrl || ''),
+                    status: response.status,
+                    statusText: response.statusText,
+                    responseText: cleanText(responseText, 1200)
+                  }
+                });
+              }
+              return response;
+            } catch (error) {
+              if (shouldLogSubmitUrl(requestUrl)) {
+                reportDiagnostic({
+                  source: 'webview:page-fetch-failed',
+                  level: 'error',
+                  message: error && error.message ? error.message : String(error),
+                  url: normalizeUrl(requestUrl) || window.location.href,
+                  details: { requestUrl: String(requestUrl || '') }
+                });
+              }
+              throw error;
+            }
+          };
+        }
+      } catch (_) {}
+      try {
+        const originalXhrOpen = XMLHttpRequest.prototype.open;
+        const originalXhrSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url, ...args) {
+          this.__studyPilotRequest = { method, url: String(url || '') };
+          return originalXhrOpen.apply(this, [method, url, ...args]);
+        };
+        XMLHttpRequest.prototype.send = function(body) {
+          const request = this.__studyPilotRequest || {};
+          const requestUrl = String(request.url || '');
+          if (shouldLogSubmitUrl(requestUrl)) {
+            this.addEventListener('loadend', () => {
+              reportDiagnostic({
+                source: 'webview:page-xhr-result',
+                level: this.status >= 200 && this.status < 400 ? 'info' : 'warn',
+                message: '页面 XHR 返回 ' + (request.method || '') + ' ' + this.status + ' ' + (this.statusText || ''),
+                url: normalizeUrl(requestUrl) || window.location.href,
+                details: {
+                  method: request.method,
+                  requestUrl,
+                  status: this.status,
+                  statusText: this.statusText,
+                  requestBody: cleanText(body, 1000),
+                  responseText: cleanText(this.responseText, 1200)
+                }
+              });
+            });
+          }
+          return originalXhrSend.call(this, body);
+        };
+      } catch (_) {}
+      try {
+        const originalSubmit = HTMLFormElement.prototype.submit;
+        HTMLFormElement.prototype.submit = function() {
+          const summary = summarizeForm(this);
+          if (shouldLogSubmitUrl(summary.action) || summary.fields.length > 0) {
+            reportDiagnostic({
+              source: 'webview:page-form-submit',
+              level: 'info',
+              message: '页面调用 form.submit',
+              url: summary.action || window.location.href,
+              details: summary
+            });
+          }
+          return originalSubmit.apply(this, arguments);
+        };
+        document.addEventListener('submit', (event) => {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement)) return;
+          const summary = summarizeForm(form);
+          if (shouldLogSubmitUrl(summary.action) || summary.fields.length > 0) {
+            reportDiagnostic({
+              source: 'webview:page-form-submit-event',
+              level: 'info',
+              message: '页面触发表单 submit 事件',
+              url: summary.action || window.location.href,
+              details: {
+                ...summary,
+                defaultPrevented: event.defaultPrevented
+              }
+            });
+          }
+        }, true);
+      } catch (_) {}
+      try {
+        const originalAlert = window.alert.bind(window);
+        window.alert = (message) => {
+          reportDiagnostic({
+            source: 'webview:page-alert',
+            level: /失败|错误|异常|fail|error/i.test(String(message || '')) ? 'warn' : 'info',
+            message: cleanText(message, 800)
+          });
+          return originalAlert(message);
+        };
+      } catch (_) {}
+      try {
+        const originalConfirm = window.confirm.bind(window);
+        window.confirm = (message) => {
+          reportDiagnostic({
+            source: 'webview:page-confirm',
+            level: 'info',
+            message: cleanText(message, 800)
+          });
+          return originalConfirm(message);
+        };
+      } catch (_) {}
+      try {
+        const seenTexts = new Set();
+        const scanPageMessage = () => {
+          const text = cleanText(document.body && document.body.innerText, 1200);
+          const match = text.match(/[^\\n。；;]*(保存失败|提交失败|保存成功|提交成功|作业提交失败|失败|错误|异常|success|fail|error)[^\\n。；;]*/i);
+          if (!match) return;
+          const message = cleanText(match[0], 500);
+          if (seenTexts.has(message)) return;
+          seenTexts.add(message);
+          reportDiagnostic({
+            source: 'webview:page-visible-message',
+            level: /失败|错误|异常|fail|error/i.test(message) ? 'warn' : 'info',
+            message,
+            details: { href: window.location.href }
+          });
+        };
+        const observer = new MutationObserver(() => window.setTimeout(scanPageMessage, 60));
+        if (document.body) observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        window.setTimeout(scanPageMessage, 400);
+      } catch (_) {}
       const originalOpen = window.open.bind(window);
       window.open = (targetUrl, target, features) => {
         const nextUrl = normalizeUrl(targetUrl);
         if (nextUrl && isBlockedInternalTabUrl(nextUrl)) {
           return originalOpen(targetUrl, target, features);
         }
-        if (requestOpenTab(targetUrl)) return makePopupProxy();
+        if (requestOpenTab(targetUrl, undefined, { force: true })) return makePopupProxy();
         return originalOpen(targetUrl, target, features);
       };
       document.addEventListener('click', (event) => {
@@ -783,7 +1014,7 @@ function installBrowserNavigationPatch() {
         const target = (element.getAttribute('target') || '').toLowerCase();
         if (!href || /^javascript:/i.test(href)) return;
         if (target === '_blank' || target === 'blank') {
-          if (requestOpenTab(element.href, element.textContent && element.textContent.trim())) {
+          if (requestOpenTab(element.href, element.textContent && element.textContent.trim(), { force: true })) {
             event.preventDefault();
           }
         }
@@ -805,6 +1036,10 @@ function installBrowserNavigationPatch() {
 
   window.addEventListener('studypilot:open-tab-request' as any, ((event: CustomEvent) => {
     requestOpenTab(event.detail?.url, event.detail?.title);
+  }) as EventListener);
+
+  window.addEventListener('studypilot:page-diagnostic' as any, ((event: CustomEvent) => {
+    reportPageDiagnostic(event.detail);
   }) as EventListener);
 
   try {
@@ -915,7 +1150,7 @@ function installBrowserNavigationPatch() {
   }) as typeof window.open;
 
   document.addEventListener('click', (event) => {
-    const anchor = (event.target as HTMLElement | null)?.closest?.('a[target="_blank"], a[target="blank"], a[onclick]') as HTMLAnchorElement | null;
+    const anchor = (event.target as HTMLElement | null)?.closest?.('a[target="_blank"], a[target="blank"]') as HTMLAnchorElement | null;
     if (!anchor?.href) return;
     const href = anchor.getAttribute('href') || '';
     if (!href || href.startsWith('javascript:')) return;
@@ -928,6 +1163,20 @@ function installBrowserNavigationPatch() {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     if (isSaveOrSubmitTarget(target)) {
+      if (shouldBlockDuplicateSaveOrSubmit(target)) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        reportWebviewError('webview:save-submit-duplicate-blocked', {
+          level: 'info',
+          message: 'Blocked duplicate save/submit click within 800ms.',
+          details: {
+            target: debugElementSummary(target),
+            clickable: debugElementSummary(clickableAncestorFor(target))
+          }
+        });
+        return;
+      }
       try {
         syncAnswersBeforeSave();
       } catch (error) {
@@ -1092,7 +1341,8 @@ function repairMojibakeText(text: string) {
   if (!value) return '';
   if (mojibakeScore(value) < 4) return value;
   try {
-    const repaired = iconv.decode(iconv.encode(value, 'gb18030'), 'utf8');
+    const bytes = new Uint8Array(Array.from(value, (char) => char.charCodeAt(0) & 0xff));
+    const repaired = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     return mojibakeScore(repaired) < mojibakeScore(value) ? repaired : value;
   } catch {
     return value;
@@ -2363,40 +2613,145 @@ function selectedOptionValue(element: HTMLElement) {
   return optionValueForSubmit(element);
 }
 
-function syncAnswersBeforeSave() {
-  const rawQuestionRoots = uniqueElements(Array.from(document.querySelectorAll([
+interface SubmitQuestionRoot {
+  qid: string;
+  root: HTMLElement;
+  hiddenAnswer: HTMLInputElement;
+  qtype: string;
+  score: number;
+}
+
+const SUBMIT_QUESTION_CONTAINER_SELECTOR = [
+  '.singleQuestionDiv',
+  '.questionLi',
+  '.question',
+  '.question-item',
+  '.subject-item',
+  '.exam-question',
+  '.timu',
+  '.TiMu',
+  '.CeSheng',
+  '.questionCard'
+].join(',');
+
+function questionIdFromSubmitElement(element: HTMLElement) {
+  const input = element as HTMLInputElement;
+  const idMatch = input.id?.match(/^answer(.+)$/i)?.[1] || '';
+  const nameMatch = input.name?.match(/^answer(.+)$/i)?.[1] || '';
+  const direct = element.getAttribute('qid') ||
+    element.getAttribute('questionid') ||
+    element.querySelector('[qid]')?.getAttribute('qid') ||
+    element.querySelector('[questionid]')?.getAttribute('questionid') ||
+    element.querySelector('input[name="questionId"]')?.getAttribute('value') ||
+    idMatch ||
+    nameMatch ||
+    '';
+  if (direct) {
+    const normalized = cleanText(direct);
+    return /^\d{4,}$/.test(normalized) ? normalized : '';
+  }
+
+  const dataValue = element.getAttribute('data') || '';
+  return /^\d{4,}$/.test(dataValue) ? dataValue : '';
+}
+
+function hiddenAnswerForQuestion(qid: string, root?: HTMLElement | null) {
+  const selector = `#answer${cssEscape(qid)}, input[name="answer${cssEscape(qid)}"]`;
+  return (root?.querySelector(selector) || document.querySelector(selector)) as HTMLInputElement | null;
+}
+
+function canonicalSubmitRootFor(element: HTMLElement, hiddenAnswer: HTMLInputElement | null) {
+  const elementRoot = element.closest(SUBMIT_QUESTION_CONTAINER_SELECTOR) as HTMLElement | null;
+  if (elementRoot) return elementRoot;
+  const hiddenRoot = hiddenAnswer?.closest(SUBMIT_QUESTION_CONTAINER_SELECTOR) as HTMLElement | null;
+  if (hiddenRoot) return hiddenRoot;
+  if (element.matches('[qid], [questionid], [qtype]')) return element;
+  return document.body;
+}
+
+function submitRootScore(root: HTMLElement, qid: string, hiddenAnswer: HTMLInputElement) {
+  let score = 0;
+  if (root.contains(hiddenAnswer)) score += 100;
+  if (root.matches('.singleQuestionDiv, .questionLi')) score += 90;
+  else if (root.matches('.question, .question-item, .subject-item, .exam-question, .questionCard')) score += 70;
+  else if (root.matches('.timu, .TiMu, .CeSheng')) score += 45;
+  if (root.matches('.answerBg, .workTextWrap, .num_option, .num_option_dx, input')) score -= 80;
+  if (root === document.body) score -= 120;
+  const sameQidSelector = [
+    `[qid="${cssEscape(qid)}"]`,
+    `[questionid="${cssEscape(qid)}"]`,
+    `.choice${cssEscape(qid)}`
+  ].join(',');
+  score += Math.min(root.querySelectorAll(sameQidSelector).length, 12);
+  return score;
+}
+
+function collectSubmitQuestionRoots() {
+  const candidates = uniqueElements(Array.from(document.querySelectorAll([
     '.singleQuestionDiv',
     '.questionLi',
     '[qid][qtype]',
     '[questionid][qtype]',
-    '[data] input[id^="answer"]',
+    'input[id^="answer"]',
+    'input[name^="answer"]',
     '.TiMu'
   ].join(','))) as HTMLElement[]);
-  const questionRoots = rawQuestionRoots
-    .map((element) => element.matches('input[id^="answer"]') ? element.closest('.singleQuestionDiv, .questionLi, [qid], [questionid], [data], .TiMu') as HTMLElement | null : element)
-    .filter(Boolean) as HTMLElement[];
+  const byQid = new Map<string, SubmitQuestionRoot>();
+
+  for (const candidate of candidates) {
+    const qid = questionIdFromSubmitElement(candidate);
+    if (!qid) continue;
+    const hiddenAnswer = hiddenAnswerForQuestion(qid, candidate);
+    if (!hiddenAnswer) continue;
+    const root = canonicalSubmitRootFor(candidate, hiddenAnswer);
+    const typeHint = readQuestionTypeHint(root);
+    const qtype = typeHint.qtype ||
+      candidate.getAttribute('qtype') ||
+      candidate.querySelector('[qtype]')?.getAttribute('qtype') ||
+      '';
+    const next: SubmitQuestionRoot = {
+      qid,
+      root,
+      hiddenAnswer,
+      qtype,
+      score: submitRootScore(root, qid, hiddenAnswer)
+    };
+    const previous = byQid.get(qid);
+    if (!previous || next.score > previous.score) byQid.set(qid, next);
+  }
+
+  return Array.from(byQid.values()).sort((a, b) => {
+    const aTop = a.root.getBoundingClientRect?.().top ?? 0;
+    const bTop = b.root.getBoundingClientRect?.().top ?? 0;
+    return aTop - bTop;
+  });
+}
+
+function optionElementsForSubmit(root: HTMLElement, qid: string) {
+  const scopedByQid = uniqueElements(Array.from(root.querySelectorAll([
+    `.choice${cssEscape(qid)}`,
+    `[qid="${cssEscape(qid)}"][data]`,
+    `[questionid="${cssEscape(qid)}"][data]`
+  ].join(','))) as HTMLElement[]);
+  if (scopedByQid.length > 0) return scopedByQid;
+  if (root === document.body) return [];
+  return uniqueElements(Array.from(root.querySelectorAll([
+    '.answerBg',
+    '.workTextWrap',
+    'input[type="radio"]',
+    'input[type="checkbox"]',
+    '[role="radio"]',
+    '[role="checkbox"]'
+  ].join(','))) as HTMLElement[]);
+}
+
+function syncAnswersBeforeSave() {
+  const questionRoots = collectSubmitQuestionRoots();
   let updated = 0;
   const details: Array<Record<string, unknown>> = [];
 
-  for (const root of questionRoots) {
-    const qid = root.getAttribute('qid') ||
-      root.getAttribute('questionid') ||
-      root.getAttribute('data') ||
-      root.querySelector('[qid]')?.getAttribute('qid') ||
-      root.querySelector('[questionid]')?.getAttribute('questionid') ||
-      root.querySelector('input[name="questionId"]')?.getAttribute('value') ||
-      '';
-    if (!qid) continue;
-    const hiddenAnswer = (
-      document.querySelector(`#answer${cssEscape(qid)}`) ||
-      document.querySelector(`input[name="answer${cssEscape(qid)}"]`) ||
-      root.querySelector(`#answer${cssEscape(qid)}, input[name="answer${cssEscape(qid)}"]`)
-    ) as HTMLInputElement | null;
-    if (!hiddenAnswer) continue;
-    const qtype = readQuestionTypeHint(root).qtype ||
-      root.getAttribute('qtype') ||
-      root.querySelector('[qtype]')?.getAttribute('qtype') ||
-      '';
+  for (const item of questionRoots) {
+    const { qid, root, hiddenAnswer, qtype } = item;
     const appliedAnswer = appliedAnswerFor(qid);
     if (appliedAnswer) {
       if (hiddenAnswer.value !== appliedAnswer.answer) {
@@ -2413,27 +2768,17 @@ function syncAnswersBeforeSave() {
       });
       continue;
     }
-    const optionElements = uniqueElements(Array.from(root.querySelectorAll([
-      '.answerBg',
-      '.workTextWrap',
-      `.choice${cssEscape(qid)}`,
-      `[qid="${cssEscape(qid)}"][data]`,
-      `[questionid="${cssEscape(qid)}"][data]`,
-      'input[type="radio"]',
-      'input[type="checkbox"]',
-      '[role="radio"]',
-      '[role="checkbox"]'
-    ].join(','))) as HTMLElement[]);
-    const values = optionElements
+    const optionElements = optionElementsForSubmit(root, qid);
+    const values = Array.from(new Set(optionElements
       .map(selectedOptionValue)
       .map((value) => {
-        if (qtype === '3') return parseJudgementValueStable(value) || value;
+        if (qtype === '3') return parseStrictJudgementOption(value) || parseJudgementValueStable(value) || value;
         return /^[A-Z]$/i.test(value) ? value.toUpperCase() : value;
       })
-      .filter(Boolean);
+      .filter(Boolean)));
     if (values.length === 0) continue;
     const nextValue = qtype === '1' || qtype === '21'
-      ? Array.from(new Set(values)).join('')
+      ? values.slice().sort().join('')
       : values[0];
     if (hiddenAnswer.value !== nextValue) {
       hiddenAnswer.value = nextValue;
@@ -2448,8 +2793,10 @@ function syncAnswersBeforeSave() {
     message: `Synced ${updated} answers before save/submit`,
     details: {
       updated,
-      total: details.length,
-      answers: details.slice(0, 80)
+      total: questionRoots.length,
+      recorded: details.length,
+      sampleAnswers: details.slice(0, 8),
+      tailAnswers: details.length > 8 ? details.slice(-4) : []
     }
   });
 }
@@ -2655,8 +3002,24 @@ function parseJudgementValue(text: string): 'true' | 'false' | null {
   if (/(\u9519\u8bef|\u9519|\u5426|false|wrong|incorrect)/i.test(value)) return 'false';
   return null;
 }
+
+function parseStrictJudgementOption(text: string): 'true' | 'false' | null {
+  const raw = String(text || '')
+    .replace(/^[A-D]\s*[.、．):：]?\s*/i, '')
+    .trim();
+  const value = raw
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[\u3002\uff0c\uff1b,.;:?;\/()（）【】\[\]]/g, '');
+  if (!value) return null;
+  if (/^(true|t|1|yes|y|right|correct|ri|\u6b63\u786e|\u5bf9|\u662f|\u221a|\u2713|\u2714)$/.test(value)) return 'true';
+  if (/^(false|f|0|no|n|wrong|incorrect|wr|x|\u9519\u8bef|\u9519|\u5426|\u00d7|\u2717|\u2718)$/.test(value)) return 'false';
+  return null;
+}
+
 function judgementValueFromOptionTarget(target: QuestionOptionTarget) {
-  return parseJudgementValueStable(`${target.value || ''} ${target.text || ''} ${target.label || ''}`);
+  return parseStrictJudgementOption(target.value || '') ||
+    parseStrictJudgementOption(target.text || '');
 }
 
 function judgementValueFromElement(element: HTMLElement | null) {
@@ -2751,11 +3114,19 @@ function qtypeForPayload(payload: AnswerApplyPayload) {
   return root.getAttribute('qtype') || root.querySelector('[qtype]')?.getAttribute('qtype') || '';
 }
 
-function isJudgementPayload(payload: AnswerApplyPayload, targets: QuestionOptionTarget[] = []) {
+function hasExplicitJudgementType(payload: AnswerApplyPayload) {
   const qtype = qtypeForPayload(payload);
-  if (payload.question?.type === 'judgement' || qtype === '3') return true;
+  return payload.question?.type === 'judgement' || qtype === '3';
+}
+
+function isJudgementPayload(payload: AnswerApplyPayload, targets: QuestionOptionTarget[] = []) {
+  if (hasExplicitJudgementType(payload)) return true;
+  if (payload.question?.type === 'multiple' || isMultipleChoicePayload(payload)) return false;
+  if (payload.question?.type === 'single' || qtypeForPayload(payload) === '0') return false;
   const meaningfulTargets = targets.filter((target) => target.value || target.text);
-  return meaningfulTargets.length === 2 && meaningfulTargets.every((target) => Boolean(judgementValueFromOptionTarget(target)));
+  if (meaningfulTargets.length !== 2) return false;
+  const values = meaningfulTargets.map(judgementValueFromOptionTarget);
+  return values.includes('true') && values.includes('false');
 }
 
 function isMultipleChoicePayload(payload: AnswerApplyPayload) {
@@ -3128,8 +3499,25 @@ function ensureAppliedAnswerValue(payload: AnswerApplyPayload, targets: Question
 }
 
 function selectedClassHit(element: HTMLElement) {
-  const classText = Array.from(element.classList).join(' ');
-  return /(active|selected|checked|current|on|check_answer|check_answer_dx|cur|choose|chosen)/i.test(classText);
+  return Array.from(element.classList).some((className) => {
+    const token = className.trim().toLowerCase();
+    if (!token) return false;
+    if ([
+      'active',
+      'selected',
+      'checked',
+      'current',
+      'on',
+      'cur',
+      'choose',
+      'chosen',
+      'check_answer',
+      'check_answer_dx'
+    ].includes(token)) {
+      return true;
+    }
+    return /(?:^|[-_])(active|selected|checked|current|choose|chosen|check_answer|check_answer_dx|cur|on)(?:[-_]|$)/i.test(token);
+  });
 }
 
 function isElementSelected(element: HTMLElement, target: QuestionOptionTarget) {
@@ -3206,8 +3594,11 @@ async function clickAnswerTarget(target: QuestionOptionTarget) {
       element.checked = true;
       dispatchInput(element);
     }
-    if (typeof pageAny.addMultipleChoice === 'function' && (qtype === '1' || qtype === '21')) pageAny.addMultipleChoice(actionElement);
-    if (typeof pageAny.addChoice === 'function' && (qtype === '0' || qtype === '3' || element.getAttribute('qid'))) pageAny.addChoice(actionElement);
+    if (typeof pageAny.addMultipleChoice === 'function' && (qtype === '1' || qtype === '21')) {
+      pageAny.addMultipleChoice(actionElement);
+    } else if (typeof pageAny.addChoice === 'function' && (qtype === '0' || qtype === '3')) {
+      pageAny.addChoice(actionElement);
+    }
     await new Promise((resolve) => setTimeout(resolve, 260));
     if (isElementSelected(element, target) || answerStateSignature(element) !== before) return;
   }

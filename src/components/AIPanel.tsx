@@ -13,7 +13,7 @@ import {
   Search,
   ShieldCheck,
 } from 'lucide-react';
-import { AIAnswerResult, appStore, QuestionItem, useAppStore } from '../store/appStore';
+import { AIAnswerResult, AIProviderConfig, appStore, QuestionItem, useAppStore } from '../store/appStore';
 
 const statusLabels: Record<string, string> = {
   idle: '空闲',
@@ -37,6 +37,23 @@ const typeLabels: Record<string, string> = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+function notifyTaskDone(title: string, body: string) {
+  const api = (window as any).electronAPI;
+  if (!api?.notify) return;
+  api.notify(title, body).catch((error: Error) => {
+    appStore.addLog('warn', `桌面通知发送失败：${error.message}`);
+  });
+}
+
+function buildAIHeaders(provider: AIProviderConfig) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (provider.authHeader === 'api-key') headers['api-key'] = provider.apiKey;
+  else if (provider.authHeader !== 'none') headers.Authorization = `Bearer ${provider.apiKey}`;
+  return headers;
+}
 
 function buildPrompt(question: QuestionItem) {
   return `你是一个学习辅助解析助手。请根据题目内容给出参考答案和解析。
@@ -146,7 +163,7 @@ export function AIPanel() {
       return bankAnswer;
     }
 
-    if (!activeProvider.apiKey) {
+    if (activeProvider.authHeader !== 'none' && !activeProvider.apiKey) {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
       const answer = demoAnswer(question);
       appStore.upsertQuestionBank(question, answer);
@@ -155,21 +172,21 @@ export function AIPanel() {
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+    const requestBody: Record<string, any> = {
+      model: activeProvider.model,
+      messages: [
+        { role: 'system', content: '你是严谨的学习辅助解析助手，只输出 JSON。' },
+        { role: 'user', content: buildPrompt(question) }
+      ],
+      temperature: 0.1
+    };
+    if (activeProvider.supportsResponseFormat !== false && activeProvider.authHeader !== 'api-key' && activeProvider.authHeader !== 'none') {
+      requestBody.response_format = { type: 'json_object' };
+    }
     const response = await fetch(`${activeProvider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${activeProvider.apiKey}`
-      },
-      body: JSON.stringify({
-        model: activeProvider.model,
-        messages: [
-          { role: 'system', content: '你是严谨的学习辅助解析助手，只输出 JSON。' },
-          { role: 'user', content: buildPrompt(question) }
-        ],
-        temperature: 0.1,
-        response_format: { type: 'json_object' }
-      }),
+      headers: buildAIHeaders(activeProvider),
+      body: JSON.stringify(requestBody),
       signal: controller.signal
     });
     window.clearTimeout(timeoutId);
@@ -251,6 +268,7 @@ export function AIPanel() {
         appStore.setCurrentAnswer(answer);
       }
       appStore.setStatus('done', `已完成 ${questions.length} 道题的解析。`);
+      notifyTaskDone('题目解析已完成', `已完成 ${questions.length} 道题的解析。`);
     } catch (error: any) {
       appStore.setStatus('error', `批量解析失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
     } finally {
@@ -309,6 +327,10 @@ export function AIPanel() {
     let resolvedCount = 0;
     let appliedCount = 0;
     const seen = new Set<string>();
+    const finishSequential = (message: string) => {
+      appStore.setStatus('done', message);
+      notifyTaskDone('考试自动化已完成', message);
+    };
 
     for (let step = 0; step < 160; step += 1) {
       await waitWhileLivePaused();
@@ -319,13 +341,13 @@ export function AIPanel() {
       if (current) appStore.setCurrentQuestion(current);
       if (!current) throw new Error('当前页面未返回题目。');
       if (!isSequentialExamQuestion(current)) {
-        appStore.setStatus('done', `已离开逐题答题页，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        finishSequential(`已离开逐题答题页，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
         return;
       }
 
       const signature = `${current.index || ''}:${current.hash}`;
       if (seen.has(signature)) {
-        appStore.setStatus('done', `检测到题目未继续变化，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        finishSequential(`检测到题目未继续变化，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
         return;
       }
       seen.add(signature);
@@ -348,19 +370,19 @@ export function AIPanel() {
       const nextResult = await goNextExamQuestionAsync();
       if (!nextResult?.success) {
         if (nextResult?.done) {
-          appStore.setStatus('done', `已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+          finishSequential(`已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
           return;
         }
         throw new Error(nextResult?.error || '进入下一题失败。');
       }
       if (nextResult.done) {
-        appStore.setStatus('done', `已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        finishSequential(`已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
         return;
       }
       await new Promise((resolve) => window.setTimeout(resolve, 700));
     }
 
-    appStore.setStatus('done', `逐题自动化已达到安全上限。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+    finishSequential(`逐题自动化已达到安全上限。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
   };
 
   const callAllAIAndApplyLive = async () => {
@@ -440,6 +462,7 @@ export function AIPanel() {
       await Promise.all(workers);
       await Promise.allSettled(applyPromises);
       appStore.setStatus('done', `边搜边填完成：已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
+      notifyTaskDone('自动化填入已完成', `已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
     } catch (error: any) {
       appStore.setStatus('error', `边搜边填失败：${error.message}`);
     } finally {
@@ -461,7 +484,9 @@ export function AIPanel() {
     const items = questions
       .map((question) => ({ question, answer: answerMap[question.hash] }))
       .filter((item): item is { question: QuestionItem; answer: AIAnswerResult } => Boolean(item.answer));
-    applyAnswersToPage(items);
+    applyAnswersToPage(items, (result) => {
+      if (result?.success) notifyTaskDone('答案填入已完成', result.message || `已填入 ${items.length} 道题。`);
+    });
   };
 
   const canParse = questions.length > 0 && !batchRunning && !liveRunning && status !== 'calling_ai';
@@ -473,7 +498,7 @@ export function AIPanel() {
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
           <div>
-            <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: 6 }}>答题流程</h4>
+            <h4 style={{ fontSize: '0.95rem', color: 'var(--text-primary)', marginBottom: 6 }}>答题流程</h4>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', lineHeight: 1.55 }}>
               先获取当前页面题目，再解析答案，最后填入页面。自动化填入会边查题边填入，适合多题页面。
             </p>
@@ -484,21 +509,21 @@ export function AIPanel() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <button
             onClick={() => runAutomationAction('extract-question')}
-            style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900 }}
+            style={{ background: 'rgba(16,185,129,0.16)', color: 'var(--text-primary)', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900 }}
           >
             <FileQuestion size={15} /> 获取页面题目
           </button>
           <button
             onClick={callAllAI}
             disabled={!canParse}
-            style={{ background: 'rgba(99,102,241,0.18)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canParse ? 1 : 0.55 }}
+            style={{ background: 'rgba(99,102,241,0.18)', color: 'var(--text-primary)', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canParse ? 1 : 0.55 }}
           >
             <Search size={15} /> 开始解析
           </button>
           <button
             onClick={applyAllAnswers}
             disabled={!canFill}
-            style={{ background: 'rgba(245,158,11,0.15)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canFill ? 1 : 0.55 }}
+            style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--text-primary)', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canFill ? 1 : 0.55 }}
           >
             <MousePointerClick size={15} /> 开始填入
           </button>
@@ -514,7 +539,7 @@ export function AIPanel() {
         {liveRunning && (
           <button
             onClick={toggleLivePause}
-            style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
           >
             {livePaused ? <Play size={15} /> : <Pause size={15} />} {livePaused ? '继续自动化填入' : '暂停自动化填入'}
           </button>
@@ -529,7 +554,7 @@ export function AIPanel() {
       <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--primary-color)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <BrainCircuit size={18} style={{ color: 'var(--primary-color)' }} />
-          <h4 style={{ color: '#fff', fontSize: '0.95rem' }}>题目抓取与答案解析</h4>
+          <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>题目抓取与答案解析</h4>
         </div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
           抓题会过滤脚本和样式噪声。解析时优先查询本地题库，未命中才调用 AI，AI 结果会自动入库。
@@ -538,7 +563,7 @@ export function AIPanel() {
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>当前状态</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前状态</h5>
           <span className="badge badge-primary">{statusLabels[status] || status}</span>
         </div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.5 }}>{statusText}</p>
@@ -546,7 +571,7 @@ export function AIPanel() {
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>题库与 AI</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>题库与 AI</h5>
           {activeProvider.apiKey ? <CheckCircle2 size={16} style={{ color: 'var(--success-color)' }} /> : <AlertTriangle size={16} style={{ color: 'var(--warning-color)' }} />}
         </div>
         <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.6 }}>
@@ -559,7 +584,7 @@ export function AIPanel() {
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>题目列表</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>题目列表</h5>
           <span className="badge badge-primary">{questions.length} 题</span>
         </div>
         {questions.length === 0 ? (
@@ -581,7 +606,7 @@ export function AIPanel() {
                     textAlign: 'left',
                     background: active ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
                     border: active ? '1px solid var(--primary-color)' : '1px solid var(--border-glass)',
-                    color: '#fff',
+                    color: 'var(--text-primary)',
                     padding: 10,
                     borderRadius: 8
                   }}
@@ -603,10 +628,10 @@ export function AIPanel() {
       {currentQuestion && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>当前题目</h5>
+            <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前题目</h5>
             <span className="badge badge-primary">{typeLabels[currentQuestion.type] || currentQuestion.type}</span>
           </div>
-          <p style={{ color: '#fff', fontSize: '0.88rem', lineHeight: 1.55, fontWeight: 700 }}>{currentQuestion.question}</p>
+          <p style={{ color: 'var(--text-primary)', fontSize: '0.88rem', lineHeight: 1.55, fontWeight: 700 }}>{currentQuestion.question}</p>
           {currentQuestion.options.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {currentQuestion.options.map((option) => (
@@ -627,7 +652,7 @@ export function AIPanel() {
             <button
               onClick={callAllAI}
               disabled={batchRunning || liveRunning || status === 'calling_ai'}
-              style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+              style={{ background: 'rgba(16,185,129,0.16)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
             >
               <ListChecks size={15} /> 批量查询/解析
             </button>
@@ -636,14 +661,14 @@ export function AIPanel() {
             <button
               onClick={callAllAIAndApplyLive}
               disabled={liveRunning || batchRunning || status === 'calling_ai'}
-              style={{ background: 'rgba(99,102,241,0.2)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, opacity: liveRunning || batchRunning || status === 'calling_ai' ? 0.55 : 1 }}
+              style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, opacity: liveRunning || batchRunning || status === 'calling_ai' ? 0.55 : 1 }}
             >
               <Play size={15} /> 并发查询并自动填入
             </button>
             {liveRunning && (
               <button
                 onClick={toggleLivePause}
-                style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+                style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: 'var(--text-primary)', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
               >
                 {livePaused ? <Play size={15} /> : <Pause size={15} />} {livePaused ? '继续' : '暂停'}
               </button>
@@ -655,7 +680,7 @@ export function AIPanel() {
       {currentAnswer && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.04)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>参考答案</h5>
+            <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>参考答案</h5>
             <span style={{ color: 'var(--success-color)', fontWeight: 800, fontSize: '0.8rem' }}>{(currentAnswer.confidence * 100).toFixed(0)}%</span>
           </div>
           <div style={{ color: '#34d399', fontSize: '1rem', fontWeight: 900, padding: 12, border: '1px solid rgba(16,185,129,0.18)', borderRadius: 8, marginBottom: 12 }}>
@@ -664,13 +689,13 @@ export function AIPanel() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
             <button
               onClick={applyCurrentAnswer}
-              style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+              style={{ background: 'rgba(16,185,129,0.16)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
             >
               <MousePointerClick size={15} /> 填入当前题
             </button>
             <button
               onClick={applyAllAnswers}
-              style={{ background: 'rgba(99,102,241,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+              style={{ background: 'rgba(99,102,241,0.16)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
             >
               <ListChecks size={15} /> 填入已解析
             </button>

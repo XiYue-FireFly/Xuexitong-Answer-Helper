@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, session, shell, webFrameMain } from 'electron';
+import { app, BrowserWindow, Menu, clipboard, ipcMain, Notification, screen, session, shell, webFrameMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -17,8 +17,11 @@ const WEBVIEW_PARTITION = 'persist:studypilot-sites';
 const BLOCKED_INTERNAL_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
 const BLOCKED_STAT_KNOWLEDGE_URL = /\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i;
 const INCOMPLETE_EXAM_LIST_PATH = /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i;
+const RELEASE_API_URL = 'https://api.github.com/repos/XiYue-FireFly/Xuexitong-Answer-Helper/releases/latest';
+const RELEASES_PAGE_URL = 'https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/latest';
 
 installProcessErrorLogging();
+if (process.platform === 'win32') app.setAppUserModelId('com.studypilot.desktop');
 
 // Ensure DB file exists
 function readDB() {
@@ -105,6 +108,118 @@ function logWebviewNavigation(source: string, details: any) {
       initiatorUrl: frameUrl(details?.initiator)
     }
   });
+}
+
+function compareVersion(left: string, right: string) {
+  const clean = (value: string) => String(value || '').replace(/^v/i, '').split(/[.-]/).map((part) => Number(part) || 0);
+  const leftParts = clean(left);
+  const rightParts = clean(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function readRecentErrorLogs(limit = 80) {
+  const logPath = getErrorLogPath();
+  if (!fs.existsSync(logPath)) return { success: true, path: logPath, entries: [] };
+  const lines = fs.readFileSync(logPath, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-Math.max(1, Math.min(limit, 300)));
+  const entries = lines.map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return {
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        source: 'diagnostics:parse',
+        message: line
+      };
+    }
+  }).reverse();
+  return { success: true, path: logPath, entries };
+}
+
+function createRequestHeaders(url: string) {
+  const headers: Record<string, string> = {
+    'User-Agent': `StudyPilot/${app.getVersion()} (Windows Electron)`,
+    Accept: 'application/json, text/plain;q=0.8, */*;q=0.5'
+  };
+  if (/api\.github\.com/i.test(url)) headers['X-GitHub-Api-Version'] = '2022-11-28';
+  return headers;
+}
+
+function safeParseJson(text: string, url: string) {
+  try {
+    return JSON.parse(text);
+  } catch (error: any) {
+    const preview = text.replace(/\s+/g, ' ').trim().slice(0, 300) || '空响应';
+    throw new Error(`接口未返回 JSON：${preview}`);
+  }
+}
+
+function buildWebviewContextMenu(contents: Electron.WebContents, params: Electron.ContextMenuParams) {
+  const template: Electron.MenuItemConstructorOptions[] = [];
+  const editFlags = params.editFlags || {};
+  const hasSelection = Boolean(params.selectionText);
+  const hasLink = Boolean(params.linkURL);
+  const isEditable = Boolean(params.isEditable);
+
+  if (hasLink) {
+    template.push(
+      {
+        label: '在新标签页打开链接',
+        click: () => mainWindow?.webContents.send('browser:open-tab', { url: params.linkURL, title: params.linkText || '新标签页' })
+      },
+      {
+        label: '复制链接地址',
+        click: () => clipboard.writeText(params.linkURL)
+      },
+      { type: 'separator' }
+    );
+  }
+
+  if (isEditable) {
+    template.push(
+      { label: '撤销', role: 'undo', enabled: Boolean(editFlags.canUndo) },
+      { label: '重做', role: 'redo', enabled: Boolean(editFlags.canRedo) },
+      { type: 'separator' },
+      { label: '剪切', role: 'cut', enabled: Boolean(editFlags.canCut) },
+      { label: '复制', role: 'copy', enabled: Boolean(editFlags.canCopy) },
+      { label: '粘贴', role: 'paste', enabled: Boolean(editFlags.canPaste) },
+      { label: '全选', role: 'selectAll', enabled: Boolean(editFlags.canSelectAll) }
+    );
+  } else {
+    template.push(
+      { label: '后退', enabled: contents.canGoBack(), click: () => contents.goBack() },
+      { label: '前进', enabled: contents.canGoForward(), click: () => contents.goForward() },
+      { label: '刷新', click: () => contents.reload() },
+      { type: 'separator' },
+      { label: '复制', role: 'copy', enabled: hasSelection },
+      { label: '全选', role: 'selectAll' }
+    );
+  }
+
+  template.push(
+    { type: 'separator' },
+    {
+      label: '复制当前页面地址',
+      click: () => {
+        const targetUrl = contents.getURL();
+        if (targetUrl) clipboard.writeText(targetUrl);
+      }
+    },
+    {
+      label: '检查元素',
+      click: () => contents.inspectElement(params.x, params.y)
+    }
+  );
+
+  return Menu.buildFromTemplate(template);
 }
 
 function frameClickBridgeSource() {
@@ -669,6 +784,85 @@ ipcMain.handle('diagnostics:get-error-log-path', () => {
   return getErrorLogPath();
 });
 
+ipcMain.handle('diagnostics:get-recent-error-logs', (_event, limit?: number) => {
+  try {
+    return readRecentErrorLogs(typeof limit === 'number' ? limit : 80);
+  } catch (error: any) {
+    writeUnknownError('diagnostics:get-recent-error-logs', error);
+    return { success: false, error: error?.message || '读取错误报告失败。', entries: [] };
+  }
+});
+
+ipcMain.handle('app:check-update', async () => {
+  try {
+    const currentVersion = app.getVersion();
+    const release = await fetchJson(RELEASE_API_URL);
+    const latestVersion = String(release?.tag_name || release?.name || '').replace(/^v/i, '') || currentVersion;
+    const assets = Array.isArray(release?.assets) ? release.assets : [];
+    const winAsset = assets.find((asset: any) => /\.exe$/i.test(String(asset?.name || ''))) || assets[0];
+    return {
+      success: true,
+      currentVersion,
+      latestVersion,
+      hasUpdate: compareVersion(latestVersion, currentVersion) > 0,
+      releaseUrl: release?.html_url || RELEASES_PAGE_URL,
+      downloadUrl: winAsset?.browser_download_url || release?.html_url || RELEASES_PAGE_URL,
+      assetName: winAsset?.name || '',
+      body: String(release?.body || '').slice(0, 3000),
+      publishedAt: release?.published_at || release?.created_at || ''
+    };
+  } catch (error: any) {
+    writeUnknownError('app:check-update', error);
+    return {
+      success: true,
+      currentVersion: app.getVersion(),
+      latestVersion: app.getVersion(),
+      hasUpdate: false,
+      releaseUrl: RELEASES_PAGE_URL,
+      downloadUrl: RELEASES_PAGE_URL,
+      assetName: '',
+      body: '',
+      publishedAt: '',
+      warning: error?.message || '检查更新接口暂时不可用，已提供 Releases 下载页。'
+    };
+  }
+});
+
+ipcMain.handle('app:open-url', async (_event, targetUrl?: string) => {
+  const url = String(targetUrl || RELEASES_PAGE_URL);
+  if (!/^https?:\/\//i.test(url)) return { success: false, error: '只允许打开 http/https 链接。' };
+  await shell.openExternal(url);
+  return { success: true };
+});
+
+ipcMain.handle('app:notify', async (_event, payload?: { title?: string; body?: string }) => {
+  const title = String(payload?.title || '学习通答题辅助工具').slice(0, 80);
+  const body = String(payload?.body || '任务已完成。').slice(0, 240);
+  try {
+    if (!Notification.isSupported()) return { success: false, error: '当前系统不支持桌面通知。' };
+    new Notification({ title, body, silent: false }).show();
+    return { success: true };
+  } catch (error: any) {
+    writeUnknownError('app:notify', error, { title, body }, 'warn');
+    return { success: false, error: error?.message || '发送桌面通知失败。' };
+  }
+});
+
+ipcMain.handle('session:get-webview-state', () => {
+  try {
+    const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+    return {
+      success: true,
+      partition: WEBVIEW_PARTITION,
+      persistent: WEBVIEW_PARTITION.startsWith('persist:'),
+      storagePath: webviewSession.getStoragePath()
+    };
+  } catch (error: any) {
+    writeUnknownError('session:get-webview-state', error);
+    return { success: false, error: error?.message || '读取网页登录持久化状态失败。' };
+  }
+});
+
 ipcMain.handle('session:clear-webview-login', async () => {
   const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
   await webviewSession.clearStorageData();
@@ -735,22 +929,54 @@ ipcMain.handle('automation:execute-plan', async (_, payload) => {
   return { success: true, payload };
 });
 
-// Helper to perform simple GET requests from native process
-function fetchJson(url: string): Promise<any> {
+// Helper to perform simple GET requests from native process.
+function fetchText(url: string, redirectCount = 0): Promise<{ statusCode: number; statusMessage: string; headers: http.IncomingHttpHeaders; text: string }> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
-    client.get(url, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch (e) {
-          reject(e);
+    const request = client.get(url, { headers: createRequestHeaders(url) }, (res) => {
+      const statusCode = res.statusCode || 0;
+      const location = res.headers.location;
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        res.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('接口重定向次数过多。'));
+          return;
         }
+        const nextUrl = new URL(location, url).toString();
+        fetchText(nextUrl, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       });
-    }).on('error', (err) => { reject(err); });
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          statusCode,
+          statusMessage: res.statusMessage || '',
+          headers: res.headers,
+          text
+        });
+      });
+    });
+    request.setTimeout(15000, () => {
+      request.destroy(new Error('接口请求超时。'));
+    });
+    request.on('error', (err) => {
+      reject(err);
+    });
   });
+}
+
+async function fetchJson(url: string): Promise<any> {
+  const response = await fetchText(url);
+  const preview = response.text.replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(`接口返回 ${response.statusCode}${response.statusMessage ? ` ${response.statusMessage}` : ''}：${preview || '空响应'}`);
+  }
+  return safeParseJson(response.text, url);
 }
 
 // IPC Handler: Fetch Font Decryption Table
@@ -835,6 +1061,14 @@ app.whenReady().then(() => {
         });
       });
 
+      contents.on('context-menu', (_event, params) => {
+        try {
+          buildWebviewContextMenu(contents, params).popup();
+        } catch (error) {
+          writeUnknownError('webview:context-menu', error, { pageUrl: contents.getURL() }, 'warn');
+        }
+      });
+
       contents.on('render-process-gone', (_event, details) => {
         writeErrorLog({
           source: 'webview:render-process-gone',
@@ -894,7 +1128,7 @@ app.whenReady().then(() => {
           });
           return;
         }
-        if (isExamListUrl(targetUrl)) {
+        if (isIncompleteExamListUrl(targetUrl)) {
           writeErrorLog({
             source: 'webview:drop-incomplete-exam-list-tab',
             level: 'info',
@@ -957,6 +1191,29 @@ app.whenReady().then(() => {
             } catch (error) {
               writeUnknownError('webview:hidden-child-hide', error, undefined, 'warn');
             }
+            childWindow.webContents.once('did-finish-load', async () => {
+              try {
+                const currentUrl = childWindow.webContents.getURL();
+                const titleText = childWindow.webContents.getTitle();
+                const bodyText = await childWindow.webContents.executeJavaScript(
+                  `(() => (document.body && document.body.innerText || document.documentElement && document.documentElement.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1200))()`,
+                  true
+                );
+                writeErrorLog({
+                  source: 'webview:hidden-form-window-loaded',
+                  level: /失败|错误|异常|fail|error/i.test(String(bodyText)) ? 'warn' : 'info',
+                  message: String(bodyText || titleText || 'Hidden form/save window loaded').slice(0, 500),
+                  url: currentUrl || targetUrl,
+                  details: {
+                    title: titleText,
+                    text: bodyText
+                  }
+                });
+                closeChildWhenSettled('did-finish-load');
+              } catch (error) {
+                writeUnknownError('webview:hidden-form-window-read-failed', error, { targetUrl }, 'warn');
+              }
+            });
             childWindow.webContents.once('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
               writeErrorLog({
                 source: 'webview:hidden-form-window-load-failed',
@@ -979,7 +1236,7 @@ app.whenReady().then(() => {
             if (!childWindow.isDestroyed()) childWindow.close();
             return;
           }
-          if (isExamListUrl(targetUrl)) {
+          if (isIncompleteExamListUrl(targetUrl)) {
             writeErrorLog({
               source: 'webview:hidden-incomplete-exam-list-window',
               level: 'info',
@@ -1033,7 +1290,7 @@ app.whenReady().then(() => {
         if (shouldDropStatKnowledgeUrl(targetUrl)) {
           return { action: 'deny' };
         }
-        if (isExamListUrl(targetUrl)) {
+        if (isIncompleteExamListUrl(targetUrl)) {
           return {
             action: 'allow',
             overrideBrowserWindowOptions: {

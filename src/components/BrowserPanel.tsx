@@ -240,6 +240,7 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
   useEffect(() => {
     const webview = ref.current;
     if (!webview) return undefined;
+    webview.setAttribute('allowpopups', 'true');
     registerWebview(tab.id, webview);
     let ready = false;
 
@@ -306,8 +307,7 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
       src={tab.initialUrl}
       preload={preloadPath}
       partition={WEBVIEW_PARTITION}
-      allowpopups
-      webpreferences="contextIsolation=yes, nodeIntegration=no, javascript=yes, webSecurity=yes"
+      webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=no, javascript=yes, webSecurity=yes"
       style={{
         position: 'absolute',
         inset: 0,
@@ -340,6 +340,7 @@ export function BrowserPanel() {
   const [goal, setGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
   const [mockValues, setMockValues] = useState<Record<string, string | boolean>>({});
   const [mockSubmitted, setMockSubmitted] = useState(false);
+  const [tabContextMenu, setTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
@@ -359,6 +360,22 @@ export function BrowserPanel() {
   useEffect(() => {
     tabsRef.current = tabs;
   }, [tabs]);
+
+  useEffect(() => {
+    if (!tabContextMenu) return undefined;
+    const closeMenu = () => setTabContextMenu(null);
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('blur', closeMenu);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('blur', closeMenu);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [tabContextMenu]);
 
   const activeTabRef = useRef<BrowserTab | undefined>(activeTab);
   useEffect(() => {
@@ -762,6 +779,7 @@ export function BrowserPanel() {
 
   const closeBrowserTab = (tabId: string, event?: React.MouseEvent) => {
     event?.stopPropagation();
+    setTabContextMenu(null);
     delete webviewRefs.current[tabId];
     if (tabs.length <= 1) {
       const replacement = createBrowserTab(DEFAULT_BROWSER_URL, '首页');
@@ -779,6 +797,64 @@ export function BrowserPanel() {
       setActiveTabId(nextActive.id);
       setAddressText(nextActive.url);
     }
+  };
+
+  const refreshBrowserTab = (tabId: string) => {
+    setTabContextMenu(null);
+    const webview = webviewRefs.current[tabId];
+    if (webview) safeWebviewRun(() => webview.reload?.(), '刷新标签页失败');
+  };
+
+  const closeOtherTabs = (tabId: string) => {
+    setTabContextMenu(null);
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target) return;
+    Object.keys(webviewRefs.current).forEach((id) => {
+      if (id !== tabId) delete webviewRefs.current[id];
+    });
+    setTabs([target]);
+    setActiveTabId(tabId);
+    setAddressText(target.url);
+  };
+
+  const closeTabsToRight = (tabId: string) => {
+    setTabContextMenu(null);
+    const index = tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0 || index >= tabs.length - 1) return;
+    const nextTabs = tabs.slice(0, index + 1);
+    const removedIds = new Set(tabs.slice(index + 1).map((tab) => tab.id));
+    removedIds.forEach((id) => delete webviewRefs.current[id]);
+    setTabs(nextTabs);
+    if (removedIds.has(activeTabId)) {
+      setActiveTabId(tabId);
+      setAddressText(tabs[index].url);
+    }
+  };
+
+  const copyTabUrl = async (tabId: string) => {
+    setTabContextMenu(null);
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target?.url) return;
+    try {
+      await navigator.clipboard.writeText(target.url);
+      appStore.addLog('success', '标签页地址已复制。');
+    } catch (error: any) {
+      appStore.addLog('warn', `复制标签页地址失败：${error?.message || '浏览器权限不足'}`);
+    }
+  };
+
+  const openTabContextMenu = (event: React.MouseEvent, tabId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveTabId(tabId);
+    const viewportPadding = 8;
+    const menuWidth = 176;
+    const menuHeight = 214;
+    setTabContextMenu({
+      tabId,
+      x: Math.min(event.clientX, window.innerWidth - menuWidth - viewportPadding),
+      y: Math.min(event.clientY, window.innerHeight - menuHeight - viewportPadding)
+    });
   };
 
   const toggleFullscreen = () => {
@@ -866,13 +942,17 @@ export function BrowserPanel() {
   return (
     <div className="mock-page-container" style={browserFullscreen ? { position: 'fixed', inset: 0, zIndex: 9999, background: '#05040a', borderRadius: 0 } : undefined}>
       {canUseRealWebview && preloadPath && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px 0', background: '#0a0914', borderBottom: '1px solid rgba(255,255,255,0.04)', overflowX: 'auto' }}>
+        <div className="browser-tabs-bar" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px 0', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto' }}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTabId(tab.id)}
+                onAuxClick={(event) => {
+                  if (event.button === 1) closeBrowserTab(tab.id, event);
+                }}
+                onContextMenu={(event) => openTabContextMenu(event, tab.id)}
                 title={tab.url}
                 style={{
                   minWidth: 138,
@@ -884,12 +964,12 @@ export function BrowserPanel() {
                   gap: 4,
                   padding: '0 5px 0 10px',
                   borderRadius: '8px 8px 0 0',
-                  background: active ? '#171426' : 'rgba(255,255,255,0.035)',
-                  color: active ? '#fff' : 'var(--text-secondary)',
+                  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                   border: active ? '1px solid var(--border-glass)' : '1px solid transparent',
-                  borderBottomColor: active ? '#171426' : 'transparent',
+                  borderBottomColor: active ? 'var(--bg-panel-solid)' : 'transparent',
                   fontSize: '0.76rem'
                 }}
+                className={`browser-tab${active ? ' active' : ''}`}
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
                   {tab.loading ? '加载中...' : tab.title || friendlyTitle(tab.url)}
@@ -902,7 +982,7 @@ export function BrowserPanel() {
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') closeBrowserTab(tab.id);
                   }}
-                  style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, color: active ? '#cbd5e1' : 'var(--text-muted)' }}
+                   style={{ width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, color: active ? 'var(--text-secondary)' : 'var(--text-muted)' }}
                 >
                   <X size={13} />
                 </span>
@@ -916,10 +996,56 @@ export function BrowserPanel() {
           >
             <Plus size={15} />
           </button>
+          {tabContextMenu && (
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                position: 'fixed',
+                left: tabContextMenu.x,
+                top: tabContextMenu.y,
+                zIndex: 10020,
+                width: 176,
+                padding: 6,
+                borderRadius: 8,
+                border: '1px solid var(--border-glass)',
+                background: 'var(--bg-panel-solid)',
+                boxShadow: '0 16px 36px rgba(0,0,0,0.38)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2
+              }}
+            >
+              {[
+                { label: '刷新标签页', action: () => refreshBrowserTab(tabContextMenu.tabId), disabled: false },
+                { label: '复制标签页地址', action: () => copyTabUrl(tabContextMenu.tabId), disabled: false },
+                { label: '关闭标签页', action: () => closeBrowserTab(tabContextMenu.tabId), disabled: false },
+                { label: '关闭其他标签页', action: () => closeOtherTabs(tabContextMenu.tabId), disabled: tabs.length <= 1 },
+                { label: '关闭右侧标签页', action: () => closeTabsToRight(tabContextMenu.tabId), disabled: tabs.findIndex((tab) => tab.id === tabContextMenu.tabId) >= tabs.length - 1 }
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  disabled={item.disabled}
+                  onClick={item.action}
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    color: item.disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+                    background: 'transparent',
+                    fontSize: '0.76rem',
+                    opacity: item.disabled ? 0.55 : 1
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="browser-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: '#0a0914', borderBottom: '1px solid var(--border-glass)' }}>
+      <div className="browser-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border-glass)' }}>
         <button onClick={() => moveHistory(-1)} disabled={backDisabled} title="后退" style={{ background: 'rgba(255,255,255,0.03)', color: backDisabled ? 'var(--text-muted)' : 'var(--text-primary)', padding: 8, borderRadius: 6 }}>
           <ArrowLeft size={15} />
         </button>
@@ -930,11 +1056,11 @@ export function BrowserPanel() {
           <RefreshCw size={15} style={isLoadingPage ? { animation: 'spin 0.9s linear infinite' } : undefined} />
         </button>
         <form onSubmit={navigate} style={{ flex: 1, display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-glass)', borderRadius: 8, padding: '0 10px', gap: 8 }}>
+          <div className="browser-address" style={{ flex: 1, display: 'flex', alignItems: 'center', border: '1px solid var(--border-glass)', borderRadius: 8, padding: '0 10px', gap: 8 }}>
             <Compass size={14} style={{ color: 'var(--text-muted)' }} />
-            <input value={addressText} onChange={(event) => setAddressText(event.target.value)} placeholder="输入网址或搜索内容，按 Enter 跳转" style={{ flex: 1, background: 'transparent', border: 'none', color: '#e2e8f0', fontSize: '0.85rem' }} />
+            <input value={addressText} onChange={(event) => setAddressText(event.target.value)} placeholder="输入网址或搜索内容，按 Enter 跳转" style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '0.85rem' }} />
           </div>
-          <button type="submit" style={{ background: 'rgba(99,102,241,0.16)', color: '#fff', padding: '0 12px', borderRadius: 8, fontWeight: 800 }}>前往</button>
+          <button type="submit" style={{ background: 'rgba(99,102,241,0.16)', color: 'var(--text-primary)', padding: '0 12px', borderRadius: 8, fontWeight: 800 }}>前往</button>
         </form>
         <button onClick={toggleFullscreen} title={browserFullscreen ? '退出全屏浏览' : '全屏浏览'} style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', padding: 8, borderRadius: 6 }}>
           {browserFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
@@ -960,7 +1086,7 @@ export function BrowserPanel() {
             <div className="mock-page-body">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 20, alignItems: 'flex-start' }}>
                 <div>
-                  <h3 style={{ color: '#fff', fontSize: '1.15rem', marginBottom: 6 }}>授权学习页面演示</h3>
+                  <h3 style={{ color: 'var(--text-primary)', fontSize: '1.15rem', marginBottom: 6 }}>授权学习页面演示</h3>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', maxWidth: 680, lineHeight: 1.55 }}>
                     这里演示连续多题抓取、按题显示答案，以及授权网页自动化操作。真实页面抓取需要在设置中启用 WebView。
                   </p>
@@ -971,7 +1097,7 @@ export function BrowserPanel() {
               <section className="glass-panel" style={{ padding: 18, maxWidth: 780, marginBottom: 18, borderRadius: 8 }}>
                 {mockQuestions.map((question) => (
                   <div key={question.hash} data-sp-question style={{ marginBottom: 18 }}>
-                    <div className="question-title" style={{ color: '#fff', fontWeight: 800, fontSize: '0.95rem', marginBottom: 10 }}>
+                    <div className="question-title" style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', marginBottom: 10 }}>
                       {question.index}.（单选题）{question.question}
                     </div>
                     {question.options.map((option) => (

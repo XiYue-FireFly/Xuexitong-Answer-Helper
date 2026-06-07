@@ -54,7 +54,7 @@ export function ChapterLearningPanel() {
       <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--success-color)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <BookOpen size={18} style={{ color: 'var(--success-color)' }} />
-          <h4 style={{ color: '#fff', fontSize: '0.95rem' }}>章节学习辅助</h4>
+          <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>章节学习辅助</h4>
         </div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.6 }}>
           自动播放视频和音频，读取文档/PPT，检测任务点状态。内容完成后可自动打开下一章节继续学习。
@@ -62,25 +62,25 @@ export function ChapterLearningPanel() {
       </div>
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>控制</h5>
+        <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>控制</h5>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <button onClick={() => sendAction('scan')} style={{ background: 'rgba(99,102,241,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => sendAction('scan')} style={{ background: 'rgba(99,102,241,0.16)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
             <RefreshCw size={15} /> 扫描章节
           </button>
           <button onClick={() => sendAction('start')} style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 900, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
             <Play size={15} /> 开始学习
           </button>
-          <button onClick={() => sendAction('pause')} style={{ background: 'rgba(245,158,11,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => sendAction('pause')} style={{ background: 'rgba(245,158,11,0.16)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
             <Pause size={15} /> 暂停媒体
           </button>
-          <button onClick={() => sendAction('stop')} style={{ background: 'rgba(239,68,68,0.14)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
+          <button onClick={() => sendAction('stop')} style={{ background: 'rgba(239,68,68,0.14)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', gap: 6, alignItems: 'center' }}>
             <Square size={15} /> 停止辅助
           </button>
         </div>
       </div>
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>播放设置</h5>
+        <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>播放设置</h5>
         <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
           <span>视频/音频结束后打开下一章节</span>
           <input type="checkbox" checked={settings.chapterAutoNext} onChange={(event) => updateChapterSettings({ chapterAutoNext: event.target.checked })} style={{ width: 18, height: 18 }} />
@@ -104,7 +104,7 @@ export function ChapterLearningPanel() {
       </div>
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>自动化设置</h5>
+        <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>自动化设置</h5>
         <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <FileText size={14} /> 自动阅读文档/PPT
@@ -121,7 +121,7 @@ export function ChapterLearningPanel() {
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>当前章节状态</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前章节状态</h5>
           <span className={`badge ${chapterLearning?.running ? 'badge-success' : 'badge-primary'}`}>
             {chapterLearning?.running ? '运行中' : '未运行'}
           </span>
@@ -139,7 +139,7 @@ export function ChapterLearningPanel() {
 
       {currentVideo && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem', marginBottom: 10 }}>视频进度</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem', marginBottom: 10 }}>视频进度</h5>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.7 }}>
             <div>进度：{formatTime(currentVideo.currentTime)} / {formatTime(currentVideo.duration)}</div>
             <div>状态：{currentVideo.ended ? '已结束' : currentVideo.paused ? '暂停' : '播放中'}</div>
@@ -150,7 +150,7 @@ export function ChapterLearningPanel() {
 
       {currentAudio && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem', marginBottom: 10 }}>音频进度</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem', marginBottom: 10 }}>音频进度</h5>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.7 }}>
             <div>进度：{formatTime(currentAudio.currentTime)} / {formatTime(currentAudio.duration)}</div>
             <div>状态：{currentAudio.ended ? '已结束' : currentAudio.paused ? '暂停' : '播放中'}</div>
@@ -161,7 +161,7 @@ export function ChapterLearningPanel() {
 
       {taskPoints.length > 0 && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem', marginBottom: 10 }}>任务点列表</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem', marginBottom: 10 }}>任务点列表</h5>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {taskPoints.slice(0, 5).map((task, index) => (
               <div key={`${task.title}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: '0.76rem' }}>
@@ -183,7 +183,7 @@ export function ChapterLearningPanel() {
 
       {chapterLearning?.nextChapter && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem', marginBottom: 8 }}>下一章节</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem', marginBottom: 8 }}>下一章节</h5>
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
             {chapterLearning.nextChapter.title}
           </div>

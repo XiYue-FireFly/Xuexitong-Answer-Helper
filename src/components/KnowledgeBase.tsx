@@ -157,7 +157,7 @@ export function KnowledgeBase() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Database size={18} style={{ color: 'var(--primary-color)' }} />
-            <h4 style={{ color: '#fff', fontSize: '0.95rem' }}>本地题库</h4>
+            <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>本地题库</h4>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <input
@@ -169,14 +169,14 @@ export function KnowledgeBase() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              style={{ background: 'rgba(99,102,241,0.14)', color: '#fff', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', fontWeight: 700 }}
+              style={{ background: 'rgba(99,102,241,0.14)', color: 'var(--text-primary)', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', fontWeight: 700 }}
             >
               <Upload size={13} /> 导入
             </button>
             <button
               onClick={exportQuestionBank}
               disabled={questionBank.length === 0}
-              style={{ background: 'rgba(16,185,129,0.14)', color: '#fff', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', fontWeight: 700, opacity: questionBank.length === 0 ? 0.55 : 1 }}
+              style={{ background: 'rgba(16,185,129,0.14)', color: 'var(--text-primary)', padding: '7px 9px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', fontWeight: 700, opacity: questionBank.length === 0 ? 0.55 : 1 }}
             >
               <Download size={13} /> 导出
             </button>
@@ -196,18 +196,18 @@ export function KnowledgeBase() {
       </div>
 
       <div className="glass-panel" style={{ padding: 14, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.6 }}>
-        <div><strong style={{ color: '#fff' }}>题库数量：</strong>{questionBank.length} 题</div>
+        <div><strong style={{ color: 'var(--text-primary)' }}>题库数量：</strong>{questionBank.length} 题</div>
         {snapshot && (
           <>
-            <div><strong style={{ color: '#fff' }}>当前页面：</strong>{snapshot.title}</div>
-            <div><strong style={{ color: '#fff' }}>捕获时间：</strong>{new Date(snapshot.capturedAt).toLocaleString()}</div>
+            <div><strong style={{ color: 'var(--text-primary)' }}>当前页面：</strong>{snapshot.title}</div>
+            <div><strong style={{ color: 'var(--text-primary)' }}>捕获时间：</strong>{new Date(snapshot.capturedAt).toLocaleString()}</div>
           </>
         )}
       </div>
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-          <h5 style={{ color: '#fff', fontSize: '0.86rem' }}>手动加入答案</h5>
+          <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>手动加入答案</h5>
           <button
             onClick={addManualItems}
             style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: '8px 10px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.74rem', fontWeight: 800 }}
@@ -235,7 +235,7 @@ export function KnowledgeBase() {
         questionBank.slice(0, 80).map((entry) => (
           <div key={entry.id} className="glass-panel" style={{ padding: 14, borderRadius: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-              <h5 style={{ color: '#fff', fontSize: '0.84rem', lineHeight: 1.45 }}>{entry.question}</h5>
+              <h5 style={{ color: 'var(--text-primary)', fontSize: '0.84rem', lineHeight: 1.45 }}>{entry.question}</h5>
               <span className="badge badge-success">命中 {entry.hits}</span>
             </div>
             <div style={{ color: '#34d399', fontSize: '0.82rem', fontWeight: 800, marginBottom: 8 }}>{entry.answer.answer}</div>
