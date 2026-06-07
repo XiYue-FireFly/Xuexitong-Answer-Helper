@@ -44,32 +44,22 @@ jobs:
           body: |
             ## New Features
 
-            - 新增 22 个 AI 服务商预设，覆盖 Qwen、DeepSeek、硅基流动、OpenRouter、Gemini、Kimi、GLM、豆包、混元、千帆、MiniMax、StepFun、Groq、Mistral、Together、Grok、小米 MiMo、OpenAI 等
-            - 新增 Ollama、LM Studio、vLLM/LocalAI 本地模型配置，支持无需 API Key 的本地接口
-            - 新增 AI 服务商 URL、模型和认证方式下拉选择
-            - 新增应用检查更新入口
-            - 新增错误报告台，集中展示后台错误报告
-            - 新增 Windows 桌面通知，解析或填入完成后提醒用户
-            - 新增浏览器标签页右键菜单和中键关闭标签页
-            - 新增 WebView 登录态持久化状态展示
-            - 新增卸载清理规则，卸载时同步清理应用缓存、本地题库和网页登录态
+            - 设置页 API Key 输入框新增“没有秘钥，前往”入口
+            - 新增 API Key 获取弹窗，当前服务商会优先展示
+            - 新增常用 AI 服务商获取地址列表，支持打开控制台和复制链接
+            - 新增 API Key 使用教程，说明云端服务和本地模型的配置差异
+            - 新增本地模型无需 API Key 的提示，覆盖 Ollama、LM Studio、vLLM/LocalAI
 
             ## Fixes
 
-            - 修复 UI 不协调问题，统一深浅主题、面板、按钮、输入框和下拉菜单样式
-            - 修复 Windows/Electron 原生下拉白底浅字导致选项不可读的问题
-            - 修复更新检查返回非 JSON 时出现 Unexpected token 报错的问题
-            - 修复 AI 测试聊天输入框固定、无法自由输入的问题
-            - 修复小米 MiMo api-key 认证方式和 response_format 兼容问题
-            - 修复本地模型服务因 API Key 为空而误走演示答案的问题
-            - 修复源码 UTF-8 BOM 和终端显示引发的中文编码误判
-            - 修复安装包启动白屏和旧 release 产物残留相关问题
+            - 修复用户没有 API Key 时需要手动查找服务商文档的问题
+            - 修复 API Key 获取地址缺少复制入口的问题
+            - 修复设置页帮助信息不足导致 AI 配置流程不清晰的问题
 
             ## Performance Improvements
 
-            - 优化设置页 AI 配置流程，减少手动输入 Base URL 和模型名的错误率
-            - 优化 AI 请求兼容性，不支持 JSON response_format 的服务商默认使用文本 JSON 解析
-            - 优化应用主题切换后的外框、工具栏和浏览器标签栏一致性
+            - 优化设置页 API 配置路径，减少用户在不同网站之间来回搜索的时间
+            - 优化弹窗展示顺序，当前服务商排在首位，其他服务商作为备选列表展示
 
             ## Download
 
