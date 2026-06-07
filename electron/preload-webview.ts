@@ -1597,6 +1597,38 @@ function isJudgementPayload(payload: AnswerApplyPayload, targets: QuestionOption
   return meaningfulTargets.length === 2 && meaningfulTargets.every((target) => Boolean(judgementValueFromOptionTarget(target)));
 }
 
+function isMultipleChoicePayload(payload: AnswerApplyPayload) {
+  const qtype = qtypeForPayload(payload);
+  return payload.question?.type === 'multiple' || qtype === '1' || qtype === '21';
+}
+
+function normalizeChoiceLabels(labels: string[], allowMultiple: boolean) {
+  const unique = Array.from(new Set(labels
+    .map((label) => String(label || '').trim().toUpperCase())
+    .filter((label) => /^[A-D]$/.test(label))));
+  return allowMultiple ? unique : unique.slice(0, 1);
+}
+
+function labelsFromAnswerText(text: string, allowMultiple: boolean) {
+  const value = String(text || '').trim();
+  const labels: string[] = [];
+  const compact = value.replace(/\s+/g, '').match(/^[A-D]{1,8}$/i)?.[0] || '';
+  if (compact) {
+    labels.push(...compact.split(''));
+  } else {
+    labels.push(...Array.from(value.matchAll(/(?:答案|选项|选择|^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
+      .map((match) => match[1]));
+  }
+  return normalizeChoiceLabels(labels, allowMultiple);
+}
+
+function labelsFromPayload(payload: AnswerApplyPayload) {
+  const allowMultiple = isMultipleChoicePayload(payload);
+  const explicitLabels = normalizeChoiceLabels(payload.choiceLabels || [], allowMultiple);
+  if (explicitLabels.length > 0) return explicitLabels;
+  return labelsFromAnswerText(payload.answer || '', allowMultiple);
+}
+
 function clearMatchString(text: string) {
   return String(text || '')
     .trim()
@@ -1653,14 +1685,7 @@ function pickAnswerTargets(payload: AnswerApplyPayload) {
     .sort((left, right) => Number(Boolean(right.inputSelector)) - Number(Boolean(left.inputSelector)));
   const judgementSelected = isJudgementPayload(payload, targets) ? pickJudgementTargets(payload, targets) : [];
   if (judgementSelected.length > 0) return judgementSelected;
-  const answerText = `${payload.answer} ${(payload.matchedOptions || []).join(' ')}`;
-  const labelSet = new Set((payload.choiceLabels || [])
-    .map((label) => label.trim().toUpperCase())
-    .filter(Boolean));
-
-  Array.from(answerText.matchAll(/(?:^|[^A-Z])([A-D])(?:[^A-Z]|$)/gi))
-    .map((match) => match[1].toUpperCase())
-    .forEach((label) => labelSet.add(label));
+  const labelSet = new Set(labelsFromPayload(payload));
 
   let selected: QuestionOptionTarget[] = [];
   if (labelSet.size > 0) {
@@ -1689,15 +1714,6 @@ function pickAnswerTargets(payload: AnswerApplyPayload) {
   }
 
   return selected;
-}
-
-function labelsFromPayload(payload: AnswerApplyPayload) {
-  const answerText = `${payload.answer || ''} ${(payload.matchedOptions || []).join(' ')}`;
-  const labels = new Set((payload.choiceLabels || []).map((label) => label.trim().toUpperCase()).filter(Boolean));
-  Array.from(answerText.matchAll(/(?:^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
-    .map((match) => match[1].toUpperCase())
-    .forEach((label) => labels.add(label));
-  return Array.from(labels);
 }
 
 function answerPartsFromPayload(payload: AnswerApplyPayload) {
