@@ -37,7 +37,28 @@ jobs:
         with:
           draft: false
           prerelease: false
+          body: |
+            ## New Features
+
+            - 新增本地题库导入/导出
+            - 新增手动批量导入答案，支持选择题、判断题、填空题
+            - 新增 GitHub Releases 自动构建 Windows 安装包
+
+            ## Fixes
+
+            - 修复安装包启动白屏
+            - 修复本地题库匹配不到而继续调用 API 的问题
+            - 修复连续多题导入解析错误
+            - 修复填入正确答案后保存/提交值错位的问题
+            - 修复内置浏览器新窗口跳转和登录态持久化相关问题
+
+            ## Performance Improvements
+
+            - 优化题库精确匹配与模糊匹配流程
+            - 优化答题填入前后的页面状态同步
+
+            ## Download
+
+            Windows 用户下载下方 `学习通答题辅助工具 Setup x.x.x.exe` 安装即可。
           files: |
             release/*.exe
-            release/*.yml
-            release/*.blockmap
