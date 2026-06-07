@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, Download, Eye, EyeOff, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
+import { ChevronDown, Copy, Download, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
 
 type TestChatMessage = {
@@ -33,6 +33,39 @@ type SelectOption = {
   value: string;
   note?: string;
 };
+
+type ApiKeyHelpLink = {
+  providerId: string;
+  name: string;
+  url?: string;
+  note: string;
+  authLabel: string;
+};
+
+const API_KEY_HELP_LINKS: ApiKeyHelpLink[] = [
+  { providerId: 'dashscope', name: '阿里云百炼 / Qwen', url: 'https://help.aliyun.com/zh/model-studio/get-api-key/', authLabel: 'Authorization: Bearer', note: '进入百炼控制台后，在 API Key 管理页创建并复制 Key。' },
+  { providerId: 'deepseek', name: 'DeepSeek', url: 'https://platform.deepseek.com/api_keys', authLabel: 'Authorization: Bearer', note: '登录 DeepSeek Platform 后，在 API Keys 页面创建 Key。' },
+  { providerId: 'siliconflow', name: '硅基流动 SiliconFlow', url: 'https://cloud.siliconflow.cn/account/ak', authLabel: 'Authorization: Bearer', note: '进入硅基流动控制台，在账户 API 密钥页面创建 Key。' },
+  { providerId: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/keys', authLabel: 'Authorization: Bearer', note: '进入 OpenRouter Keys 页面创建 API Key，并确认账户有可用额度。' },
+  { providerId: 'google', name: 'Google Gemini', url: 'https://aistudio.google.com/app/apikey', authLabel: 'Authorization: Bearer', note: '在 Google AI Studio 创建 API Key，复制后填入本应用。' },
+  { providerId: 'moonshot', name: '月之暗面 Kimi', url: 'https://platform.moonshot.cn/console/api-keys', authLabel: 'Authorization: Bearer', note: '进入 Moonshot 控制台 API Keys 页面创建 Key。' },
+  { providerId: 'zhipu', name: '智谱 AI / GLM', url: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys', authLabel: 'Authorization: Bearer', note: '进入智谱开放平台的 API Keys 管理页创建 Key。' },
+  { providerId: 'volcengine', name: '火山方舟 / 豆包', url: 'https://console.volcengine.com/ark/', authLabel: 'Authorization: Bearer', note: '进入火山方舟控制台，创建 API Key，并按控制台模型或接入点名称填写模型。' },
+  { providerId: 'tencent', name: '腾讯混元', url: 'https://console.cloud.tencent.com/hunyuan/api-key', authLabel: 'Authorization: Bearer', note: '进入腾讯云混元控制台，在 API Key 页面创建并复制 Key。' },
+  { providerId: 'baidu', name: '百度千帆 / 文心', url: 'https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application', authLabel: 'Authorization: Bearer', note: '进入千帆控制台创建应用或 API Key，按控制台说明复制密钥。' },
+  { providerId: 'minimax', name: 'MiniMax', url: 'https://platform.minimaxi.com/user-center/basic-information/interface-key', authLabel: 'Authorization: Bearer', note: '进入 MiniMax 平台用户中心，在接口密钥页面复制 Key。' },
+  { providerId: 'stepfun', name: '阶跃星辰 StepFun', url: 'https://platform.stepfun.com/account-info', authLabel: 'Authorization: Bearer', note: '进入 StepFun 平台账户信息页面查看或创建 API Key。' },
+  { providerId: 'groq', name: 'Groq', url: 'https://console.groq.com/keys', authLabel: 'Authorization: Bearer', note: '进入 Groq Console 的 API Keys 页面创建 Key。' },
+  { providerId: 'mistral', name: 'Mistral AI', url: 'https://console.mistral.ai/api-keys/', authLabel: 'Authorization: Bearer', note: '进入 Mistral Console 创建 API Key。' },
+  { providerId: 'together', name: 'Together AI', url: 'https://api.together.ai/settings/api-keys', authLabel: 'Authorization: Bearer', note: '进入 Together API Keys 设置页创建 Key。' },
+  { providerId: 'xai', name: 'xAI / Grok', url: 'https://console.x.ai/', authLabel: 'Authorization: Bearer', note: '进入 xAI Console 创建 API Key。' },
+  { providerId: 'xiaomi', name: '小米 MiMo', url: 'https://platform.xiaomimimo.com/', authLabel: 'api-key', note: '进入小米 MiMo 平台创建 sk-key 或 Token Plan 的 tp-key，注意两类 Key 不能混用。' },
+  { providerId: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys', authLabel: 'Authorization: Bearer', note: '进入 OpenAI Platform 的 API Keys 页面创建 Key。' },
+  { providerId: 'ollama', name: 'Ollama 本地模型', authLabel: '无需认证', note: '本地服务不需要 API Key，请先启动 Ollama 并拉取模型。' },
+  { providerId: 'lmstudio', name: 'LM Studio 本地模型', authLabel: '无需认证', note: '本地服务不需要 API Key，请在 LM Studio 开启 OpenAI Compatible Server。' },
+  { providerId: 'vllm', name: 'vLLM / LocalAI 兼容服务', authLabel: '无需认证', note: '本地或自建服务通常不需要 API Key，按服务端要求填写 Base URL 和模型名。' },
+  { providerId: 'custom', name: '自定义兼容接口', authLabel: '按接口要求', note: '如果使用第三方代理或自建接口，请查看该服务商文档，确认 Base URL、模型名和认证方式。' }
+];
 
 function CustomSelect({
   value,
@@ -140,6 +173,8 @@ export function SettingsPanel() {
   const { settings, isElectron } = useAppStore();
   const [selectedProviderId, setSelectedProviderId] = useState(settings.activeProviderId);
   const [showKey, setShowKey] = useState(false);
+  const [showApiKeyHelp, setShowApiKeyHelp] = useState(false);
+  const [copiedKeyHelpUrl, setCopiedKeyHelpUrl] = useState('');
   const [isClearingSession, setIsClearingSession] = useState(false);
   const [isTestingAI, setIsTestingAI] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -161,6 +196,17 @@ export function SettingsPanel() {
   const modelOptions = [
     ...(selectedPreset?.models || [{ label: '自定义模型', value: formData.model }]),
     ...(selectedPreset?.allowCustomModel ? [{ label: '自定义模型', value: '__custom__' }] : [])
+  ];
+  const selectedKeyHelp: ApiKeyHelpLink = API_KEY_HELP_LINKS.find((item) => item.providerId === selectedProviderId) || {
+    providerId: selectedProviderId,
+    name: formData.name || '当前服务商',
+    url: undefined,
+    authLabel: authHeaderLabel(formData.authHeader),
+    note: '请查看当前服务商文档获取 API Key，确认 Base URL、模型名和认证方式。'
+  };
+  const visibleKeyHelpLinks = [
+    selectedKeyHelp,
+    ...API_KEY_HELP_LINKS.filter((item) => item.providerId !== selectedKeyHelp.providerId)
   ];
 
   useEffect(() => {
@@ -377,6 +423,39 @@ export function SettingsPanel() {
       appStore.addLog('info', '已打开最新版下载页面。');
     } catch (error: any) {
       appStore.addLog('error', `打开下载页面失败：${error?.message || '未知错误'}`);
+    }
+  };
+
+  const openApiKeyUrl = async (url?: string) => {
+    if (!url) {
+      appStore.addLog('info', '当前服务商无需 API Key，按教程启动本地服务即可。');
+      return;
+    }
+    try {
+      if ((window as any).electronAPI?.openExternalUrl) {
+        await (window as any).electronAPI.openExternalUrl(url);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+      appStore.addLog('info', '已打开 API Key 获取页面。');
+    } catch (error: any) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      appStore.addLog('warn', `外部打开失败，已尝试在浏览器中打开：${error?.message || '未知错误'}`);
+    }
+  };
+
+  const copyApiKeyUrl = async (url?: string) => {
+    if (!url) {
+      appStore.addLog('info', '当前服务商无需复制 API Key 获取链接。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedKeyHelpUrl(url);
+      window.setTimeout(() => setCopiedKeyHelpUrl((current) => (current === url ? '' : current)), 1800);
+      appStore.addLog('success', '已复制 API Key 获取链接。');
+    } catch (error: any) {
+      appStore.addLog('error', `复制链接失败：${error?.message || '未知错误'}`);
     }
   };
 
@@ -611,7 +690,17 @@ export function SettingsPanel() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label className="field-label">API Key</label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <label className="field-label">API Key</label>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setShowApiKeyHelp(true)}
+              style={{ padding: '5px 8px', fontSize: '0.72rem', color: 'var(--primary-color)' }}
+            >
+              <KeyRound size={13} /> 没有秘钥，前往
+            </button>
+          </div>
           <div style={{ position: 'relative' }}>
             <input
               type={showKey ? 'text' : 'password'}
@@ -722,6 +811,153 @@ export function SettingsPanel() {
           onChange={(value) => syncSettings({ theme: value as 'dark' | 'light' })}
         />
       </div>
+
+      {showApiKeyHelp && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="获取 API Key"
+          onClick={() => setShowApiKeyHelp(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            background: 'rgba(2,6,23,0.68)',
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          <div
+            className="glass-panel"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 'min(760px, 100%)',
+              maxHeight: '88vh',
+              overflowY: 'auto',
+              borderRadius: 8,
+              padding: 18,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              boxShadow: '0 24px 80px rgba(0,0,0,0.42)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)', fontWeight: 900, fontSize: '1rem' }}>
+                  <KeyRound size={18} /> 获取 API Key
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', lineHeight: 1.55, marginTop: 6 }}>
+                  选择服务商后打开对应控制台，复制 Key 后回到设置页粘贴。链接只用于跳转，不会保存任何秘钥。
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-icon btn-ghost"
+                onClick={() => setShowApiKeyHelp(false)}
+                title="关闭"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            <div style={{ border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: 14, background: 'rgba(99,102,241,0.10)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ color: 'var(--text-primary)', fontSize: '0.88rem', fontWeight: 850 }}>{selectedKeyHelp.name}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: 3 }}>当前服务商 · {selectedKeyHelp.authLabel}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    disabled={!selectedKeyHelp.url}
+                    onClick={() => copyApiKeyUrl(selectedKeyHelp.url)}
+                    style={{ opacity: selectedKeyHelp.url ? 1 : 0.55 }}
+                  >
+                    <Copy size={14} /> {copiedKeyHelpUrl === selectedKeyHelp.url ? '已复制' : '复制链接'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!selectedKeyHelp.url}
+                    onClick={() => openApiKeyUrl(selectedKeyHelp.url)}
+                    style={{ opacity: selectedKeyHelp.url ? 1 : 0.55 }}
+                  >
+                    <ExternalLink size={14} /> 打开
+                  </button>
+                </div>
+              </div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', lineHeight: 1.55 }}>{selectedKeyHelp.note}</div>
+              {selectedKeyHelp.url && (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', wordBreak: 'break-all' }}>{selectedKeyHelp.url}</div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>其他常用获取地址</h5>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 8 }}>
+                {visibleKeyHelpLinks.slice(1).map((item) => (
+                  <div
+                    key={item.providerId}
+                    style={{
+                      border: '1px solid var(--border-glass)',
+                      borderRadius: 8,
+                      padding: 10,
+                      background: 'rgba(255,255,255,0.03)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      minWidth: 0
+                    }}
+                  >
+                    <div>
+                      <div style={{ color: 'var(--text-primary)', fontSize: '0.78rem', fontWeight: 800 }}>{item.name}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.66rem', marginTop: 2 }}>{item.authLabel}</div>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.68rem', lineHeight: 1.45 }}>{item.note}</div>
+                    {item.url && <div style={{ color: 'var(--text-muted)', fontSize: '0.64rem', wordBreak: 'break-all' }}>{item.url}</div>}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                      <button
+                        type="button"
+                        className="btn btn-soft"
+                        disabled={!item.url}
+                        onClick={() => copyApiKeyUrl(item.url)}
+                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.68rem', opacity: item.url ? 1 : 0.55 }}
+                      >
+                        <Copy size={13} /> {copiedKeyHelpUrl === item.url ? '已复制' : '复制'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={!item.url}
+                        onClick={() => openApiKeyUrl(item.url)}
+                        style={{ flex: 1, padding: '6px 8px', fontSize: '0.68rem', opacity: item.url ? 1 : 0.55 }}
+                      >
+                        <ExternalLink size={13} /> 打开
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>使用教程</h5>
+              <ol style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: 1.7 }}>
+                <li>在设置页先选择 AI 服务商、Base URL 和模型。</li>
+                <li>点击“打开”进入服务商控制台，登录后创建或复制 API Key。</li>
+                <li>回到本应用，把 API Key 粘贴到输入框并点击“保存 AI 配置”。</li>
+                <li>使用“AI 测试聊天”发送一句话，确认接口、模型和秘钥可用。</li>
+                <li>Ollama、LM Studio、vLLM 等本地服务通常无需 API Key，只要先启动本地模型服务。</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
