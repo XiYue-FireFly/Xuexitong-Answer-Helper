@@ -80,14 +80,8 @@ D. 选项四
 答案：A
 解析：可选解析
 ```
-```text
-题目：示例判断题题干
-A. 选项一
-B. 选项二
-答案：A
-解析：可选解析
-```
-多选题答案可以写成 `答案：A` 或 `答案：B`。如果答案写完整选项文本，程序也会尝试和选项内容匹配。
+
+多选题答案可以写成 `答案：A、C` 或 `答案：AC`。如果答案写完整选项文本，程序也会尝试和选项内容匹配。
 
 填空题、问答题可以使用题目、答案的格式：
 
@@ -171,9 +165,9 @@ npm run release:win
 - **获取API Key**: 访问 [百度智能云千帆平台](https://cloud.baidu.com/product/wenxinworkshop)
 
 ### 小米AI
-- **Base URL**: `https://api.xiaomimimo.com/v1`
+- **Base URL**: `https://api.mixin.chat/v1`
 - **模型**: `xiaomi-llm`
-- **获取API Key**: 访问 [小米AI开放平台文档](https://platform.xiaomimimo.com/docs/zh-CN/price/tokenplan/quick-access)
+- **获取API Key**: 参考小米AI开放平台文档
 
 ### OpenAI
 - **Base URL**: `https://api.openai.com/v1`
