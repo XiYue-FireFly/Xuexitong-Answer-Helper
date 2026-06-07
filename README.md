@@ -80,6 +80,19 @@ npm install
 npm run electron
 ```
 
+## 下载 Windows 安装包
+
+普通用户不需要克隆源码。打开 GitHub 仓库右侧的 Releases，下载最新版本里的 `学习通答题辅助工具 Setup x.x.x.exe`，双击安装即可。
+
+项目维护者发布新版本时，先更新 `package.json` 里的 `version`，然后创建并推送版本标签：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions 会自动在 Windows 环境构建安装包，并把 `.exe` 上传到对应 Release 附件中。
+
 仅运行前端开发服务：
 
 ```bash
