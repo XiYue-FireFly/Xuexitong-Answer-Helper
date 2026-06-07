@@ -414,6 +414,8 @@ class GlobalStore {
     Array.from(answer.matchAll(/(?:^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
       .map((match) => match[1].toUpperCase())
       .forEach((label) => labels.add(label));
+    const compactLabels = answer.replace(/\s+/g, '').match(/^[A-D]{1,8}$/i)?.[0] || '';
+    compactLabels.split('').forEach((label) => labels.add(label.toUpperCase()));
 
     const matchedOptions = input.options.filter((option, index) => {
       const label = this.optionLabelFromText(option, index);

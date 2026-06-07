@@ -3,7 +3,7 @@ import { Database, Download, FileSearch, Plus, Trash2, Upload } from 'lucide-rea
 import { appStore, ManualQuestionBankInput, QuestionType, useAppStore } from '../store/appStore';
 
 function cleanLine(line: string) {
-  return line.replace(/^\s*(题目|问题|选项|答案|解析)\s*[:：]\s*/i, '').trim();
+  return line.replace(/^\s*(题目|问题|选项|答案|正确答案|解析|分析)\s*[:：]\s*/i, '').trim();
 }
 
 function parseQuestionType(text: string, options: string[]): QuestionType {
@@ -14,24 +14,86 @@ function parseQuestionType(text: string, options: string[]): QuestionType {
   return options.length > 0 ? 'single' : 'completion';
 }
 
+function isSeparatorLine(line: string) {
+  return /^(---+|====+|###+)$/.test(line.trim());
+}
+
+function isSectionHeading(line: string) {
+  return /^(一|二|三|四|五|六|七|八|九|十|[0-9]+)[、.．]\s*(单选题|多选题|判断题|填空题|问答题|简答题|论述题)/.test(line.trim());
+}
+
+function isAnswerLine(line: string) {
+  return /^\s*(答案|正确答案)\s*[:：]/i.test(line);
+}
+
+function isAnalysisLine(line: string) {
+  return /^\s*(解析|分析)\s*[:：]/i.test(line);
+}
+
+function isOptionLine(line: string) {
+  return /^\s*[A-Z]\s*[.\s:：、。)]/.test(line) || /^\s*选项\s*[:：]/.test(line);
+}
+
+function isLikelyQuestionStart(line: string) {
+  const text = line.trim();
+  if (!text || isSectionHeading(text) || isAnswerLine(text) || isAnalysisLine(text) || isOptionLine(text)) return false;
+  return true;
+}
+
+function splitManualBlocks(input: string) {
+  const lines = input.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim());
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let hasAnswer = false;
+  let hasAnalysis = false;
+
+  const flush = () => {
+    const block = current.join('\n').trim();
+    if (block) blocks.push(block);
+    current = [];
+    hasAnswer = false;
+    hasAnalysis = false;
+  };
+
+  for (const line of lines) {
+    if (!line || isSeparatorLine(line)) {
+      if (hasAnswer) flush();
+      continue;
+    }
+
+    if (isSectionHeading(line)) {
+      if (hasAnswer) flush();
+      continue;
+    }
+
+    if (hasAnswer && isLikelyQuestionStart(line) && (!hasAnalysis || !isAnalysisLine(line))) {
+      flush();
+    }
+
+    current.push(line);
+    if (isAnswerLine(line)) hasAnswer = true;
+    if (isAnalysisLine(line)) hasAnalysis = true;
+  }
+
+  flush();
+  return blocks;
+}
+
 function parseManualText(input: string): ManualQuestionBankInput[] {
-  const blocks = input
-    .replace(/\r\n/g, '\n')
-    .split(/\n\s*(?:---|====|###)\s*\n|\n{2,}/g)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = splitManualBlocks(input);
 
   return blocks.map((block) => {
     const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
-    const answerIndex = lines.findIndex((line) => /^\s*(答案|正确答案)\s*[:：]/i.test(line));
-    const analysisIndex = lines.findIndex((line) => /^\s*(解析|分析)\s*[:：]/i.test(line));
+    const answerIndex = lines.findIndex(isAnswerLine);
+    const analysisIndex = lines.findIndex(isAnalysisLine);
+    const answerEndIndex = analysisIndex >= 0 ? analysisIndex : lines.length;
     const rawQuestionLines = answerIndex >= 0 ? lines.slice(0, answerIndex) : lines.slice(0, Math.max(1, lines.length - 1));
     const answer = answerIndex >= 0
-      ? cleanLine(lines[answerIndex])
+      ? lines.slice(answerIndex, answerEndIndex).map(cleanLine).join('\n').trim()
       : cleanLine(lines[lines.length - 1] || '');
-    const analysis = analysisIndex >= 0 ? cleanLine(lines[analysisIndex]) : '';
+    const analysis = analysisIndex >= 0 ? lines.slice(analysisIndex).map(cleanLine).join('\n').trim() : '';
 
-    const optionLines = rawQuestionLines.filter((line) => /^\s*[A-Z]\s*[.\s:：、。)]/.test(line) || /^\s*选项\s*[:：]/.test(line));
+    const optionLines = rawQuestionLines.filter(isOptionLine);
     const questionLines = rawQuestionLines.filter((line) => !optionLines.includes(line));
     const question = questionLines.map(cleanLine).join('\n').trim();
     const options = optionLines.map(cleanLine).filter(Boolean);
@@ -49,7 +111,7 @@ function parseManualText(input: string): ManualQuestionBankInput[] {
 export function KnowledgeBase() {
   const { snapshot, questionBank } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [manualText, setManualText] = useState('题目：示例选择题题干\nA. 选项一\nB. 选项二\n答案：A\n解析：这里可以写解析\n\n题目：示例填空题题干\n答案：填空答案');
+  const [manualText, setManualText] = useState('题目：示例选择题题干\nA. 选项一\nB. 选项二\n答案：A\n解析：这里可以写解析\n题目：示例填空题题干\n答案：填空答案');
 
   const exportQuestionBank = () => {
     const data = appStore.exportQuestionBank();
@@ -160,7 +222,7 @@ export function KnowledgeBase() {
           style={{ width: '100%', resize: 'vertical', fontSize: '0.78rem', lineHeight: 1.55 }}
         />
         <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', lineHeight: 1.55 }}>
-          选择题格式：题目换行，A/B/C/D 选项换行，答案写“答案：A”或“答案：A、C”。填空题格式：题目换行，答案写“答案：内容”。多个题目可用空行或 --- 分隔。
+          选择题格式：题目换行，A/B/C/D 选项换行，答案写“答案：A”或“答案：A、C”。填空题格式：题目换行，答案写“答案：内容”。多个题目可连续粘贴，也可用空行或 --- 分隔。
         </div>
       </div>
 
