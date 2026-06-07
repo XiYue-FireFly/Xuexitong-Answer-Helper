@@ -15,6 +15,8 @@ let mainWindow: BrowserWindow | null = null;
 const DB_FILE = path.join(app.getPath('userData'), 'studypilot_db.json');
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
 const BLOCKED_INTERNAL_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
+const BLOCKED_STAT_KNOWLEDGE_URL = /\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i;
+const INCOMPLETE_EXAM_LIST_PATH = /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i;
 
 installProcessErrorLogging();
 
@@ -48,6 +50,38 @@ function shouldBlockInternalTabUrl(url: string) {
   return BLOCKED_INTERNAL_TAB_URL.test(String(url || ''));
 }
 
+function shouldDropStatKnowledgeUrl(url: string) {
+  return BLOCKED_STAT_KNOWLEDGE_URL.test(String(url || ''));
+}
+
+function isIncompleteExamListUrl(url: string) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (!INCOMPLETE_EXAM_LIST_PATH.test(parsed.pathname)) return false;
+    const query = parsed.searchParams;
+    return !(
+      query.has('courseId') ||
+      query.has('courseid') ||
+      query.has('classId') ||
+      query.has('clazzid') ||
+      query.has('relationId') ||
+      query.has('examId') ||
+      query.has('answerId')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isExamListUrl(url: string) {
+  try {
+    const parsed = new URL(String(url || ''));
+    return INCOMPLETE_EXAM_LIST_PATH.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function frameUrl(frame: any) {
   try {
     return frame?.url || frame?.top?.url || '';
@@ -78,8 +112,8 @@ function frameClickBridgeSource() {
     (() => {
       if (window.__studyPilotFrameClickBridge) return;
       window.__studyPilotFrameClickBridge = true;
-      const navigationHint = /(mooc2-ans|mooc-ans|mycourse|dowork|stucoursemiddle|courseid|courseId|clazzid|clazzId|classId|workId|answerId|cpi|chaoxing)/i;
-      const attributeHint = /(course|clazz|class|work|answer|cpi|enc|url|href|target|mooc|chaoxing)/i;
+      const navigationHint = /(mooc2-ans|mooc-ans|exam-ans|viewExamAnswer|goTest|jumpRetest|retest|mycourse|dowork|stucoursemiddle|courseid|courseId|clazzid|clazzId|classId|workId|answerId|examAnswerId|examId|cpi|chaoxing)/i;
+      const attributeHint = /(course|clazz|class|work|answer|cpi|enc|url|href|target|mooc|chaoxing|exam)/i;
       const blockedInternalTabUrl = /(addStudentWorkNewWeb|\\/mooc-ans\\/work\\/(?:addStudentWorkNewWeb|save|submit)|\\/work\\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
       const answerInlineHandlerHint = /(addMultipleChoice|addChoice|answerContentChange|loadAnswerSheet|setClozeTextAnswer|setBlankAnswer|fillBlank|blankAnswer)/i;
       const answerInteractionSelector = [
@@ -165,7 +199,11 @@ function frameClickBridgeSource() {
           'area[href]',
           'button',
           '[role="button"]',
+          '[role="option"]',
           '[onclick]',
+          '[onclick*="viewExamAnswer"]',
+          '[onclick*="goTest"]',
+          '[tabindex][onclick]',
           '[data-url]',
           '[data-href]',
           '[data-target-url]',
@@ -185,16 +223,64 @@ function frameClickBridgeSource() {
         }
         return false;
       };
+      const isNativeExamEntry = (target) => {
+        for (const element of chainFor(target)) {
+          const id = element.id || '';
+          const className = String(element.className || '');
+          const inlineHandler = (element.getAttribute && element.getAttribute('onclick')) || String(element.onclick || '');
+          const text = clean(element.innerText || element.textContent || '', 40);
+          if (/^(startBtn|tabIntoexam2)$/i.test(id)) return true;
+          if (/(preEnterExam|enterExamCallBack|checkLoadError)/i.test(inlineHandler)) return true;
+          if (/(entrybtn|confirm|btnBlue|next_btn_div)/i.test(className) && /进入考试/.test(text)) return true;
+        }
+        return false;
+      };
       const normalizeUrl = (rawValue) => {
         let raw = String(rawValue || '').replace(/&amp;/g, '&').replace(/\\\\u0026/g, '&').trim();
         raw = raw.replace(/^[\`'"]+|[\`'",;)\\]]+$/g, '');
         if (!raw || raw === 'about:blank' || /^javascript:/i.test(raw)) return '';
         try {
-          const url = new URL(raw, window.location.href).toString();
+          const url = repairExamStartUrl(new URL(raw, window.location.href)).toString();
           return /^https?:\\/\\//i.test(url) ? url : '';
         } catch {
           return '';
         }
+      };
+      const isBlankExamToken = (value) => {
+        const normalized = String(value || '').trim();
+        return !normalized || normalized === '?' || normalized.toLowerCase() === 'undefined' || normalized.toLowerCase() === 'null';
+      };
+      const readUrlParam = (urlText, names) => {
+        try {
+          const parsed = new URL(String(urlText || ''), window.location.href);
+          for (const name of names) {
+            const value = parsed.searchParams.get(name);
+            if (!isBlankExamToken(value)) return value || '';
+          }
+        } catch (_) {}
+        return readParam(urlText, names);
+      };
+      const readExamContextParam = (names) => {
+        const fromUrl = readUrlParam(window.location.href, names);
+        if (!isBlankExamToken(fromUrl)) return fromUrl;
+        for (const name of names) {
+          const element = document.querySelector('input[name="' + name + '"], input[id="' + name + '"], textarea[name="' + name + '"], [data-' + name + ']');
+          const value = (element && (element.value || element.getAttribute('data-' + name))) || '';
+          if (!isBlankExamToken(value)) return value;
+        }
+        return '';
+      };
+      const repairExamStartUrl = (url) => {
+        if (!/\\/exam-ans\\/exam\\/test\\/reVersionTestStartNew/i.test(url.pathname)) return url;
+        if (isBlankExamToken(url.searchParams.get('enc'))) {
+          const enc = readExamContextParam(['enc', 'examEnc', 'spExamEnc']);
+          if (!isBlankExamToken(enc)) url.searchParams.set('enc', enc);
+        }
+        if (isBlankExamToken(url.searchParams.get('openc'))) {
+          const openc = readExamContextParam(['openc', 'spExamOpenC']);
+          if (!isBlankExamToken(openc)) url.searchParams.set('openc', openc);
+        }
+        return url;
       };
       const addUrl = (list, rawValue) => {
         const url = normalizeUrl(rawValue);
@@ -204,8 +290,8 @@ function frameClickBridgeSource() {
         const list = [];
         const value = String(text || '');
         for (const match of value.matchAll(/https?:\\/\\/[^\\s"'<>\\\\)]+/gi)) addUrl(list, match[0]);
-        for (const match of value.matchAll(/(?:^|["'\`])((?:\\/|\\.\\.?\\/)?(?:mooc2-ans|mooc-ans|mycourse|visit|course|zt|work)\\/[^"'\`<>\\s\\\\)]*)/gi)) addUrl(list, match[1]);
-        for (const match of value.matchAll(/(\\/(?:mooc2-ans|mooc-ans|visit|mycourse|work)\\/[^\\s"'<>\\\\)]*)/gi)) addUrl(list, match[1]);
+        for (const match of value.matchAll(/(?:^|["'\`])((?:\\/|\\.\\.?\\/)?(?:mooc2-ans|mooc-ans|study-knowledge|mycourse|visit|course|zt|work)\\/[^"'\`<>\\s\\\\)]*)/gi)) addUrl(list, match[1]);
+        for (const match of value.matchAll(/(\\/(?:mooc2-ans|mooc-ans|study-knowledge|visit|mycourse|work)\\/[^\\s"'<>\\\\)]*)/gi)) addUrl(list, match[1]);
         return list;
       };
       const readParam = (text, names) => {
@@ -244,29 +330,125 @@ function frameClickBridgeSource() {
         });
         return 'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?' + query.toString();
       };
+      const splitInlineArgs = (rawArgs) => {
+        const args = [];
+        let current = '';
+        let quote = '';
+        const value = String(rawArgs || '');
+        for (let index = 0; index < value.length; index += 1) {
+          const char = value[index];
+          if (quote) {
+            if (char === quote && value[index - 1] !== '\\\\') quote = '';
+            else current += char;
+            continue;
+          }
+          if (char === "'" || char === '"') {
+            quote = char;
+            continue;
+          }
+          if (char === ',') {
+            args.push(current.trim());
+            current = '';
+            continue;
+          }
+          current += char;
+        }
+        if (current.trim()) args.push(current.trim());
+        return args.map((item) => String(item || '').replace(/^[\\'"]|[\\'"]$/g, '').trim());
+      };
+      const examNotesFromGoTest = (inlineHandler) => {
+        const match = String(inlineHandler || '').match(/goTest\\s*\\(([\\s\\S]*?)\\)/i);
+        if (!match || !match[1]) return '';
+        const args = splitInlineArgs(match[1]);
+        const courseId = args[0] || readParam(window.location.href, ['courseId', 'courseid']);
+        const examId = args[1] || readParam(window.location.href, ['examId']);
+        const answerId = args[2] || '';
+        const paperId = args[4] || '';
+        const examEnc = args[6] || readUrlParam(window.location.href, ['enc', 'stuenc']);
+        const openc = readUrlParam(window.location.href, ['openc']);
+        const classId = readParam(window.location.href, ['classId', 'clazzid', 'clazzId', 'classid']);
+        const cpi = readParam(window.location.href, ['cpi']);
+        if (!courseId || !examId || !classId || !cpi) return '';
+        const query = new URLSearchParams({ courseId, classId, examId, cpi });
+        if (!isBlankExamToken(answerId) && answerId !== '0') query.set('answerId', answerId);
+        if (!isBlankExamToken(paperId) && paperId !== '0') query.set('paperId', paperId);
+        if (!isBlankExamToken(examEnc)) {
+          query.set('enc', examEnc);
+          query.set('spExamEnc', examEnc);
+        }
+        if (!isBlankExamToken(openc)) {
+          query.set('openc', openc);
+          query.set('spExamOpenC', openc);
+        }
+        return 'https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes?' + query.toString();
+      };
       const isLikelyNavigation = (url) => {
         if (!/^https?:\\/\\//i.test(url)) return false;
         if (blockedInternalTabUrl.test(String(url || ''))) return false;
+        try {
+          const parsed = new URL(url, window.location.href);
+          if (/\\/exam-ans\\/mooc2\\/exam\\/exam-list\\/?$/i.test(parsed.pathname)) return false;
+        } catch (_) {}
+        if (/\\/\\/stat\\d*-ans\\.chaoxing\\.com\\/study-knowledge\\/ans/i.test(url)) return false;
         if (/\\.(?:png|jpe?g|gif|webp|svg|ico)(?:[?#]|$)/i.test(url)) return false;
         if (/\\/visit\\/interaction(?:[?#]|$)/i.test(url)) return false;
-        return /(mycourse\\/stu|mooc2\\/work\\/dowork|stucoursemiddle|courseid=|courseId=|clazzid=|clazzId=|classId=|workId=|answerId=)/i.test(url);
+        return /(exam\\/test\\/examcode\\/examnotes|exam\\/test\\/reVersionTestStartNew|exam\\/test\\/look|exam-ans\\/nycourse\\/transfer|mycourse\\/stu(?:[?#]|$)|mooc2\\/work\\/dowork|stucoursemiddle|courseid=|courseId=|clazzid=|clazzId=|classId=|workId=|answerId=|examAnswerId=|examId=)/i.test(url);
       };
       const candidatesFor = (target) => {
         const chain = chainFor(target);
         const list = [];
+        const examCandidate = examAnswerCandidate(target);
+        if (examCandidate && examCandidate.url) addUrl(list, examCandidate.url);
         for (const element of chain) {
           const anchor = element.closest && element.closest('a[href], area[href]');
           if (anchor && anchor.href) addUrl(list, anchor.href);
+          const descendantAnchors = Array.from((element.querySelectorAll && element.querySelectorAll('a[href], area[href]')) || []);
+          for (const item of descendantAnchors.slice(0, 8)) {
+            if (item.href) addUrl(list, item.href);
+          }
           const record = attrs(element);
           for (const value of Object.values(record)) {
             addUrl(list, value);
             urlsFromText(value).forEach((url) => addUrl(list, url));
           }
           const inlineHandler = (element.getAttribute && element.getAttribute('onclick')) || String(element.onclick || '');
+          addUrl(list, examNotesFromGoTest(inlineHandler));
           urlsFromText(inlineHandler).forEach((url) => addUrl(list, url));
         }
         addUrl(list, buildCourseUrl(courseParams(chain)));
         return list.filter(isLikelyNavigation);
+      };
+      const examAnswerCandidate = (target) => {
+        if (!target) return null;
+        const containers = [];
+        const addContainer = (element) => {
+          if (element && !containers.includes(element)) containers.push(element);
+        };
+        for (const element of chainFor(target)) {
+          addContainer(element);
+          addContainer(element.closest && element.closest('[onclick*="viewExamAnswer"], [onclick*="goTest"], [role="option"], li, tr, .clearfix, .list, .list-item, .item, .exam, .exam-item'));
+        }
+        const anchorSelector = [
+          'a[href*="exam-ans"]',
+          'a[href*="mooc-ans"]',
+          'a[href*="mooc2-ans"]',
+          'a.listSubmit[href]',
+          'a.insightBtn[href]'
+        ].join(',');
+        for (const container of containers) {
+          const anchors = Array.from((container.querySelectorAll && container.querySelectorAll(anchorSelector)) || []);
+          const selfAnchor = container.matches && container.matches(anchorSelector) ? container : null;
+          for (const anchor of [selfAnchor].concat(anchors)) {
+            const url = normalizeUrl((anchor && (anchor.href || (anchor.getAttribute && anchor.getAttribute('href')))) || '');
+            if (url && isLikelyNavigation(url)) {
+              return {
+                url,
+                title: clean((container.textContent || (anchor && anchor.textContent) || document.title || url), 80)
+              };
+            }
+          }
+        }
+        return null;
       };
       const post = (message) => {
         try {
@@ -277,6 +459,7 @@ function frameClickBridgeSource() {
         const target = event.target && event.target.nodeType === 1 ? event.target : null;
         if (!target) return;
         if (isAnswerInteraction(target)) return;
+        if (isNativeExamEntry(target)) return;
         const chain = chainFor(target);
         const clickable = clickableFor(target);
         const candidates = candidatesFor(target);
@@ -400,6 +583,13 @@ function createWindow() {
 
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     if (shouldSkipConsoleMessage(message)) return;
+
+    // 捕获所有 [StudyPilot] 调试日志
+    if (message.includes('[StudyPilot]')) {
+      console.log(`[Main Window Debug] ${message}`);
+      return;
+    }
+
     if (level < 2) return;
     const tag = level >= 2 ? 'WARN' : 'INFO';
     console.log(`[StudyPilot Renderer ${tag}] ${message} (${sourceId}:${line})`);
@@ -611,6 +801,20 @@ app.whenReady().then(() => {
     if (contents.getType() === 'webview') {
       contents.on('console-message', (_event, level, message, line, sourceId) => {
         if (shouldSkipConsoleMessage(message)) return;
+
+        // 捕获所有 [StudyPilot] 调试日志
+        if (message.includes('[StudyPilot]')) {
+          console.log(`[WebView Debug] ${message}`);
+          writeErrorLog({
+            source: 'webview:studypilot-debug',
+            level: 'info',
+            message,
+            url: sourceId,
+            line
+          });
+          return;
+        }
+
         if (level < 2) return;
         writeErrorLog({
           source: 'webview:console',
@@ -680,6 +884,26 @@ app.whenReady().then(() => {
           return;
         }
         if (!/^https?:\/\//i.test(targetUrl)) return;
+        if (shouldDropStatKnowledgeUrl(targetUrl)) {
+          writeErrorLog({
+            source: 'webview:drop-stat-knowledge-tab',
+            level: 'info',
+            message: `Dropped Chaoxing stat knowledge URL: ${targetUrl}`,
+            url: targetUrl,
+            details: { title }
+          });
+          return;
+        }
+        if (isExamListUrl(targetUrl)) {
+          writeErrorLog({
+            source: 'webview:drop-incomplete-exam-list-tab',
+            level: 'info',
+            message: `Dropped intermediate Chaoxing exam-list URL: ${targetUrl}`,
+            url: targetUrl,
+            details: { title }
+          });
+          return;
+        }
         if (shouldBlockInternalTabUrl(targetUrl)) {
           writeErrorLog({
             source: 'webview:block-internal-tab',
@@ -746,6 +970,38 @@ app.whenReady().then(() => {
             setTimeout(() => closeChildWhenSettled('timeout'), 15000);
             return;
           }
+          if (shouldDropStatKnowledgeUrl(targetUrl)) {
+            writeErrorLog({
+              source: 'webview:hidden-stat-knowledge-window',
+              level: 'info',
+              message: `Closing Chaoxing stat knowledge child window: ${targetUrl}`,
+              url: targetUrl
+            });
+            if (!childWindow.isDestroyed()) childWindow.close();
+            return;
+          }
+          if (isExamListUrl(targetUrl)) {
+            writeErrorLog({
+              source: 'webview:hidden-incomplete-exam-list-window',
+              level: 'info',
+              message: `Keeping intermediate Chaoxing exam-list in hidden child window: ${targetUrl}`,
+              url: targetUrl
+            });
+            try {
+              childWindow.hide();
+            } catch (error) {
+              writeUnknownError('webview:hidden-exam-list-hide', error, undefined, 'warn');
+            }
+            childWindow.webContents.once('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+              writeErrorLog({
+                source: 'webview:hidden-incomplete-exam-list-load-failed',
+                level: errorCode === -3 ? 'info' : 'warn',
+                message: `${errorCode} ${errorDescription}`,
+                url: validatedURL || targetUrl
+              });
+            });
+            return;
+          }
           let title = '';
           try {
             title = childWindow.webContents.getTitle();
@@ -775,6 +1031,21 @@ app.whenReady().then(() => {
           url: targetUrl,
           details
         });
+        if (shouldDropStatKnowledgeUrl(targetUrl)) {
+          return { action: 'deny' };
+        }
+        if (isExamListUrl(targetUrl)) {
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              show: false,
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true
+              }
+            }
+          };
+        }
         if (!targetUrl || targetUrl === 'about:blank' || shouldBlockInternalTabUrl(targetUrl)) {
           return {
             action: 'allow',

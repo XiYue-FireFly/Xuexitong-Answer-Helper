@@ -187,6 +187,26 @@ function shouldBlockInternalBrowserTab(targetUrl: string) {
   return BLOCKED_INTERNAL_BROWSER_TAB_URL.test(String(targetUrl || ''));
 }
 
+function isExamStartUrl(targetUrl: string) {
+  try {
+    const parsed = new URL(targetUrl);
+    return /\/exam-ans\/exam\/test\/reVersionTestStartNew/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function shouldCloseOpenerAfterOpen(targetUrl: string, openerUrl?: string) {
+  if (!openerUrl || !isExamStartUrl(targetUrl)) return false;
+  try {
+    const opener = new URL(openerUrl);
+    return /\/exam-ans\/exam\/test\/examcode\/examnotes/i.test(opener.pathname) ||
+      /\/exam-ans\/exam\/test\/reVersionTestStartNew/i.test(opener.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function safeWebviewRead<T>(reader: () => T | undefined, fallback: T) {
   try {
     return reader() ?? fallback;
@@ -323,6 +343,8 @@ export function BrowserPanel() {
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
+  const extractQuestionResolverRef = useRef<((result: any) => void) | null>(null);
+  const examNextResolverRef = useRef<((result: any) => void) | null>(null);
   const recentOpenRef = useRef<Record<string, number>>({});
   const tabsRef = useRef(tabs);
 
@@ -390,6 +412,21 @@ export function BrowserPanel() {
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
     setAddressText(targetUrl);
+    if (options.openerTabId && shouldCloseOpenerAfterOpen(targetUrl, openerUrl)) {
+      window.setTimeout(() => {
+        const latestTabs = tabsRef.current;
+        if (latestTabs.length <= 1) return;
+        const opener = latestTabs.find((item) => item.id === options.openerTabId);
+        const opened = latestTabs.find((item) => item.id === tab.id);
+        if (!opener || !opened) return;
+        delete webviewRefs.current[opener.id];
+        setTabs((prev) => prev.filter((item) => item.id !== opener.id));
+        if (activeTabRef.current?.id === opener.id) {
+          setActiveTabId(opened.id);
+          setAddressText(opened.url);
+        }
+      }, 1200);
+    }
     appStore.addLog('info', `已在新标签页打开：${targetUrl}`);
   }, [initialBrowserUrl]);
 
@@ -450,6 +487,8 @@ export function BrowserPanel() {
 
     if (event.channel === 'studypilot:question-result') {
       const result = event.args[0];
+      extractQuestionResolverRef.current?.(result);
+      extractQuestionResolverRef.current = null;
       if (result?.success) {
         const questions = Array.isArray(result.questions) && result.questions.length > 0 ? result.questions : [result.data];
         appStore.setQuestions(questions);
@@ -459,12 +498,41 @@ export function BrowserPanel() {
       }
     }
 
+    if (event.channel === 'studypilot:exam-next-question-result') {
+      const result = event.args[0];
+      examNextResolverRef.current?.(result);
+      examNextResolverRef.current = null;
+    }
+
     if (event.channel === 'studypilot:apply-answer-result') {
       const result = event.args[0];
       applyAnswerResolverRef.current?.(result);
       applyAnswerResolverRef.current = null;
       if (result?.success) appStore.setStatus('done', result.message || '答案已填入当前页面。');
       else appStore.setStatus('error', result?.error || '答案填入失败。');
+    }
+
+    if (event.channel === 'studypilot:chapter-learning-result') {
+      const result = event.args[0];
+      if (result?.success) {
+        appStore.setChapterLearning(result.data);
+        if (result.data?.running) appStore.setStatus('learning', result.data.lastMessage || '章节学习辅助运行中。');
+      } else {
+        appStore.setStatus('error', result?.error || '章节学习辅助执行失败。');
+      }
+    }
+
+    if (event.channel === 'studypilot:chapter-open-next') {
+      const payload = event.args?.[0] || {};
+      const targetUrl = payload.url;
+      if (targetUrl) {
+        openBrowserTab(targetUrl, { title: payload.title || '下一章节', openerTabId: tabId });
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
+            detail: { action: 'start', options: payload.options || {} }
+          }));
+        }, 2200);
+      }
     }
 
     if (event.channel === 'studypilot:execute-result') {
@@ -519,6 +587,57 @@ export function BrowserPanel() {
       openBrowserTab(targetUrl, { title: payload?.title });
     });
   }, [canUseRealWebview, openBrowserTab]);
+
+  useEffect(() => {
+    const handleExtractQuestionRequest = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
+      const webview = getActiveWebview();
+      if (!canUseRealWebview || !webview) {
+        onComplete?.({ success: false, error: '请先在设置中启用真实 WebView。' });
+        return;
+      }
+      const timeoutId = window.setTimeout(() => {
+        if (extractQuestionResolverRef.current) {
+          extractQuestionResolverRef.current = null;
+          onComplete?.({ success: false, error: '等待题目抓取结果超时。' });
+        }
+      }, 8000);
+      extractQuestionResolverRef.current = (result: any) => {
+        window.clearTimeout(timeoutId);
+        onComplete?.(result);
+      };
+      safeWebviewRun(() => webview.send?.('studypilot:extract-question'), '发送题目抓取请求失败');
+    };
+
+    const handleExamNextQuestion = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
+      const webview = getActiveWebview();
+      if (!canUseRealWebview || !webview) {
+        onComplete?.({ success: false, error: '请先在设置中启用真实 WebView。' });
+        return;
+      }
+      const timeoutId = window.setTimeout(() => {
+        if (examNextResolverRef.current) {
+          examNextResolverRef.current = null;
+          onComplete?.({ success: false, error: '等待下一题切换结果超时。' });
+        }
+      }, 10000);
+      examNextResolverRef.current = (result: any) => {
+        window.clearTimeout(timeoutId);
+        onComplete?.(result);
+      };
+      safeWebviewRun(() => webview.send?.('studypilot:exam-next-question'), '发送下一题请求失败');
+    };
+
+    window.addEventListener('studypilot:extract-question-request', handleExtractQuestionRequest);
+    window.addEventListener('studypilot:exam-next-question', handleExamNextQuestion);
+    return () => {
+      window.removeEventListener('studypilot:extract-question-request', handleExtractQuestionRequest);
+      window.removeEventListener('studypilot:exam-next-question', handleExamNextQuestion);
+    };
+  }, [canUseRealWebview, getActiveWebview]);
 
   useEffect(() => {
     const handleApplyAnswers = async (event: Event) => {
@@ -578,6 +697,24 @@ export function BrowserPanel() {
 
     window.addEventListener('studypilot:apply-answers', handleApplyAnswers);
     return () => window.removeEventListener('studypilot:apply-answers', handleApplyAnswers);
+  }, [canUseRealWebview, getActiveWebview]);
+
+  useEffect(() => {
+    const handleChapterLearningAction = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const webview = getActiveWebview();
+      if (!canUseRealWebview || !webview) {
+        appStore.setStatus('error', '请先在设置中启用真实 WebView，再使用章节学习。');
+        return;
+      }
+      const action = detail.action || 'scan';
+      const options = detail.options || {};
+      appStore.setStatus('learning', action === 'stop' ? '正在停止章节学习辅助。' : '正在处理当前章节。');
+      safeWebviewRun(() => webview.send?.('studypilot:chapter-learning', { action, options }), '发送章节学习指令失败');
+    };
+
+    window.addEventListener('studypilot:chapter-learning-action', handleChapterLearningAction);
+    return () => window.removeEventListener('studypilot:chapter-learning-action', handleChapterLearningAction);
   }, [canUseRealWebview, getActiveWebview]);
 
   const navigate = (event: React.FormEvent) => {

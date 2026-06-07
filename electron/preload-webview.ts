@@ -46,6 +46,28 @@ interface AnswerApplyPayload {
   question?: QuestionPayload;
 }
 
+interface ChapterLearningOptions {
+  autoNext?: boolean;
+  autoPlay?: boolean;
+  muted?: boolean;
+  playbackRate?: number;
+  autoReadDocument?: boolean;
+  autoAnswerQuestions?: boolean;
+}
+
+interface ChapterLearningCommand {
+  action: 'scan' | 'start' | 'pause' | 'play' | 'stop' | 'set-options';
+  options?: ChapterLearningOptions;
+}
+
+interface TaskPoint {
+  type: 'video' | 'document' | 'audio' | 'work' | 'exam' | 'unknown';
+  title: string;
+  completed: boolean;
+  element?: HTMLElement;
+  iframe?: HTMLIFrameElement;
+}
+
 function serializeBridgeError(error: any) {
   if (!error) return { message: 'Unknown WebView error' };
   if (error instanceof Error) {
@@ -104,8 +126,8 @@ window.addEventListener('unhandledrejection', (event) => {
   });
 });
 
-const NAVIGATION_HINT = /(mooc2-ans|mooc-ans|mycourse|dowork|stucoursemiddle|courseid|courseId|clazzid|clazzId|classId|workId|answerId|cpi|chaoxing)/i;
-const COURSE_PARAM_HINT = /(course|clazz|class|work|answer|cpi|enc|url|href|target|mooc|chaoxing)/i;
+const NAVIGATION_HINT = /(mooc2-ans|mooc-ans|exam-ans|viewExamAnswer|goTest|jumpRetest|retest|mycourse|dowork|stucoursemiddle|courseid|courseId|clazzid|clazzId|classId|workId|answerId|examAnswerId|examId|cpi|chaoxing)/i;
+const COURSE_PARAM_HINT = /(course|clazz|class|work|answer|cpi|enc|url|href|target|mooc|chaoxing|exam)/i;
 const BLOCKED_INTERNAL_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
 const ANSWER_INLINE_HANDLER_HINT = /(addMultipleChoice|addChoice|answerContentChange|loadAnswerSheet|setClozeTextAnswer|setBlankAnswer|fillBlank|blankAnswer)/i;
 const SAVE_OR_SUBMIT_HANDLER_HINT = /(saveWork|submitValidate|noSubmit|btnBlueSubmit|submitCheckTimes|ready2Submit|submitWork|saveQuestion)/i;
@@ -208,6 +230,34 @@ function isBlockedInternalTabUrl(url: string) {
   return BLOCKED_INTERNAL_TAB_URL.test(url);
 }
 
+function isIncompleteExamListUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (!/\/exam-ans\/mooc2\/exam\/exam-list\/?$/i.test(parsed.pathname)) return false;
+    const query = parsed.searchParams;
+    return !(
+      query.has('courseId') ||
+      query.has('courseid') ||
+      query.has('classId') ||
+      query.has('clazzid') ||
+      query.has('relationId') ||
+      query.has('examId') ||
+      query.has('answerId')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isExamListUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isStudyPilotApplyingAnswer() {
   return Number((window as any).__studyPilotApplyingAnswerUntil || 0) > Date.now();
 }
@@ -229,6 +279,21 @@ function isSaveOrSubmitTarget(target: Element | null) {
     if (/(\u6682\u65f6\u4fdd\u5b58|\u4fdd\u5b58|\u63d0\u4ea4|save|submit)/i.test(elementText)) {
       if (element.matches?.('a, button, [role="button"], input[type="button"], input[type="submit"]')) return true;
     }
+  }
+  return false;
+}
+
+function isNativeExamEntryTarget(target: Element | null) {
+  for (const element of elementChainFor(target)) {
+    const id = (element as HTMLElement).id || '';
+    const className = String((element as HTMLElement).className || '');
+    const inlineHandler = element.getAttribute?.('onclick') || String((element as any).onclick || '');
+    const text = compactDebugText(element.textContent || '', 40);
+    if (/^(startBtn|tabIntoexam2)$/i.test(id)) return true;
+    if (/(preEnterExam|enterExamCallBack|checkLoadError)/i.test(inlineHandler)) return true;
+    if (/(jumpRetest|retest)/i.test(inlineHandler)) return true;
+    if (/(重考|重新考试|再考一次|retake|retest)/i.test(text)) return true;
+    if (/(entrybtn|confirm|btnBlue|next_btn_div)/i.test(className) && /进入考试/.test(text)) return true;
   }
   return false;
 }
@@ -258,7 +323,11 @@ function clickableAncestorFor(element: Element | null) {
     'area[href]',
     'button',
     '[role="button"]',
+    '[role="option"]',
     '[onclick]',
+    '[onclick*="viewExamAnswer"]',
+    '[onclick*="goTest"]',
+    '[tabindex][onclick]',
     '[data-url]',
     '[data-href]',
     '[data-target-url]',
@@ -289,11 +358,55 @@ function normalizeCandidateUrl(rawValue: unknown) {
   raw = raw.replace(/^[`'"]+|[`'",;)\]]+$/g, '');
   if (!raw || raw === 'about:blank' || /^javascript:/i.test(raw)) return '';
   try {
-    const url = new URL(raw, window.location.href).toString();
+    const url = repairExamStartUrl(new URL(raw, window.location.href)).toString();
     return /^https?:\/\//i.test(url) ? url : '';
   } catch {
     return '';
   }
+}
+
+function isBlankExamToken(value: string | null | undefined) {
+  const normalized = String(value || '').trim();
+  return !normalized || normalized === '?' || normalized.toLowerCase() === 'undefined' || normalized.toLowerCase() === 'null';
+}
+
+function readUrlParam(urlText: string, names: string[]) {
+  try {
+    const parsed = new URL(urlText, window.location.href);
+    for (const name of names) {
+      const value = parsed.searchParams.get(name);
+      if (!isBlankExamToken(value)) return value || '';
+    }
+  } catch {
+    // Fall through to regex extraction.
+  }
+  return readParamFromText(urlText, names);
+}
+
+function readExamContextParam(names: string[]) {
+  const fromUrl = readUrlParam(window.location.href, names);
+  if (!isBlankExamToken(fromUrl)) return fromUrl;
+  for (const selectorName of names) {
+    const element = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      `input[name="${selectorName}"], input[id="${selectorName}"], textarea[name="${selectorName}"], [data-${selectorName}]`
+    );
+    const value = element?.value || element?.getAttribute(`data-${selectorName}`) || '';
+    if (!isBlankExamToken(value)) return value;
+  }
+  return '';
+}
+
+function repairExamStartUrl(url: URL) {
+  if (!/\/exam-ans\/exam\/test\/reVersionTestStartNew/i.test(url.pathname)) return url;
+  if (isBlankExamToken(url.searchParams.get('enc'))) {
+    const enc = readExamContextParam(['enc', 'examEnc', 'spExamEnc']);
+    if (!isBlankExamToken(enc)) url.searchParams.set('enc', enc);
+  }
+  if (isBlankExamToken(url.searchParams.get('openc'))) {
+    const openc = readExamContextParam(['openc', 'spExamOpenC']);
+    if (!isBlankExamToken(openc)) url.searchParams.set('openc', openc);
+  }
+  return url;
 }
 
 function urlsFromText(text: string) {
@@ -306,10 +419,10 @@ function urlsFromText(text: string) {
   for (const match of String(text || '').matchAll(/https?:\/\/[^\s"'<>\\)]+/gi)) {
     add(match[0]);
   }
-  for (const match of String(text || '').matchAll(/(?:^|["'`])((?:\/|\.\.?\/)?(?:mooc2-ans|mooc-ans|mycourse|visit|course|zt|work)\/[^"'`<>\s\\)]*)/gi)) {
+  for (const match of String(text || '').matchAll(/(?:^|["'`])((?:\/|\.\.?\/)?(?:mooc2-ans|mooc-ans|study-knowledge|mycourse|visit|course|zt|work)\/[^"'`<>\s\\)]*)/gi)) {
     add(match[1]);
   }
-  for (const match of String(text || '').matchAll(/(\/(?:mooc2-ans|mooc-ans|visit|mycourse|work)\/[^\s"'<>\\)]*)/gi)) {
+  for (const match of String(text || '').matchAll(/(\/(?:mooc2-ans|mooc-ans|study-knowledge|visit|mycourse|work)\/[^\s"'<>\\)]*)/gi)) {
     add(match[1]);
   }
   return values;
@@ -354,12 +467,67 @@ function buildChaoxingCourseUrl(params: ReturnType<typeof collectCourseParams>) 
   return `https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?${query.toString()}`;
 }
 
+function splitInlineArgs(rawArgs: string) {
+  const args: string[] = [];
+  let current = '';
+  let quote = '';
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const char = rawArgs[index];
+    if (quote) {
+      if (char === quote && rawArgs[index - 1] !== '\\') quote = '';
+      else current += char;
+      continue;
+    }
+    if (char === '\'' || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ',') {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) args.push(current.trim());
+  return args.map((item) => item.replace(/^['"]|['"]$/g, '').trim());
+}
+
+function buildExamNotesUrlFromGoTest(inlineHandler: string) {
+  const match = String(inlineHandler || '').match(/goTest\s*\(([\s\S]*?)\)/i);
+  if (!match?.[1]) return '';
+  const args = splitInlineArgs(match[1]);
+  const courseId = args[0] || readParamFromText(window.location.href, ['courseId', 'courseid']);
+  const examId = args[1] || readParamFromText(window.location.href, ['examId']);
+  const answerId = args[2] || '';
+  const paperId = args[4] || '';
+  const examEnc = args[6] || readUrlParam(window.location.href, ['enc', 'stuenc']);
+  const openc = readUrlParam(window.location.href, ['openc']);
+  const classId = readParamFromText(window.location.href, ['classId', 'clazzid', 'clazzId', 'classid']);
+  const cpi = readParamFromText(window.location.href, ['cpi']);
+  if (!courseId || !examId || !classId || !cpi) return '';
+  const query = new URLSearchParams({ courseId, classId, examId, cpi });
+  if (!isBlankExamToken(answerId) && answerId !== '0') query.set('answerId', answerId);
+  if (!isBlankExamToken(paperId) && paperId !== '0') query.set('paperId', paperId);
+  if (!isBlankExamToken(examEnc)) {
+    query.set('enc', examEnc);
+    query.set('spExamEnc', examEnc);
+  }
+  if (!isBlankExamToken(openc)) {
+    query.set('openc', openc);
+    query.set('spExamOpenC', openc);
+  }
+  return `https://mooc1.chaoxing.com/exam-ans/exam/test/examcode/examnotes?${query.toString()}`;
+}
+
 function isLikelyCourseNavigationUrl(url: string) {
   if (!/^https?:\/\//i.test(url)) return false;
   if (isBlockedInternalTabUrl(url)) return false;
+  if (isExamListUrl(url)) return false;
+  if (/\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i.test(url)) return false;
   if (/\.(?:png|jpe?g|gif|webp|svg|ico)(?:[?#]|$)/i.test(url)) return false;
   if (/\/visit\/interaction(?:[?#]|$)/i.test(url)) return false;
-  return /(mycourse\/stu|mooc2\/work\/dowork|stucoursemiddle|courseid=|courseId=|clazzid=|clazzId=|classId=|workId=|answerId=)/i.test(url);
+  return /(exam\/test\/examcode\/examnotes|exam\/test\/reVersionTestStartNew|exam\/test\/look|exam-ans\/nycourse\/transfer|mycourse\/stu(?:[?#]|$)|mooc2\/work\/dowork|stucoursemiddle|courseid=|courseId=|clazzid=|clazzId=|classId=|workId=|answerId=|examAnswerId=|examId=)/i.test(url);
 }
 
 function collectClickNavigationCandidates(target: Element | null) {
@@ -369,9 +537,16 @@ function collectClickNavigationCandidates(target: Element | null) {
     if (url && !values.includes(url)) values.push(url);
   };
 
+  const examCandidate = findExamAnswerNavigationCandidate(target);
+  if (examCandidate?.url) add(examCandidate.url);
+
   for (const element of chain) {
     const anchor = element.closest?.('a[href], area[href]') as HTMLAnchorElement | null;
     if (anchor?.href) add(anchor.href);
+    const descendantAnchors = Array.from(element.querySelectorAll?.('a[href], area[href]') || []) as HTMLAnchorElement[];
+    for (const item of descendantAnchors.slice(0, 8)) {
+      if (item.href) add(item.href);
+    }
     const attributes = debugAttributesFor(element);
     for (const value of Object.values(attributes)) {
       const normalized = normalizeCandidateUrl(value);
@@ -379,12 +554,51 @@ function collectClickNavigationCandidates(target: Element | null) {
       urlsFromText(value).forEach(add);
     }
     const inlineHandler = element.getAttribute?.('onclick') || String((element as any).onclick || '');
+    const goTestUrl = buildExamNotesUrlFromGoTest(inlineHandler);
+    if (goTestUrl) add(goTestUrl);
     urlsFromText(inlineHandler).forEach(add);
   }
 
   const paramUrl = buildChaoxingCourseUrl(collectCourseParams(chain));
   if (paramUrl) add(paramUrl);
   return values.filter(isLikelyCourseNavigationUrl);
+}
+
+function findExamAnswerNavigationCandidate(target: Element | null) {
+  if (!target) return null;
+  const containers: Element[] = [];
+  const addContainer = (element: Element | null | undefined) => {
+    if (element && !containers.includes(element)) containers.push(element);
+  };
+
+  for (const element of elementChainFor(target)) {
+    addContainer(element);
+    addContainer(element.closest?.('[onclick*="viewExamAnswer"], [onclick*="goTest"], [role="option"], li, tr, .clearfix, .list, .list-item, .item, .exam, .exam-item'));
+  }
+
+  const anchorSelector = [
+    'a[href*="exam-ans"]',
+    'a[href*="mooc-ans"]',
+    'a[href*="mooc2-ans"]',
+    'a.listSubmit[href]',
+    'a.insightBtn[href]'
+  ].join(',');
+
+  for (const container of containers) {
+    const anchors = Array.from(container.querySelectorAll?.(anchorSelector) || []) as HTMLAnchorElement[];
+    const selfAnchor = container.matches?.(anchorSelector) ? container as HTMLAnchorElement : null;
+    for (const anchor of [selfAnchor, ...anchors]) {
+      const url = normalizeCandidateUrl(anchor?.href || anchor?.getAttribute?.('href') || '');
+      if (url && isLikelyCourseNavigationUrl(url)) {
+        return {
+          url,
+          title: compactDebugText(container.textContent || anchor?.textContent || document.title || url, 80)
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 function reportClickDebug(payload: any) {
@@ -409,6 +623,7 @@ function installBrowserNavigationPatch() {
       const url = new URL(raw, window.location.href).toString();
       if (!/^https?:\/\//i.test(url)) return '';
       if (isBlockedInternalTabUrl(url)) return '';
+      if (isExamListUrl(url)) return '';
       ipcRenderer.sendToHost('studypilot:open-tab', { url, title: title || document.title || url });
       return url;
     } catch {
@@ -449,17 +664,80 @@ function installBrowserNavigationPatch() {
         const raw = String(targetUrl || '').trim();
         if (!raw || raw === 'about:blank' || /^javascript:/i.test(raw)) return '';
         try {
-          return new URL(raw, window.location.href).toString();
+          return repairExamStartUrl(new URL(raw, window.location.href)).toString();
         } catch {
           return '';
         }
       };
+      const isBlankExamToken = (value) => {
+        const normalized = String(value || '').trim();
+        return !normalized || normalized === '?' || normalized.toLowerCase() === 'undefined' || normalized.toLowerCase() === 'null';
+      };
+      const readUrlParam = (urlText, names) => {
+        try {
+          const parsed = new URL(String(urlText || ''), window.location.href);
+          for (const name of names) {
+            const value = parsed.searchParams.get(name);
+            if (!isBlankExamToken(value)) return value || '';
+          }
+        } catch (_) {}
+        return '';
+      };
+      const readExamContextParam = (names) => {
+        const fromUrl = readUrlParam(window.location.href, names);
+        if (!isBlankExamToken(fromUrl)) return fromUrl;
+        for (const name of names) {
+          const element = document.querySelector('input[name="' + name + '"], input[id="' + name + '"], textarea[name="' + name + '"], [data-' + name + ']');
+          const value = (element && (element.value || element.getAttribute('data-' + name))) || '';
+          if (!isBlankExamToken(value)) return value;
+        }
+        return '';
+      };
+      const repairExamStartUrl = (url) => {
+        if (!/\\/exam-ans\\/exam\\/test\\/reVersionTestStartNew/i.test(url.pathname)) return url;
+        if (isBlankExamToken(url.searchParams.get('enc'))) {
+          const enc = readExamContextParam(['enc', 'examEnc', 'spExamEnc']);
+          if (!isBlankExamToken(enc)) url.searchParams.set('enc', enc);
+        }
+        if (isBlankExamToken(url.searchParams.get('openc'))) {
+          const openc = readExamContextParam(['openc', 'spExamOpenC']);
+          if (!isBlankExamToken(openc)) url.searchParams.set('openc', openc);
+        }
+        return url;
+      };
       const isBlockedInternalTabUrl = (url) => /(addStudentWorkNewWeb|\\/mooc-ans\\/work\\/(?:addStudentWorkNewWeb|save|submit)|\\/work\\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i.test(String(url || ''));
+      const isIncompleteExamListUrl = (url) => {
+        try {
+          const parsed = new URL(String(url || ''), window.location.href);
+          if (!/\\/exam-ans\\/mooc2\\/exam\\/exam-list\\/?$/i.test(parsed.pathname)) return false;
+          const query = parsed.searchParams;
+          return !(
+            query.has('courseId') ||
+            query.has('courseid') ||
+            query.has('classId') ||
+            query.has('clazzid') ||
+            query.has('relationId') ||
+            query.has('examId') ||
+            query.has('answerId')
+          );
+        } catch {
+          return false;
+        }
+      };
+      const isExamListUrl = (url) => {
+        try {
+          const parsed = new URL(String(url || ''), window.location.href);
+          return /\\/exam-ans\\/mooc2\\/exam\\/exam-list\\/?$/i.test(parsed.pathname);
+        } catch {
+          return false;
+        }
+      };
       const requestOpenTab = (targetUrl, title) => {
         const nextUrl = normalizeUrl(targetUrl);
         if (!nextUrl) return false;
         if (!/^https?:\\/\\//i.test(nextUrl)) return false;
         if (isBlockedInternalTabUrl(nextUrl)) return false;
+        if (isExamListUrl(nextUrl)) return false;
         window.dispatchEvent(new CustomEvent('studypilot:open-tab-request', {
           detail: { url: nextUrl, title: title || document.title || nextUrl }
         }));
@@ -494,8 +772,8 @@ function installBrowserNavigationPatch() {
         if (nextUrl && isBlockedInternalTabUrl(nextUrl)) {
           return originalOpen(targetUrl, target, features);
         }
-        requestOpenTab(targetUrl);
-        return makePopupProxy();
+        if (requestOpenTab(targetUrl)) return makePopupProxy();
+        return originalOpen(targetUrl, target, features);
       };
       document.addEventListener('click', (event) => {
         const element = event.target && event.target.closest ? event.target.closest('a[href], area[href]') : null;
@@ -659,6 +937,17 @@ function installBrowserNavigationPatch() {
       }
     }
     if (isStudyPilotApplyingAnswer() || isAnswerInteractionTarget(target)) return;
+    if (isNativeExamEntryTarget(target)) {
+      reportClickDebug({
+        message: 'Native exam entry click allowed; page script will handle confirmation/navigation.',
+        target: debugElementSummary(target),
+        clickable: debugElementSummary(clickableAncestorFor(target)),
+        ancestors: elementChainFor(target).map(debugElementSummary),
+        candidates: [],
+        selectedUrl: ''
+      });
+      return;
+    }
 
     const clickable = clickableAncestorFor(target);
     const chain = elementChainFor(target);
@@ -701,6 +990,7 @@ const QUESTION_CONTAINER_SELECTORS = [
   '.question-item',
   '.subject-item',
   '.exam-question',
+  '.singleQuestionDiv',
   '.timu',
   '.TiMu',
   '.CeSheng',
@@ -710,6 +1000,7 @@ const QUESTION_CONTAINER_SELECTORS = [
 const TITLE_SELECTORS = [
   '[data-question-title]',
   '.question-title',
+  '.mark_name',
   '.timu-title',
   '.CeSheng_title',
   '.Zy_TItle',
@@ -723,6 +1014,9 @@ const TITLE_SELECTORS = [
 ];
 
 const OPTION_SELECTORS = [
+  '.answerBg',
+  '.singleoption',
+  '.stem_answer > .answerBg',
   '.answerCon',
   '.ans-item',
   '.option',
@@ -843,6 +1137,42 @@ function optionLabel(label: string, text: string) {
   return `${label.toUpperCase()}. ${body || label.toUpperCase()}`;
 }
 
+function isOnlyOptionMarker(text: string) {
+  return /^[A-D]$/i.test(cleanText(text));
+}
+
+function optionTextCandidate(element: HTMLElement, label: string) {
+  const candidates: string[] = [];
+  const add = (value: unknown) => {
+    const text = cleanText(String(value || ''));
+    if (text && !candidates.includes(text)) candidates.push(text);
+  };
+
+  add(visibleText(element));
+  add(element.getAttribute('aria-label'));
+  add(element.getAttribute('title'));
+  let current: HTMLElement | null = element.parentElement;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    add(visibleText(current));
+    current = current.parentElement;
+  }
+  add((element.nextElementSibling as HTMLElement | null)?.innerText || element.nextElementSibling?.textContent);
+  add((element.previousElementSibling as HTMLElement | null)?.innerText || element.previousElementSibling?.textContent);
+
+  const upper = label.toUpperCase();
+  const useful = candidates
+    .map((text) => cleanText(text))
+    .filter((text) => text && !isOnlyOptionMarker(text))
+    .filter((text) => text.length <= 220)
+    .sort((left, right) => {
+      const leftHasLabel = new RegExp(`^${upper}\\b|^${upper}[.\\s:：、)]`, 'i').test(left);
+      const rightHasLabel = new RegExp(`^${upper}\\b|^${upper}[.\\s:：、)]`, 'i').test(right);
+      if (leftHasLabel !== rightHasLabel) return leftHasLabel ? -1 : 1;
+      return left.length - right.length;
+    });
+  return useful[0] || label;
+}
+
 function labelFor(element: HTMLElement) {
   const explicitLabel = element.id ? document.querySelector(`label[for="${cssEscape(element.id)}"]`)?.textContent : '';
   const parentLabel = element.closest('label')?.textContent;
@@ -883,23 +1213,826 @@ function captureSnapshot() {
   };
 }
 
+interface ChapterFrameContext {
+  window: Window;
+  document: Document;
+  label: string;
+  url: string;
+  depth: number;
+}
+
+interface ChapterVideoEntry {
+  video: HTMLVideoElement;
+  frame: ChapterFrameContext;
+  index: number;
+}
+
+interface ChapterAudioEntry {
+  audio: HTMLAudioElement;
+  frame: ChapterFrameContext;
+  index: number;
+}
+
+function chapterLearningOptions(): Required<ChapterLearningOptions> {
+  const pageAny = window as any;
+  return {
+    autoNext: pageAny.__studyPilotChapterOptions?.autoNext ?? true,
+    autoPlay: pageAny.__studyPilotChapterOptions?.autoPlay ?? true,
+    muted: pageAny.__studyPilotChapterOptions?.muted ?? false,
+    playbackRate: pageAny.__studyPilotChapterOptions?.playbackRate ?? 1,
+    autoReadDocument: pageAny.__studyPilotChapterOptions?.autoReadDocument ?? true,
+    autoAnswerQuestions: pageAny.__studyPilotChapterOptions?.autoAnswerQuestions ?? false
+  };
+}
+
+function setChapterLearningOptions(options?: ChapterLearningOptions) {
+  const pageAny = window as any;
+  pageAny.__studyPilotChapterOptions = {
+    ...chapterLearningOptions(),
+    ...(options || {})
+  };
+}
+
+function safeFrameContexts(rootWindow: Window = window, depth = 0, label = '当前页面'): ChapterFrameContext[] {
+  const contexts: ChapterFrameContext[] = [];
+  try {
+    contexts.push({
+      window: rootWindow,
+      document: rootWindow.document,
+      label,
+      url: rootWindow.location.href,
+      depth
+    });
+  } catch {
+    return contexts;
+  }
+
+  if (depth >= 4) return contexts;
+  let frames: HTMLIFrameElement[] = [];
+  try {
+    frames = Array.from(rootWindow.document.querySelectorAll('iframe, frame')) as HTMLIFrameElement[];
+  } catch {
+    return contexts;
+  }
+
+  frames.forEach((frame, index) => {
+    try {
+      const childWindow = frame.contentWindow;
+      const childDocument = frame.contentDocument || childWindow?.document;
+      if (!childWindow || !childDocument) return;
+      const frameTitle = cleanText(frame.getAttribute('title') || frame.getAttribute('name') || frame.id || `iframe ${index + 1}`);
+      contexts.push(...safeFrameContexts(childWindow, depth + 1, frameTitle || `iframe ${index + 1}`));
+    } catch {
+      // Cross-origin frames are skipped here; they can still receive postMessage commands.
+    }
+  });
+
+  return contexts;
+}
+
+function collectChapterVideos() {
+  const entries: ChapterVideoEntry[] = [];
+  const seen = new WeakSet<HTMLVideoElement>();
+  for (const frame of safeFrameContexts()) {
+    let videos: HTMLVideoElement[] = [];
+    try {
+      videos = Array.from(frame.document.querySelectorAll('video')) as HTMLVideoElement[];
+    } catch {
+      continue;
+    }
+    for (const video of videos) {
+      if (seen.has(video)) continue;
+      if (!isVisible(video) && video.readyState <= 0 && !video.currentSrc && !video.src) continue;
+      seen.add(video);
+      entries.push({ video, frame, index: entries.length });
+    }
+  }
+  return entries;
+}
+
+function collectChapterAudios() {
+  const entries: ChapterAudioEntry[] = [];
+  const seen = new WeakSet<HTMLAudioElement>();
+  for (const frame of safeFrameContexts()) {
+    let audios: HTMLAudioElement[] = [];
+    try {
+      audios = Array.from(frame.document.querySelectorAll('audio')) as HTMLAudioElement[];
+    } catch {
+      continue;
+    }
+    for (const audio of audios) {
+      if (seen.has(audio)) continue;
+      if (!isVisible(audio) && audio.readyState <= 0 && !audio.currentSrc && !audio.src) continue;
+      seen.add(audio);
+      entries.push({ audio, frame, index: entries.length });
+    }
+  }
+  return entries;
+}
+
+function audioInfo(audio: HTMLAudioElement, index: number, frameLabel?: string) {
+  return {
+    index,
+    duration: Number.isFinite(audio.duration) ? audio.duration : 0,
+    currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    paused: audio.paused,
+    muted: audio.muted,
+    playbackRate: audio.playbackRate,
+    ended: audio.ended,
+    src: audio.currentSrc || audio.src || undefined,
+    frame: frameLabel || undefined
+  };
+}
+
+function broadcastChapterFrameCommand(action: 'play' | 'pause' | 'apply-options', options: Required<ChapterLearningOptions>) {
+  const payload = { source: 'studypilot', type: 'chapter-frame-command', action, options };
+  const post = (target: Window) => {
+    try {
+      target.postMessage(payload, '*');
+    } catch {
+      // Ignore frames that reject postMessage.
+    }
+  };
+  post(window);
+  const walk = (rootWindow: Window, depth = 0) => {
+    if (depth >= 4) return;
+    let frames: HTMLIFrameElement[] = [];
+    try {
+      frames = Array.from(rootWindow.document.querySelectorAll('iframe, frame')) as HTMLIFrameElement[];
+    } catch {
+      return;
+    }
+    for (const frame of frames) {
+      const childWindow = frame.contentWindow;
+      if (!childWindow) continue;
+      post(childWindow);
+      try {
+        walk(childWindow, depth + 1);
+      } catch {
+        // Cross-origin child has received the direct message already.
+      }
+    }
+  };
+  walk(window);
+}
+
+function videoInfo(video: HTMLVideoElement, index: number, frameLabel?: string) {
+  return {
+    index,
+    duration: Number.isFinite(video.duration) ? video.duration : 0,
+    currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+    paused: video.paused,
+    muted: video.muted,
+    playbackRate: video.playbackRate,
+    ended: video.ended,
+    src: video.currentSrc || video.src || undefined,
+    frame: frameLabel || undefined
+  };
+}
+
+function chapterLinkText(anchor: HTMLAnchorElement) {
+  return cleanText(
+    anchor.innerText ||
+    anchor.textContent ||
+    anchor.getAttribute('title') ||
+    anchor.href
+  ).slice(0, 120);
+}
+
+function isLikelyChapterAnchor(anchor: HTMLAnchorElement) {
+  const text = chapterLinkText(anchor);
+  const haystack = `${text} ${anchor.href} ${anchor.className || ''} ${anchor.getAttribute('onclick') || ''}`;
+  if (!anchor.href || isBlockedInternalTabUrl(anchor.href)) return false;
+  if (/\.(?:png|jpe?g|gif|webp|svg|ico|css|js)(?:[?#]|$)/i.test(anchor.href)) return false;
+  return /(章节|任务点|视频|学习|第\s*\d+|chapter|knowledge|course|clazz|mooc|ans|jobid|courseid|clazzid)/i.test(haystack);
+}
+
+function collectChapterLinks() {
+  const anchors = safeFrameContexts()
+    .flatMap((frame) => {
+      try {
+        return Array.from(frame.document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+      } catch {
+        return [];
+      }
+    });
+  const currentUrl = window.location.href.split('#')[0];
+  const links = uniqueBy(
+    anchors
+      .filter((anchor) => isVisible(anchor) && isLikelyChapterAnchor(anchor))
+      .map((anchor) => {
+        const url = new URL(anchor.href, window.location.href).toString();
+        const active = url.split('#')[0] === currentUrl ||
+          /(^|\s)(active|current|on|cur|selected)(\s|$)/i.test(String(anchor.className || '')) ||
+          Boolean(anchor.closest('.active,.current,.on,.cur,.selected'));
+        return {
+          title: chapterLinkText(anchor) || url,
+          url,
+          active
+        };
+      }),
+    (item) => item.url
+  ).slice(0, 80);
+
+  let activeChapterIndex = links.findIndex((item) => item.active);
+  if (activeChapterIndex < 0) {
+    activeChapterIndex = links.findIndex((item) => item.url.split('#')[0] === currentUrl);
+  }
+  const nextChapter = activeChapterIndex >= 0 ? links[activeChapterIndex + 1] : links[0];
+  return { links, activeChapterIndex, nextChapter };
+}
+
+function collectTaskPoints(): TaskPoint[] {
+  const taskPoints: TaskPoint[] = [];
+
+  for (const frame of safeFrameContexts()) {
+    try {
+      const doc = frame.document;
+
+      const jobElements = Array.from(doc.querySelectorAll('.jobItem, .job, [id^="job"], .jobTodo, .jobFinish')) as HTMLElement[];
+      for (const element of jobElements) {
+        const classText = element.className || '';
+        const completed = /finish|done|complete|已完成/i.test(classText);
+        const title = cleanText(element.getAttribute('title') || element.textContent || '任务点');
+
+        let type: TaskPoint['type'] = 'unknown';
+        if (/video|视频|mp4/i.test(title + classText)) type = 'video';
+        else if (/document|文档|doc|ppt|pdf/i.test(title + classText)) type = 'document';
+        else if (/audio|音频|mp3/i.test(title + classText)) type = 'audio';
+        else if (/work|作业|homework/i.test(title + classText)) type = 'work';
+        else if (/exam|考试|test/i.test(title + classText)) type = 'exam';
+
+        taskPoints.push({ type, title, completed, element });
+      }
+
+      const iframes = Array.from(doc.querySelectorAll('iframe')) as HTMLIFrameElement[];
+      for (const iframe of iframes) {
+        try {
+          const iframeDoc = iframe.contentDocument;
+          if (!iframeDoc) continue;
+
+          if (iframeDoc.querySelector('.reader, .document-reader, #reader')) {
+            const title = cleanText(iframe.getAttribute('title') || '文档阅读');
+            const completed = Boolean(iframeDoc.querySelector('.finish, .complete, [class*="finish"]'));
+            taskPoints.push({ type: 'document', title, completed, iframe });
+          }
+
+          if (iframeDoc.querySelector('video')) {
+            const video = iframeDoc.querySelector('video') as HTMLVideoElement;
+            const completed = video.ended || (video.currentTime > 0 && video.currentTime >= video.duration - 1);
+            const title = cleanText(iframe.getAttribute('title') || '视频播放');
+            taskPoints.push({ type: 'video', title, completed, iframe });
+          }
+        } catch {
+          // Cross-origin iframe
+        }
+      }
+    } catch {
+      // Frame access error
+    }
+  }
+
+  return taskPoints;
+}
+
+function findDocumentReaders(): Array<{ iframe: HTMLIFrameElement; doc: Document; title: string }> {
+  const readers: Array<{ iframe: HTMLIFrameElement; doc: Document; title: string }> = [];
+
+  for (const frame of safeFrameContexts()) {
+    try {
+      const iframes = Array.from(frame.document.querySelectorAll('iframe')) as HTMLIFrameElement[];
+      for (const iframe of iframes) {
+        try {
+          const doc = iframe.contentDocument;
+          if (!doc) continue;
+
+          const hasReader = doc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader');
+          const hasPages = doc.querySelector('.page, .pageItem, [class*="page"]');
+
+          if (hasReader || hasPages) {
+            const title = cleanText(iframe.getAttribute('title') || iframe.id || '文档阅读器');
+            readers.push({ iframe, doc, title });
+          }
+        } catch {
+          // Cross-origin iframe
+        }
+      }
+    } catch {
+      // Frame access error
+    }
+  }
+
+  return readers;
+}
+
+async function autoReadDocument(reader: { iframe: HTMLIFrameElement; doc: Document; title: string }) {
+  const doc = reader.doc;
+
+  const nextButton = doc.querySelector('.next, .nextPage, [class*="next"], [onclick*="next"]') as HTMLElement | null;
+  if (nextButton && isVisible(nextButton)) {
+    nextButton.click();
+    await new Promise(resolve => setTimeout(resolve, 800));
+    return { success: true, action: 'next-page' };
+  }
+
+  const finishButton = doc.querySelector('.finish, .complete, [class*="finish"], [onclick*="finish"]') as HTMLElement | null;
+  if (finishButton && isVisible(finishButton)) {
+    finishButton.click();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { success: true, action: 'finish' };
+  }
+
+  const scrollContainer = doc.querySelector('.reader, .document-reader, #reader') as HTMLElement | null;
+  if (scrollContainer) {
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { success: true, action: 'scroll' };
+  }
+
+  return { success: false, action: 'none' };
+}
+
+function isAllTaskPointsCompleted(): boolean {
+  const taskPoints = collectTaskPoints();
+  if (taskPoints.length === 0) return false;
+  return taskPoints.every(point => point.completed);
+}
+
+function applyChapterVideoOptions(video: HTMLVideoElement) {
+  const options = chapterLearningOptions();
+  const rate = Math.max(0, Math.min(16, Number(options.playbackRate) || 0));
+  video.muted = options.muted;
+  if (rate <= 0) {
+    video.pause();
+    return;
+  }
+  video.playbackRate = rate;
+}
+
+function applyChapterAudioOptions(audio: HTMLAudioElement) {
+  const options = chapterLearningOptions();
+  const rate = Math.max(0, Math.min(16, Number(options.playbackRate) || 0));
+  audio.muted = options.muted;
+  if (rate <= 0) {
+    audio.pause();
+    return;
+  }
+  audio.playbackRate = rate;
+}
+
+async function playAllMediaElements() {
+  const options = chapterLearningOptions();
+  if (!options.autoPlay || Number(options.playbackRate) <= 0) return;
+
+  const videoEntries = collectChapterVideos();
+  for (const { video } of videoEntries) {
+    applyChapterVideoOptions(video);
+    if (!video.ended && video.paused) {
+      try {
+        await video.play();
+      } catch {
+        // Requires user interaction
+      }
+    }
+  }
+
+  const audioEntries = collectChapterAudios();
+  for (const { audio } of audioEntries) {
+    applyChapterAudioOptions(audio);
+    if (!audio.ended && audio.paused) {
+      try {
+        await audio.play();
+      } catch {
+        // Requires user interaction
+      }
+    }
+  }
+}
+
+function captureChapterLearningState(message = '已读取当前页面章节状态。') {
+  const videoEntries = collectChapterVideos();
+  const videos = videoEntries.map((entry) => videoInfo(entry.video, entry.index, entry.frame.label));
+  const audioEntries = collectChapterAudios();
+  const audios = audioEntries.map((entry) => audioInfo(entry.audio, entry.index, entry.frame.label));
+  const chapterData = collectChapterLinks();
+  const taskPoints = collectTaskPoints();
+  const readers = findDocumentReaders();
+
+  return {
+    success: true,
+    data: {
+      url: window.location.href,
+      title: document.title || window.location.href,
+      videos,
+      audios,
+      chapters: chapterData.links,
+      activeChapterIndex: chapterData.activeChapterIndex,
+      nextChapter: chapterData.nextChapter,
+      taskPoints: taskPoints.map(point => ({
+        type: point.type,
+        title: point.title,
+        completed: point.completed
+      })),
+      documentReaders: readers.length,
+      allTasksCompleted: isAllTaskPointsCompleted(),
+      lastMessage: message,
+      updatedAt: Date.now(),
+      running: Boolean((window as any).__studyPilotChapterRunning)
+    }
+  };
+}
+
+function sendChapterLearningState(message?: string) {
+  ipcRenderer.sendToHost('studypilot:chapter-learning-result', captureChapterLearningState(message));
+}
+
+function openNextChapterIfAvailable(reason: string) {
+  const options = chapterLearningOptions();
+  if (!options.autoNext || !(window as any).__studyPilotChapterRunning) return false;
+  const { nextChapter } = collectChapterLinks();
+  if (!nextChapter?.url) {
+    sendChapterLearningState('当前视频已自然播放结束，但未识别到下一章节。');
+    return false;
+  }
+  ipcRenderer.sendToHost('studypilot:chapter-open-next', {
+    url: nextChapter.url,
+    title: nextChapter.title,
+    reason,
+    options
+  });
+  sendChapterLearningState(`当前视频已自然结束，正在打开下一章节：${nextChapter.title}`);
+  return true;
+}
+
+function attachChapterVideoWatchers() {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotChapterWatchedVideos) pageAny.__studyPilotChapterWatchedVideos = new WeakSet();
+  const watched = pageAny.__studyPilotChapterWatchedVideos as WeakSet<HTMLVideoElement>;
+  for (const video of Array.from(document.querySelectorAll('video')) as HTMLVideoElement[]) {
+    if (watched.has(video)) continue;
+    watched.add(video);
+    video.addEventListener('ended', () => {
+      if (!pageAny.__studyPilotChapterRunning) return;
+      openNextChapterIfAvailable('video-ended');
+    });
+    video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
+    video.addEventListener('pause', () => {
+      if (!video.ended) sendChapterLearningState('视频已暂停。');
+    });
+  }
+}
+
+async function playChapterVideos() {
+  const options = chapterLearningOptions();
+  const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+  if (videos.length === 0) {
+    sendChapterLearningState('当前页面未识别到 video 元素。');
+    return;
+  }
+  attachChapterVideoWatchers();
+  for (const video of videos) {
+    applyChapterVideoOptions(video);
+    if (options.autoPlay && Number(options.playbackRate) > 0) {
+      try {
+        await video.play();
+      } catch (error: any) {
+        reportWebviewError('webview:chapter-video-play', {
+          level: 'warn',
+          message: `视频播放需要页面允许或用户手动点击：${error?.message || 'unknown'}`,
+          details: { options }
+        });
+      }
+    }
+  }
+  sendChapterLearningState(`已处理 ${videos.length} 个视频。`);
+}
+
+function attachChapterVideoWatchersDeep() {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotChapterWatchedVideos) pageAny.__studyPilotChapterWatchedVideos = new WeakSet();
+  const watched = pageAny.__studyPilotChapterWatchedVideos as WeakSet<HTMLVideoElement>;
+  for (const { video } of collectChapterVideos()) {
+    if (watched.has(video)) continue;
+    watched.add(video);
+    video.addEventListener('ended', () => {
+      if (!pageAny.__studyPilotChapterRunning) return;
+      openNextChapterIfAvailableDeep('video-ended');
+    });
+    video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
+    video.addEventListener('pause', () => {
+      if (!video.ended) sendChapterLearningState('视频已暂停。');
+    });
+  }
+}
+
+function openNextChapterIfAvailableDeep(reason: string) {
+  const options = chapterLearningOptions();
+  const pageAny = window as any;
+  if (!options.autoNext || !pageAny.__studyPilotChapterRunning) return false;
+  if (pageAny.__studyPilotChapterOpeningNext && Date.now() - pageAny.__studyPilotChapterOpeningNext < 8000) return true;
+  const { nextChapter } = collectChapterLinks();
+  if (!nextChapter?.url) {
+    sendChapterLearningState('当前视频已自然播放结束，但未识别到下一章节。');
+    return false;
+  }
+  pageAny.__studyPilotChapterOpeningNext = Date.now();
+  ipcRenderer.sendToHost('studypilot:chapter-open-next', {
+    url: nextChapter.url,
+    title: nextChapter.title,
+    reason,
+    options
+  });
+  sendChapterLearningState(`当前视频已自然结束，正在打开下一章节：${nextChapter.title}`);
+  return true;
+}
+
+async function playChapterVideosDeep() {
+  const options = chapterLearningOptions();
+  const entries = collectChapterVideos();
+  broadcastChapterFrameCommand('play', options);
+  if (entries.length === 0) {
+    sendChapterLearningState('当前页面暂未识别到可控制的视频，已向子页面发送播放指令并继续轮询。');
+    return;
+  }
+  attachChapterVideoWatchersDeep();
+  let played = 0;
+  for (const { video } of entries) {
+    applyChapterVideoOptions(video);
+    if (options.autoPlay && Number(options.playbackRate) > 0) {
+      try {
+        await video.play();
+        played += 1;
+      } catch (error: any) {
+        reportWebviewError('webview:chapter-video-play', {
+          level: 'warn',
+          message: `视频播放需要页面允许或用户手动点击：${error?.message || 'unknown'}`,
+          details: { options }
+        });
+      }
+    }
+  }
+  const endedCount = entries.filter((entry) => entry.video.ended).length;
+  sendChapterLearningState(`已识别 ${entries.length} 个视频，已尝试播放 ${played} 个，已结束 ${endedCount} 个。`);
+}
+
+function stopChapterLearningLoop() {
+  const pageAny = window as any;
+  if (pageAny.__studyPilotChapterTimer) {
+    window.clearInterval(pageAny.__studyPilotChapterTimer);
+    pageAny.__studyPilotChapterTimer = null;
+  }
+}
+
+function startChapterLearningLoop() {
+  const pageAny = window as any;
+  stopChapterLearningLoop();
+  pageAny.__studyPilotChapterTimer = window.setInterval(async () => {
+    if (!pageAny.__studyPilotChapterRunning) {
+      stopChapterLearningLoop();
+      return;
+    }
+    try {
+      const options = chapterLearningOptions();
+
+      attachChapterVideoWatchersDeep();
+      const videoEntries = collectChapterVideos();
+      const audioEntries = collectChapterAudios();
+
+      for (const { video } of videoEntries) applyChapterVideoOptions(video);
+      for (const { audio } of audioEntries) applyChapterAudioOptions(audio);
+      broadcastChapterFrameCommand('apply-options', options);
+
+      await playAllMediaElements();
+      broadcastChapterFrameCommand('play', options);
+
+      if (options.autoReadDocument) {
+        const readers = findDocumentReaders();
+        for (const reader of readers) {
+          try {
+            const result = await autoReadDocument(reader);
+            if (result.success && result.action !== 'none') {
+              sendChapterLearningState(`文档阅读中：${reader.title} - ${result.action}`);
+            }
+          } catch (error: any) {
+            reportWebviewError('webview:auto-read-document', {
+              level: 'warn',
+              message: `文档自动阅读失败: ${error?.message || 'unknown'}`
+            });
+          }
+        }
+      }
+
+      const allVideosEnded = videoEntries.length > 0 && videoEntries.every((entry) =>
+        entry.video.ended ||
+        (Number.isFinite(entry.video.duration) && entry.video.duration > 0 && entry.video.currentTime >= entry.video.duration - 0.5)
+      );
+
+      const allAudiosEnded = audioEntries.length > 0 && audioEntries.every((entry) =>
+        entry.audio.ended ||
+        (Number.isFinite(entry.audio.duration) && entry.audio.duration > 0 && entry.audio.currentTime >= entry.audio.duration - 0.5)
+      );
+
+      const allTasksCompleted = isAllTaskPointsCompleted();
+
+      if ((allVideosEnded && allAudiosEnded) || allTasksCompleted) {
+        const shouldProceed = await checkIfShouldProceedToNext();
+        if (shouldProceed) {
+          openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'all-media-ended');
+          return;
+        }
+      }
+
+      const statusParts: string[] = [];
+      if (videoEntries.length > 0) statusParts.push(`${videoEntries.length} 个视频`);
+      if (audioEntries.length > 0) statusParts.push(`${audioEntries.length} 个音频`);
+      const readers = findDocumentReaders();
+      if (readers.length > 0) statusParts.push(`${readers.length} 个文档`);
+      const taskPoints = collectTaskPoints();
+      const completedTasks = taskPoints.filter(point => point.completed).length;
+      if (taskPoints.length > 0) statusParts.push(`任务点 ${completedTasks}/${taskPoints.length}`);
+
+      sendChapterLearningState(
+        statusParts.length > 0
+          ? `章节学习运行中：${statusParts.join('，')}`
+          : '章节学习运行中，正在等待页面内容加载。'
+      );
+    } catch (error: any) {
+      reportWebviewError('webview:chapter-loop', {
+        level: 'warn',
+        message: error?.message || '章节学习轮询失败'
+      });
+    }
+  }, 2500);
+}
+
+async function checkIfShouldProceedToNext(): Promise<boolean> {
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  const hasQuestions = extractQuestions().length > 0;
+  if (hasQuestions) {
+    const options = chapterLearningOptions();
+    if (!options.autoAnswerQuestions) {
+      sendChapterLearningState('检测到题目，等待手动答题或启用自动答题。');
+      return false;
+    }
+  }
+
+  const readers = findDocumentReaders();
+  for (const reader of readers) {
+    try {
+      const doc = reader.doc;
+      const finishButton = doc.querySelector('.finish, .complete, [class*="finish"]') as HTMLElement | null;
+      if (finishButton && isVisible(finishButton) && !finishButton.classList.contains('disabled')) {
+        finishButton.click();
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  return true;
+}
+
+async function handleChapterLearningCommand(command: ChapterLearningCommand) {
+  setChapterLearningOptions(command.options);
+  const pageAny = window as any;
+  if (command.action === 'scan') {
+    attachChapterVideoWatchersDeep();
+    sendChapterLearningState('已扫描当前章节。');
+    return;
+  }
+  if (command.action === 'start') {
+    pageAny.__studyPilotChapterRunning = true;
+    startChapterLearningLoop();
+    await playChapterVideosDeep();
+    return;
+  }
+  if (command.action === 'play') {
+    pageAny.__studyPilotChapterRunning = true;
+    startChapterLearningLoop();
+    await playChapterVideosDeep();
+    return;
+  }
+  if (command.action === 'pause') {
+    for (const { video } of collectChapterVideos()) video.pause();
+    for (const { audio } of collectChapterAudios()) audio.pause();
+    broadcastChapterFrameCommand('pause', chapterLearningOptions());
+    sendChapterLearningState('已暂停当前页面视频和音频。');
+    return;
+  }
+  if (command.action === 'stop') {
+    pageAny.__studyPilotChapterRunning = false;
+    stopChapterLearningLoop();
+    for (const { video } of collectChapterVideos()) video.pause();
+    for (const { audio } of collectChapterAudios()) audio.pause();
+    broadcastChapterFrameCommand('pause', chapterLearningOptions());
+    sendChapterLearningState('已停止章节学习辅助。');
+    return;
+  }
+  if (command.action === 'set-options') {
+    for (const { video } of collectChapterVideos()) {
+      applyChapterVideoOptions(video);
+    }
+    for (const { audio } of collectChapterAudios()) {
+      applyChapterAudioOptions(audio);
+    }
+    broadcastChapterFrameCommand('apply-options', chapterLearningOptions());
+    sendChapterLearningState('章节学习设置已应用。');
+  }
+}
+
+window.addEventListener('message', async (event) => {
+  const data = event.data;
+  if (!data || data.source !== 'studypilot' || data.type !== 'chapter-frame-command') return;
+  setChapterLearningOptions(data.options);
+  const options = chapterLearningOptions();
+  const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
+  const audios = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+
+  for (const video of videos) {
+    applyChapterVideoOptions(video);
+    if (data.action === 'pause') video.pause();
+    if (data.action === 'play' && options.autoPlay && Number(options.playbackRate) > 0) {
+      try {
+        await video.play();
+      } catch {
+        // Parent polling keeps retrying; some players require one user gesture first.
+      }
+    }
+  }
+
+  for (const audio of audios) {
+    applyChapterAudioOptions(audio);
+    if (data.action === 'pause') audio.pause();
+    if (data.action === 'play' && options.autoPlay && Number(options.playbackRate) > 0) {
+      try {
+        await audio.play();
+      } catch {
+        // Parent polling keeps retrying; some players require one user gesture first.
+      }
+    }
+  }
+});
+
+function readQuestionTypeHint(root: HTMLElement) {
+  const qid = root.getAttribute('qid') ||
+    root.getAttribute('questionid') ||
+    root.getAttribute('data') ||
+    root.querySelector('[qid]')?.getAttribute('qid') ||
+    root.querySelector('[questionid]')?.getAttribute('questionid') ||
+    root.querySelector('input[name="questionId"]')?.getAttribute('value') ||
+    '';
+  const directQtype = root.getAttribute('qtype') || root.querySelector('[qtype]')?.getAttribute('qtype') || '';
+  const inputValue = (selector: string) => root.querySelector<HTMLInputElement>(selector)?.value || '';
+  const typedValue = qid ? inputValue(`input[name="type${cssEscape(qid)}"]`) : '';
+  const typedName = qid ? inputValue(`input[name="typeName${cssEscape(qid)}"]`) : '';
+  let fallbackType = '';
+  let fallbackTypeName = '';
+
+  for (const input of Array.from(root.querySelectorAll<HTMLInputElement>('input[name]'))) {
+    const name = input.name || '';
+    if (!fallbackTypeName && /^typeName/i.test(name)) fallbackTypeName = input.value || '';
+    if (!fallbackType && /^type(?!Name)/i.test(name)) fallbackType = input.value || '';
+    if (fallbackType && fallbackTypeName) break;
+  }
+
+  const heading = root.querySelector('.colorShallow, .mark_name, .typeName, .question-type') as HTMLElement | null;
+  return {
+    qtype: cleanText(directQtype || typedValue || fallbackType),
+    typeName: cleanText(typedName || fallbackTypeName || (heading ? visibleText(heading) : '')),
+    qid
+  };
+}
+
 function inferTypeFromDom(root: HTMLElement, options: string[]): QuestionType {
-  const qtype = root.getAttribute('qtype') || root.querySelector('[qtype]')?.getAttribute('qtype') || '';
+  const hint = readQuestionTypeHint(root);
+  const qtype = hint.qtype;
   const radios = root.querySelectorAll('input[type="radio"]').length;
   const checkboxes = root.querySelectorAll('input[type="checkbox"]').length;
   const textareas = root.querySelectorAll('textarea').length;
   const textInputs = root.querySelectorAll('input[type="text"], input:not([type])').length;
   const text = visibleText(root);
+  const typeText = `${hint.typeName} ${text}`;
+  const hasMultipleMarker = Boolean(root.querySelector('.num_option_dx, [role="checkbox"], input[type="checkbox"]'));
+  const hasSingleMarker = Boolean(root.querySelector('.num_option, [role="radio"], input[type="radio"]'));
 
-  if (qtype === '1' || checkboxes > 0) return 'multiple';
+  if (qtype === '1' || hasMultipleMarker || checkboxes > 0 || /\u591a\u9009\u9898|\u591a\u9879\u9009\u62e9|\u591a\u9009/.test(typeText)) return 'multiple';
   if (qtype === '3' || (radios === 2 && /正确|错误|对|错|true|false/i.test(text))) return 'judgement';
-  if (qtype === '0' || radios > 0 || options.length >= 2) return 'single';
+  if (qtype === '2' || /\u586b\u7a7a\u9898|\u586b\u7a7a/.test(typeText)) return 'completion';
+  if (qtype === '4' || /\u95ee\u7b54\u9898|\u7b80\u7b54\u9898|\u8bba\u8ff0\u9898/.test(typeText)) return 'essay';
+  if (qtype === '0' || /\u5355\u9009\u9898|\u5355\u9879\u9009\u62e9|\u5355\u9009/.test(typeText) || radios > 0 || hasSingleMarker || options.length >= 2) return 'single';
   if (textareas > 0) return 'essay';
   if (textInputs > 0) return 'completion';
   return 'unknown';
 }
 
 function inferTypeFromText(text: string, options: string[]): QuestionType {
+  if (/\u591a\u9009\u9898|\u591a\u9879\u9009\u62e9|\u591a\u9009/i.test(text)) return 'multiple';
+  if ((/\u5224\u65ad\u9898|\u5224\u65ad|\u6b63\u786e|\u9519\u8bef|\u5bf9|\u9519|true|false/i.test(text)) && options.length <= 2) return 'judgement';
+  if (/\u586b\u7a7a\u9898|\u586b\u7a7a/i.test(text)) return 'completion';
+  if (/\u95ee\u7b54\u9898|\u7b80\u7b54\u9898|\u8bba\u8ff0\u9898/i.test(text)) return 'essay';
+  if (/\u5355\u9009\u9898|\u5355\u9879\u9009\u62e9|\u5355\u9009|\u9009\u62e9\u9898/i.test(text)) return 'single';
   if (/多选题|多项选择/i.test(text)) return 'multiple';
   if (/判断题|正确|错误|对|错|true|false/i.test(text) && options.length <= 2) return 'judgement';
   if (/填空题/i.test(text)) return 'completion';
@@ -974,9 +2107,10 @@ function optionTargetFromElement(element: HTMLElement, index: number): QuestionO
   const dataLabel = /^[A-Z]$/i.test(dataValue) ? dataValue : '';
   const label = (dataLabel || labelMatch?.[1] || optionLetter(index)).toUpperCase();
   const clickTarget = nearestClickableOption(element) || element;
+  const displayText = optionTextCandidate(clickTarget, label);
   return {
     label,
-    text: optionLabel(label, rawText || label),
+    text: optionLabel(label, displayText || rawText || label),
     selector: selectorFor(element),
     inputSelector: input ? selectorFor(input) : undefined,
     clickSelector: clickTarget !== element ? selectorFor(clickTarget) : undefined,
@@ -993,6 +2127,11 @@ function dedupeOptionTargets(targets: QuestionOptionTarget[]) {
 }
 
 function extractOptionTargets(root: HTMLElement) {
+  const chaoxingExamTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[])
+    .filter((element) => element.querySelector('.num_option, .num_option_dx') && element.querySelector('.answer_p'))
+    .map((element, index) => optionTargetFromElement(element, index)));
+  if (chaoxingExamTargets.length >= 2) return chaoxingExamTargets.slice(0, 12);
+
   const inputTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('input[type="radio"], input[type="checkbox"]')) as HTMLInputElement[])
     .map((input, index) => {
       const label = input.closest('label') || (input.id ? document.querySelector(`label[for="${cssEscape(input.id)}"]`) : null);
@@ -1028,6 +2167,23 @@ function extractOptionsFromText(body: string) {
 }
 
 function findQuestionText(root: HTMLElement, optionTargets: QuestionOptionTarget[]) {
+  const chaoxingStem = root.querySelector('.mark_name') as HTMLElement | null;
+  if (chaoxingStem) {
+    const clone = chaoxingStem.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('.colorShallow').forEach((node) => node.remove());
+    let text = visibleText(clone)
+      .replace(/^\s*\d{1,3}\s*[.、.)]?\s*/, '')
+      .replace(/^\s*[（(]?\s*单选题|多选题|判断题|填空题|问答题[\s\S]*?[）)]\s*/i, '')
+      .trim();
+    if (!text) {
+      text = cleanText(Array.from(chaoxingStem.childNodes)
+        .filter((node) => !(node instanceof HTMLElement && node.classList.contains('colorShallow')))
+        .map((node) => node.textContent || '')
+        .join(' '));
+    }
+    if (!isNoiseText(text) && text.length >= 4) return text;
+  }
+
   for (const selector of TITLE_SELECTORS) {
     const element = root.querySelector(selector);
     if (!element) continue;
@@ -1107,6 +2263,12 @@ function questionFromSegment(segment: { number: number; typeLabel: string; body:
 }
 
 function extractQuestions() {
+  const currentExamRoot = document.querySelector('.singleQuestionDiv') as HTMLElement | null;
+  if (currentExamRoot && isVisible(currentExamRoot)) {
+    const currentQuestion = questionFromRoot(currentExamRoot, 1);
+    if (currentQuestion) return [currentQuestion];
+  }
+
   const roots: HTMLElement[] = [];
   const seen = new Set<string>();
 
@@ -1126,14 +2288,14 @@ function extractQuestions() {
     .map((root, index) => questionFromRoot(root, index + 1))
     .filter(Boolean) as any[];
 
-  if (domQuestions.length > 0) return domQuestions;
+  if (domQuestions.length > 0) return uniqueBy(domQuestions, (question) => question.hash);
 
   const bodyClone = document.body.cloneNode(true) as HTMLElement;
   removeNoise(bodyClone);
   const textQuestions = splitContinuousText(bodyClone.textContent || '')
     .map(questionFromSegment)
     .filter(Boolean) as any[];
-  if (textQuestions.length > 0) return textQuestions;
+  if (textQuestions.length > 0) return uniqueBy(textQuestions, (question) => question.hash);
 
   const fallback = questionFromRoot(document.body, 1);
   return fallback ? [fallback] : [];
@@ -1784,22 +2946,40 @@ function applyCompletionAnswer(payload: AnswerApplyPayload) {
 }
 
 function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptionTarget[], clickSelected = true) {
+  console.log('[StudyPilot] applyAnswerDirectly 开始');
+  console.log('[StudyPilot] targets 数量:', targets.length, 'clickSelected:', clickSelected);
+
   const answerText = `${payload.answer || ''} ${(payload.matchedOptions || []).join(' ')}`;
   const judgementValue = isJudgementPayload(payload, targets) ? parseJudgementValueStable(answerText) : null;
+  console.log('[StudyPilot] judgementValue:', judgementValue);
+
   const labels = judgementValue ? [] : (targets.length > 0 ? targets.map((target) => target.label.toUpperCase()) : labelsFromPayload(payload));
   const qid = qidForPayload(payload);
-  if (!qid || (!judgementValue && labels.length === 0)) return false;
+  console.log('[StudyPilot] qid:', qid, 'labels:', labels);
+
+  if (!qid || (!judgementValue && labels.length === 0)) {
+    console.log('[StudyPilot] qid 或 labels 为空，返回 false');
+    return false;
+  }
 
   const root = questionRootForPayload(payload);
   const isJudgement = Boolean(judgementValue) || root.getAttribute('qtype') === '3' || Boolean(root.querySelector('[qtype="3"]'));
   const isMultiple = !isJudgement && (root.getAttribute('qtype') === '1' || Boolean(root.querySelector('[qtype="1"], [qtype="21"]')));
   const answer = isJudgement && judgementValue ? judgementValue : (isMultiple ? labels.slice().sort() : labels).join('');
+
+  console.log('[StudyPilot] isJudgement:', isJudgement, 'isMultiple:', isMultiple, 'answer:', answer);
+
   const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
   if (hiddenAnswer) {
+    console.log('[StudyPilot] 找到隐藏输入字段，当前值:', hiddenAnswer.value, '设置为:', answer);
     hiddenAnswer.value = answer;
     dispatchInput(hiddenAnswer);
+  } else {
+    console.log('[StudyPilot] 未找到隐藏输入字段 #answer' + qid);
   }
+
   rememberAppliedAnswer(qid, answer, labels);
+
   if (isJudgement) {
     reportWebviewError('webview:apply-answer-judgement', {
       level: 'info',
@@ -1825,6 +3005,68 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
     `[qid="${cssEscape(qid)}"]`,
     `[questionid="${cssEscape(qid)}"]`
   ].join(','))) as HTMLElement[]);
+
+  console.log('[StudyPilot] 找到 optionElements 数量:', optionElements.length);
+
+  // 判断题特殊处理：优先使用 .answerBg 逻辑
+  if (isJudgement) {
+    console.log('[StudyPilot] 判断题特殊处理 - 查找 .answerBg 元素');
+    const answerBgElements = Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[];
+    console.log('[StudyPilot] 找到 answerBg 元素数量:', answerBgElements.length);
+
+    if (answerBgElements.length > 0) {
+      for (const answerBg of answerBgElements) {
+        const numOption = answerBg.querySelector('.num_option, .num_option_dx, [data]') as HTMLElement | null;
+        if (!numOption) {
+          console.log('[StudyPilot] answerBg 没有 num_option 或 data 属性，跳过');
+          continue;
+        }
+
+        const bgValue = judgementValueFromElement(answerBg);
+        console.log('[StudyPilot] answerBg 值:', bgValue, '目标答案:', answer);
+
+        if (!bgValue) {
+          console.log('[StudyPilot] 无法解析 answerBg 的值，跳过');
+          continue;
+        }
+
+        const selected = bgValue === answer;
+        console.log('[StudyPilot] 是否匹配:', selected);
+
+        const singleMarker = answerBg.querySelector('.num_option') as HTMLElement | null;
+        const multiMarker = answerBg.querySelector('.num_option_dx') as HTMLElement | null;
+        if (singleMarker) {
+          console.log('[StudyPilot] 设置 singleMarker check_answer class:', selected);
+          singleMarker.classList.toggle('check_answer', selected);
+        }
+        if (multiMarker) {
+          console.log('[StudyPilot] 设置 multiMarker check_answer_dx class:', selected);
+          multiMarker.classList.toggle('check_answer_dx', selected);
+        }
+        answerBg.setAttribute('aria-checked', selected ? 'true' : 'false');
+
+        if (selected && clickSelected) {
+          console.log('[StudyPilot] 点击匹配的 answerBg 元素');
+          answerBg.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+          dispatchUserClick(answerBg);
+        }
+      }
+
+      const pageAny = window as any;
+      if (typeof pageAny.loadAnswerSheet === 'function') {
+        console.log('[StudyPilot] 调用 loadAnswerSheet');
+        pageAny.loadAnswerSheet(qid, answer);
+      }
+      if (typeof pageAny.answerContentChange === 'function') {
+        console.log('[StudyPilot] 调用 answerContentChange');
+        pageAny.answerContentChange();
+      }
+      console.log('[StudyPilot] 判断题特殊处理完成，返回 true');
+      return Boolean(hiddenAnswer || answerBgElements.length > 0);
+    }
+  }
+
+  // 标准处理逻辑
   for (const option of optionElements) {
     const value = isJudgement ? judgementValueFromElement(option) : (option.getAttribute('data') || '').toUpperCase();
     const selected = isJudgement ? value === answer : labels.includes(String(value || '').toUpperCase());
@@ -1993,15 +3235,33 @@ async function applyAnswer(payload: AnswerApplyPayload) {
 }
 
 async function applyAnswerV2(payload: AnswerApplyPayload) {
-  if (isFillQuestion(payload)) return applyCompletionAnswer(payload);
+  console.log('[StudyPilot] applyAnswerV2 开始处理答案');
+  console.log('[StudyPilot] payload:', JSON.stringify(payload, null, 2));
+
+  if (isFillQuestion(payload)) {
+    console.log('[StudyPilot] 检测到填空题');
+    return applyCompletionAnswer(payload);
+  }
 
   const targets = pickAnswerTargets(payload);
+  console.log('[StudyPilot] 选择的目标数量:', targets.length);
+  console.log('[StudyPilot] 目标详情:', targets.map(t => ({ label: t.label, text: t.text, value: t.value })));
+
+  const isJudgement = isJudgementPayload(payload, targets);
+  console.log('[StudyPilot] 是否为判断题:', isJudgement);
+
   if (targets.length === 0) {
+    console.log('[StudyPilot] 没有找到目标，尝试直接应用答案');
     if (applyAnswerDirectly(payload, [])) {
-      if (!ensureAppliedAnswerValue(payload, [])) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+      if (!ensureAppliedAnswerValue(payload, [])) {
+        console.log('[StudyPilot] 答案字段校验失败');
+        return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+      }
+      console.log('[StudyPilot] 通过页面答案字段成功填入');
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
     const candidates = fallbackAnswerTargets(payload).slice(0, 8);
+    console.log('[StudyPilot] 备用候选项:', candidates.map(c => ({ label: c.label, text: c.text })));
     return {
       success: false,
       error: `未能匹配答案选项。答案：${payload.answer || '空'}；选项：${candidates.map((item) => `${item.label}.${item.text}`).join(' | ') || '未抓到'}；qid：${qidForPayload(payload) || '无'}`
@@ -2009,9 +3269,18 @@ async function applyAnswerV2(payload: AnswerApplyPayload) {
   }
 
   try {
-    for (const target of targets) await clickAnswerTarget(target);
+    console.log('[StudyPilot] 开始点击目标选项');
+    for (const target of targets) {
+      console.log('[StudyPilot] 点击目标:', target.label, target.text);
+      await clickAnswerTarget(target);
+    }
+    console.log('[StudyPilot] 点击完成，调用 applyAnswerDirectly');
     applyAnswerDirectly(payload, targets, false);
-    if (!ensureAppliedAnswerValue(payload, targets)) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+    if (!ensureAppliedAnswerValue(payload, targets)) {
+      console.log('[StudyPilot] 答案字段校验失败');
+      return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+    }
+    console.log('[StudyPilot] 成功应用答案');
     return {
       success: true,
       message: `已命中 ${targets.map((target) => target.label).join('、')} 选项。`,
@@ -2019,12 +3288,97 @@ async function applyAnswerV2(payload: AnswerApplyPayload) {
       options: targets.map((target) => target.text)
     };
   } catch (error: any) {
+    console.log('[StudyPilot] 点击失败，错误:', error.message);
     if (isJudgementPayload(payload, targets) && applyAnswerDirectly(payload, targets, false)) {
-      if (!ensureAppliedAnswerValue(payload, targets)) return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+      if (!ensureAppliedAnswerValue(payload, targets)) {
+        console.log('[StudyPilot] 答案字段校验失败');
+        return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
+      }
+      console.log('[StudyPilot] 判断题通过 applyAnswerDirectly 成功填入');
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
+    console.log('[StudyPilot] 最终失败');
     return { success: false, error: error.message };
   }
+}
+
+function currentExamQuestionSignature() {
+  const root = document.querySelector('.singleQuestionDiv') as HTMLElement | null;
+  if (!root) return '';
+  return [
+    root.getAttribute('data') || '',
+    visibleText(root.querySelector('.mark_name') || root).slice(0, 180)
+  ].join('|');
+}
+
+function isFullExamPreviewPage() {
+  const text = cleanText(document.body?.innerText || '');
+  return /全卷预览|整卷预览|答题卡|提交试卷|交卷|保存并提交/.test(text) &&
+    !document.querySelector('.singleQuestionDiv .nextDiv a');
+}
+
+function isForwardExamNextButton(element: HTMLElement) {
+  if (!isVisible(element)) return false;
+  const text = cleanText(element.innerText || element.textContent || '');
+  const inline = element.getAttribute('onclick') || '';
+  const aria = element.getAttribute('aria-label') || element.getAttribute('title') || '';
+  const haystack = `${text} ${aria}`.replace(/\s+/g, '');
+  if (/上一题|上一步|prev|previous/i.test(`${haystack} ${inline}`)) return false;
+  if (/getTheNextQuestion\s*\(\s*-\s*1\s*\)/i.test(inline)) return false;
+  if (/下一题|下一步/.test(haystack)) return true;
+  if (/topreview\s*\(/i.test(inline)) return true;
+  const nextMatch = inline.match(/getTheNextQuestion\s*\(\s*([^)]+)\s*\)/i);
+  if (nextMatch) {
+    const step = Number(String(nextMatch[1]).replace(/[^\d.-]/g, ''));
+    return Number.isFinite(step) && step > 0;
+  }
+  return false;
+}
+
+async function clickNextExamQuestion() {
+  const before = currentExamQuestionSignature();
+  const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]')) as HTMLElement[];
+  const nextButton = candidates.find((element) => {
+    if (!isVisible(element)) return false;
+    if (!isForwardExamNextButton(element)) return false;
+    return true;
+    const text = cleanText(element.innerText || element.textContent || '');
+    const inline = element.getAttribute('onclick') || '';
+    const className = String(element.className || '');
+    return /下一题|下一步/.test(text) ||
+      /getTheNextQuestion/i.test(inline) ||
+      /nextDiv|next/i.test(className);
+  });
+
+  if (!nextButton) {
+    return {
+      success: false,
+      done: isFullExamPreviewPage(),
+      error: isFullExamPreviewPage() ? undefined : '未找到“下一题/下一步”按钮。'
+    };
+  }
+
+  nextButton.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  dispatchUserClick(nextButton);
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 7000) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const after = currentExamQuestionSignature();
+    if (after && after !== before) {
+      return { success: true, done: false, message: '已切换到下一题。' };
+    }
+    if (!after && isFullExamPreviewPage()) {
+      return { success: true, done: true, message: '已进入全卷浏览。' };
+    }
+  }
+
+  return {
+    success: true,
+    done: isFullExamPreviewPage(),
+    message: isFullExamPreviewPage() ? '已进入全卷浏览。' : '已点击下一题，页面未检测到明显题号变化。'
+  };
 }
 
 ipcRenderer.on('studypilot:snapshot', () => {
@@ -2056,6 +3410,26 @@ ipcRenderer.on('studypilot:execute-plan', async (_, plan: AutomationPlan) => {
 ipcRenderer.on('studypilot:apply-answer', async (_, payload: AnswerApplyPayload) => {
   const result = await applyAnswerV2(payload);
   ipcRenderer.sendToHost('studypilot:apply-answer-result', result);
+});
+
+ipcRenderer.on('studypilot:exam-next-question', async () => {
+  try {
+    const result = await clickNextExamQuestion();
+    ipcRenderer.sendToHost('studypilot:exam-next-question-result', result);
+  } catch (error: any) {
+    ipcRenderer.sendToHost('studypilot:exam-next-question-result', { success: false, error: error.message });
+  }
+});
+
+ipcRenderer.on('studypilot:chapter-learning', async (_, command: ChapterLearningCommand) => {
+  try {
+    await handleChapterLearningCommand(command);
+  } catch (error: any) {
+    ipcRenderer.sendToHost('studypilot:chapter-learning-result', {
+      success: false,
+      error: error.message || '章节学习辅助执行失败。'
+    });
+  }
 });
 
 console.log('[StudyPilot] Authorized web automation bridge loaded.');

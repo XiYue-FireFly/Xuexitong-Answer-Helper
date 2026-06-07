@@ -10,10 +10,8 @@ import {
   MousePointerClick,
   Pause,
   Play,
-  ScanSearch,
   Search,
   ShieldCheck,
-  Wand2
 } from 'lucide-react';
 import { AIAnswerResult, appStore, QuestionItem, useAppStore } from '../store/appStore';
 
@@ -38,11 +36,7 @@ const typeLabels: Record<string, string> = {
   unknown: '未知'
 };
 
-const riskLabels: Record<string, string> = {
-  low: '低风险',
-  medium: '中风险',
-  high: '高风险'
-};
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 function buildPrompt(question: QuestionItem) {
   return `你是一个学习辅助解析助手。请根据题目内容给出参考答案和解析。
@@ -132,17 +126,16 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 }
 
 export function AIPanel() {
-  const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, snapshot, currentPlan } = useAppStore();
+  const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank } = useAppStore();
   const [batchRunning, setBatchRunning] = useState(false);
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
   const livePausedRef = useRef(false);
-  const [automationGoal, setAutomationGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
 
-  const runAutomationAction = (action: 'extract-question' | 'scan-page' | 'build-plan' | 'execute-plan') => {
+  const runAutomationAction = (action: 'extract-question') => {
     window.dispatchEvent(new CustomEvent('studypilot:automation-action', {
-      detail: { action, goal: automationGoal }
+      detail: { action }
     }));
   };
 
@@ -210,6 +203,23 @@ export function AIPanel() {
     return result;
   };
 
+  const requestAIWithRetry = async (question: QuestionItem): Promise<AIAnswerResult> => {
+    let lastError: any = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await requestAI(question);
+      } catch (error: any) {
+        lastError = error;
+        const message = String(error?.message || '');
+        if (!/429|Too many requests|limitation/i.test(message) || attempt === 3) break;
+        const waitMs = 2200 * 2 ** attempt;
+        appStore.addLog('warn', `AI 接口限流，等待 ${(waitMs / 1000).toFixed(1)} 秒后重试第 ${question.index || '?'} 题。`);
+        await sleep(waitMs);
+      }
+    }
+    throw lastError;
+  };
+
   const callCurrentAI = async () => {
     if (!currentQuestion) {
       appStore.setStatus('error', '请先抓取页面题目。');
@@ -217,7 +227,7 @@ export function AIPanel() {
     }
     appStore.setStatus('calling_ai', `正在解析第 ${currentQuestion.index || currentQuestionIndex + 1} 题。`);
     try {
-      const answer = await requestAI(currentQuestion);
+      const answer = await requestAIWithRetry(currentQuestion);
       appStore.setCurrentAnswer(answer);
       appStore.setStatus('done', `第 ${currentQuestion.index || currentQuestionIndex + 1} 题解析完成。`);
     } catch (error: any) {
@@ -237,7 +247,7 @@ export function AIPanel() {
         if (answerMap[question.hash]) continue;
         appStore.setCurrentQuestionIndex(index);
         appStore.setStatus('calling_ai', `正在解析第 ${question.index || index + 1} / ${questions.length} 题，优先查询题库。`);
-        const answer = await requestAI(question);
+        const answer = await requestAIWithRetry(question);
         appStore.setCurrentAnswer(answer);
       }
       appStore.setStatus('done', `已完成 ${questions.length} 道题的解析。`);
@@ -261,6 +271,28 @@ export function AIPanel() {
     applyAnswersToPage([{ question, answer }], resolve);
   });
 
+  const extractCurrentPageQuestionAsync = () => new Promise<any>((resolve) => {
+    window.dispatchEvent(new CustomEvent('studypilot:extract-question-request', {
+      detail: { onComplete: resolve }
+    }));
+  });
+
+  const goNextExamQuestionAsync = () => new Promise<any>((resolve) => {
+    window.dispatchEvent(new CustomEvent('studypilot:exam-next-question', {
+      detail: { onComplete: resolve }
+    }));
+  });
+
+  const isSequentialExamQuestion = (question?: QuestionItem | null) => {
+    if (!question) return false;
+    return /reVersionTestStartNew/i.test(question.pageUrl || '') ||
+      /singleQuestionDiv|fanyaMarking|questionLi/i.test(question.selector || '');
+  };
+
+  const shouldUseSequentialExamAutomation = () =>
+    Boolean(currentQuestion && isSequentialExamQuestion(currentQuestion)) ||
+    questions.some((question) => isSequentialExamQuestion(question));
+
   const waitWhileLivePaused = async () => {
     while (livePausedRef.current) {
       await new Promise((resolve) => window.setTimeout(resolve, 250));
@@ -271,6 +303,64 @@ export function AIPanel() {
     livePausedRef.current = !livePausedRef.current;
     setLivePaused(livePausedRef.current);
     appStore.setStatus(livePausedRef.current ? 'idle' : 'calling_ai', livePausedRef.current ? '已暂停边搜边填。' : '已继续边搜边填。');
+  };
+
+  const runSequentialExamAutomation = async () => {
+    let resolvedCount = 0;
+    let appliedCount = 0;
+    const seen = new Set<string>();
+
+    for (let step = 0; step < 160; step += 1) {
+      await waitWhileLivePaused();
+      appStore.setStatus('extracting_question', `正在抓取当前考试题目（第 ${step + 1} 轮）。`);
+      const extractResult = await extractCurrentPageQuestionAsync();
+      if (!extractResult?.success) throw new Error(extractResult?.error || '当前题目抓取失败。');
+      const current = (Array.isArray(extractResult.questions) && extractResult.questions[0]) || extractResult.data;
+      if (current) appStore.setCurrentQuestion(current);
+      if (!current) throw new Error('当前页面未返回题目。');
+      if (!isSequentialExamQuestion(current)) {
+        appStore.setStatus('done', `已离开逐题答题页，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        return;
+      }
+
+      const signature = `${current.index || ''}:${current.hash}`;
+      if (seen.has(signature)) {
+        appStore.setStatus('done', `检测到题目未继续变化，自动化停止。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        return;
+      }
+      seen.add(signature);
+
+      await waitWhileLivePaused();
+      appStore.setCurrentQuestion(current);
+      appStore.setStatus('calling_ai', `正在解析并填入第 ${current.index || step + 1} 题。`);
+      const latestAnswer = appStore.getState().answerMap[current.hash];
+      const answer = latestAnswer || await requestAIWithRetry(current);
+      appStore.setAnswerForQuestion(current, answer, true);
+      resolvedCount += 1;
+
+      await waitWhileLivePaused();
+      const applyResult = await applyAnswerToPageAsync(current, answer);
+      if (!applyResult?.success) throw new Error(`第 ${current.index || step + 1} 题填入失败：${applyResult?.error || '未知错误'}`);
+      appliedCount += 1;
+
+      await waitWhileLivePaused();
+      appStore.setStatus('executing', `第 ${current.index || step + 1} 题已填入，正在进入下一题。`);
+      const nextResult = await goNextExamQuestionAsync();
+      if (!nextResult?.success) {
+        if (nextResult?.done) {
+          appStore.setStatus('done', `已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+          return;
+        }
+        throw new Error(nextResult?.error || '进入下一题失败。');
+      }
+      if (nextResult.done) {
+        appStore.setStatus('done', `已进入全卷浏览。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+    }
+
+    appStore.setStatus('done', `逐题自动化已达到安全上限。已解析 ${resolvedCount} 题，填入 ${appliedCount} 题。`);
   };
 
   const callAllAIAndApplyLive = async () => {
@@ -311,11 +401,24 @@ export function AIPanel() {
       applyPromises.push(task);
     };
 
+    if (shouldUseSequentialExamAutomation()) {
+      try {
+        await runSequentialExamAutomation();
+      } catch (error: any) {
+        appStore.setStatus('error', `逐题考试自动化失败：${error.message}`);
+      } finally {
+        setLiveRunning(false);
+        setLivePaused(false);
+        livePausedRef.current = false;
+      }
+      return;
+    }
+
     try {
       appStore.setStatus('calling_ai', `开始并发查询 ${questions.length} 道题，答案返回后自动填入。`);
       preAnsweredItems.forEach((item) => enqueueApply(item.question, item.answer));
 
-      const workerCount = Math.min(3, Math.max(1, pendingQuestions.length));
+      const workerCount = Math.min(1, Math.max(1, pendingQuestions.length));
       const workers = Array.from({ length: workerCount }, async () => {
         while (nextIndex < pendingQuestions.length) {
           await waitWhileLivePaused();
@@ -323,7 +426,7 @@ export function AIPanel() {
           nextIndex += 1;
           appStore.setStatus('calling_ai', `正在并发查询第 ${question.index || nextIndex} 题，进度 ${resolvedCount}/${questions.length}。`);
           try {
-            const answer = await requestAI(question);
+            const answer = await requestAIWithRetry(question);
             appStore.setAnswerForQuestion(question, answer, question.hash === currentQuestion?.hash);
             resolvedCount += 1;
             enqueueApply(question, answer);
@@ -361,77 +464,65 @@ export function AIPanel() {
     applyAnswersToPage(items);
   };
 
+  const canParse = questions.length > 0 && !batchRunning && !liveRunning && status !== 'calling_ai';
+  const parsedAnswerCount = questions.filter((question) => answerMap[question.hash]).length;
+  const canFill = parsedAnswerCount > 0 && !liveRunning && status !== 'executing';
+
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, height: '100%', overflowY: 'auto' }}>
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <button
-          onClick={() => runAutomationAction('extract-question')}
-          style={{ background: 'rgba(16,185,129,0.15)', color: '#fff', padding: '12px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 8, alignItems: 'center', fontWeight: 900, fontSize: '0.88rem' }}
-        >
-          <FileQuestion size={16} /> 抓取页面题目
-        </button>
-
-        <div>
-          <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: 8 }}>自动化目标</h4>
-          <textarea
-            value={automationGoal}
-            onChange={(event) => setAutomationGoal(event.target.value)}
-            rows={4}
-            style={{ width: '100%', resize: 'vertical', fontSize: '0.8rem' }}
-          />
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div>
+            <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: 6 }}>答题流程</h4>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', lineHeight: 1.55 }}>
+              先获取当前页面题目，再解析答案，最后填入页面。自动化填入会边查题边填入，适合多题页面。
+            </p>
+          </div>
+          <span className="badge badge-primary" style={{ whiteSpace: 'nowrap' }}>{questions.length} 题</span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <button
-            onClick={() => runAutomationAction('scan-page')}
-            style={{ background: 'rgba(99,102,241,0.15)', color: '#fff', padding: '10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 800 }}
+            onClick={() => runAutomationAction('extract-question')}
+            style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900 }}
           >
-            <ScanSearch size={15} /> 扫描
+            <FileQuestion size={15} /> 获取页面题目
           </button>
           <button
-            onClick={() => runAutomationAction('build-plan')}
-            style={{ background: 'rgba(168,85,247,0.15)', color: '#fff', padding: '10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 800 }}
+            onClick={callAllAI}
+            disabled={!canParse}
+            style={{ background: 'rgba(99,102,241,0.18)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canParse ? 1 : 0.55 }}
           >
-            <Wand2 size={15} /> 生成计划
+            <Search size={15} /> 开始解析
+          </button>
+          <button
+            onClick={applyAllAnswers}
+            disabled={!canFill}
+            style={{ background: 'rgba(245,158,11,0.15)', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canFill ? 1 : 0.55 }}
+          >
+            <MousePointerClick size={15} /> 开始填入
+          </button>
+          <button
+            onClick={callAllAIAndApplyLive}
+            disabled={liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0}
+            style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0 ? 0.55 : 1 }}
+          >
+            <Play size={15} /> 自动化填入
           </button>
         </div>
 
-        {snapshot && (
-          <div className="glass-panel" style={{ padding: 12, borderRadius: 8 }}>
-            <h5 style={{ color: '#fff', fontSize: '0.78rem', marginBottom: 8 }}>已识别控件</h5>
-            {snapshot.controls.slice(0, 18).map((control) => (
-              <div key={control.selector} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-                <span>{control.text || control.placeholder || control.tag}</span>
-                <code style={{ color: 'var(--text-muted)' }}>{control.tag}</code>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {currentPlan && (
-          <div className="glass-panel" style={{ padding: 12, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h5 style={{ color: '#fff', fontSize: '0.78rem' }}>执行计划</h5>
-              <span className={`badge ${currentPlan.risk === 'high' ? 'badge-danger' : currentPlan.risk === 'medium' ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '0.62rem' }}>{riskLabels[currentPlan.risk] || currentPlan.risk}</span>
-            </div>
-            {currentPlan.steps.map((step, index) => (
-              <div key={step.id} style={{ display: 'grid', gridTemplateColumns: '22px 1fr', gap: 8, color: 'var(--text-secondary)', fontSize: '0.74rem', lineHeight: 1.45 }}>
-                <span style={{ color: 'var(--primary-color)', fontWeight: 800 }}>{index + 1}</span>
-                <span>{step.label}</span>
-              </div>
-            ))}
-            <button onClick={() => appStore.approvePlan(!currentPlan.approved)} style={{ background: currentPlan.approved ? 'rgba(16,185,129,0.16)' : 'rgba(255,255,255,0.04)', color: currentPlan.approved ? 'var(--success-color)' : '#fff', padding: '9px 10px', borderRadius: 8, fontWeight: 800 }}>
-              {currentPlan.approved ? '已批准' : '批准计划'}
-            </button>
-            <button onClick={() => runAutomationAction('execute-plan')} style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 900, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7 }}>
-              <Play size={15} /> 执行
-            </button>
-          </div>
+        {liveRunning && (
+          <button
+            onClick={toggleLivePause}
+            style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+          >
+            {livePaused ? <Play size={15} /> : <Pause size={15} />} {livePaused ? '继续自动化填入' : '暂停自动化填入'}
+          </button>
         )}
 
         <div className="glass-panel" style={{ padding: 12, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
           <MousePointer2 size={14} style={{ color: 'var(--primary-color)', marginBottom: 6 }} />
-          多题页面会按题号、题型和选项边界拆分。真实页面抓题需要在设置中启用 WebView。
+          已解析 {parsedAnswerCount}/{questions.length} 题。多题页面会按题号、题型和选项边界拆分；真实页面抓题和填入需要在设置中启用真实 WebView。
         </div>
       </div>
 
