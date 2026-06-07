@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron';
+import iconv from 'iconv-lite';
 
 type AutomationAction = 'click' | 'fill' | 'select' | 'wait';
 type QuestionType = 'single' | 'multiple' | 'judgement' | 'completion' | 'essay' | 'unknown';
@@ -1079,8 +1080,27 @@ function removeNoise(root: ParentNode) {
   root.querySelectorAll('script, style, noscript, template, svg, canvas, iframe, code, pre').forEach((node) => node.remove());
 }
 
+function mojibakeScore(text: string) {
+  const value = String(text || '');
+  const hits = (value.match(/[\u6D63\u7EFE\u9359\u9428\u95BF\u7039\u6FE1\u93C2\u9411\u93C9\u95B8\u7035\u95AB\u93C1\u95B2\u7A09\u95C1\u7D94\u68F0\u701B\u8133\u9225\u9365\u7EC9\u620D\uE11F\u7EC0\u53E5\u6D93\u8BB3\u7B9F\u934F\u93B5\u7470\u57BD\u9470\u546D\u6093\u9429]/g) || []).length;
+  const replacementHits = (value.match(/[\uFFFD?]/g) || []).length;
+  return hits * 3 + replacementHits;
+}
+
+function repairMojibakeText(text: string) {
+  const value = String(text || '');
+  if (!value) return '';
+  if (mojibakeScore(value) < 4) return value;
+  try {
+    const repaired = iconv.decode(iconv.encode(value, 'gb18030'), 'utf8');
+    return mojibakeScore(repaired) < mojibakeScore(value) ? repaired : value;
+  } catch {
+    return value;
+  }
+}
+
 function cleanText(text: string) {
-  return String(text || '')
+  return repairMojibakeText(String(text || ''))
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^\s*\d{1,3}\s*[.、．)]\s*/, '')
@@ -2107,7 +2127,12 @@ function optionTargetFromElement(element: HTMLElement, index: number): QuestionO
   const dataLabel = /^[A-Z]$/i.test(dataValue) ? dataValue : '';
   const label = (dataLabel || labelMatch?.[1] || optionLetter(index)).toUpperCase();
   const clickTarget = nearestClickableOption(element) || element;
-  const displayText = optionTextCandidate(clickTarget, label);
+  const judgementValue = parseJudgementValueStable(dataValue);
+  const displayText = judgementValue === 'true'
+    ? '\u5bf9'
+    : judgementValue === 'false'
+      ? '\u9519'
+      : optionTextCandidate(clickTarget, label);
   return {
     label,
     text: optionLabel(label, displayText || rawText || label),
@@ -2217,7 +2242,7 @@ function questionFromRoot(root: HTMLElement, index: number) {
     type: inferTypeFromDom(root, options),
     source: 'webview',
     pageUrl: window.location.href,
-    pageTitle: document.title || window.location.href,
+    pageTitle: cleanText(document.title) || window.location.href,
     capturedAt: Date.now(),
     index,
     selector: selectorFor(root)
@@ -2256,7 +2281,7 @@ function questionFromSegment(segment: { number: number; typeLabel: string; body:
     type: inferTypeFromText(`${segment.typeLabel} ${segment.body}`, options),
     source: 'webview',
     pageUrl: window.location.href,
-    pageTitle: document.title || window.location.href,
+    pageTitle: cleanText(document.title) || window.location.href,
     capturedAt: Date.now(),
     index: segment.number
   };
