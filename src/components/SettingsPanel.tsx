@@ -13,7 +13,7 @@ export function SettingsPanel() {
   const [showKey, setShowKey] = useState(false);
   const [isClearingSession, setIsClearingSession] = useState(false);
   const [isTestingAI, setIsTestingAI] = useState(false);
-  const [testInput, setTestInput] = useState('请用一句中文回复：AI 配置测试成功。');
+  const [testInput, setTestInput] = useState('');
   const [testMessages, setTestMessages] = useState<TestChatMessage[]>([]);
   const selectedProvider = settings.providers.find((provider) => provider.id === selectedProviderId) || settings.providers[0];
   const [formData, setFormData] = useState<AIProviderConfig>(selectedProvider);
@@ -273,8 +273,7 @@ export function SettingsPanel() {
               value={testInput}
               onChange={(event) => setTestInput(event.target.value)}
               rows={3}
-              placeholder="输入测试消息"
-              disabled={isTestingAI}
+              placeholder="输入任意测试消息，例如：请回复一句中文，确认配置可用。"
               style={{ resize: 'vertical', minHeight: 78, fontSize: '0.78rem' }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {

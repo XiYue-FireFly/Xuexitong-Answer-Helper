@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
@@ -8,6 +8,7 @@ import {
   ListChecks,
   MousePointer2,
   MousePointerClick,
+  Pause,
   Play,
   ScanSearch,
   Search,
@@ -133,6 +134,9 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 export function AIPanel() {
   const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, snapshot, currentPlan } = useAppStore();
   const [batchRunning, setBatchRunning] = useState(false);
+  const [liveRunning, setLiveRunning] = useState(false);
+  const [livePaused, setLivePaused] = useState(false);
+  const livePausedRef = useRef(false);
   const [automationGoal, setAutomationGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
 
@@ -244,12 +248,102 @@ export function AIPanel() {
     }
   };
 
-  const applyAnswersToPage = (items: { question: QuestionItem; answer: AIAnswerResult }[]) => {
+  const applyAnswersToPage = (items: { question: QuestionItem; answer: AIAnswerResult }[], onComplete?: (result: any) => void) => {
     if (items.length === 0) {
       appStore.setStatus('error', '没有可填入网页的答案。');
+      onComplete?.({ success: false, error: '没有可填入网页的答案。' });
       return;
     }
-    window.dispatchEvent(new CustomEvent('studypilot:apply-answers', { detail: { items } }));
+    window.dispatchEvent(new CustomEvent('studypilot:apply-answers', { detail: { items, onComplete } }));
+  };
+
+  const applyAnswerToPageAsync = (question: QuestionItem, answer: AIAnswerResult) => new Promise<any>((resolve) => {
+    applyAnswersToPage([{ question, answer }], resolve);
+  });
+
+  const waitWhileLivePaused = async () => {
+    while (livePausedRef.current) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  };
+
+  const toggleLivePause = () => {
+    livePausedRef.current = !livePausedRef.current;
+    setLivePaused(livePausedRef.current);
+    appStore.setStatus(livePausedRef.current ? 'idle' : 'calling_ai', livePausedRef.current ? '已暂停边搜边填。' : '已继续边搜边填。');
+  };
+
+  const callAllAIAndApplyLive = async () => {
+    if (questions.length === 0) {
+      appStore.setStatus('error', '请先抓取页面题目。');
+      return;
+    }
+    if (liveRunning) return;
+
+    setLiveRunning(true);
+    setLivePaused(false);
+    livePausedRef.current = false;
+
+    const pendingQuestions = questions.filter((question) => !answerMap[question.hash]);
+    const preAnsweredItems = questions
+      .filter((question) => answerMap[question.hash])
+      .map((question) => ({ question, answer: answerMap[question.hash] }));
+    let nextIndex = 0;
+    let resolvedCount = preAnsweredItems.length;
+    let appliedCount = 0;
+    const applyPromises: Promise<void>[] = [];
+    let applyQueue = Promise.resolve();
+
+    const enqueueApply = (question: QuestionItem, answer: AIAnswerResult) => {
+      const task = applyQueue
+        .then(async () => {
+          await waitWhileLivePaused();
+          appStore.setStatus('executing', `正在填入第 ${question.index || '?'} 题答案。`);
+          const result = await applyAnswerToPageAsync(question, answer);
+          if (result?.success) {
+            appliedCount += 1;
+            appStore.addLog('success', `第 ${question.index || '?'} 题已自动填入。`);
+          } else {
+            appStore.addLog('error', `第 ${question.index || '?'} 题自动填入失败：${result?.error || '未知错误'}`);
+          }
+        });
+      applyQueue = task.catch(() => undefined);
+      applyPromises.push(task);
+    };
+
+    try {
+      appStore.setStatus('calling_ai', `开始并发查询 ${questions.length} 道题，答案返回后自动填入。`);
+      preAnsweredItems.forEach((item) => enqueueApply(item.question, item.answer));
+
+      const workerCount = Math.min(3, Math.max(1, pendingQuestions.length));
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < pendingQuestions.length) {
+          await waitWhileLivePaused();
+          const question = pendingQuestions[nextIndex];
+          nextIndex += 1;
+          appStore.setStatus('calling_ai', `正在并发查询第 ${question.index || nextIndex} 题，进度 ${resolvedCount}/${questions.length}。`);
+          try {
+            const answer = await requestAI(question);
+            appStore.setAnswerForQuestion(question, answer, question.hash === currentQuestion?.hash);
+            resolvedCount += 1;
+            enqueueApply(question, answer);
+          } catch (error: any) {
+            resolvedCount += 1;
+            appStore.addLog('error', `第 ${question.index || '?'} 题查询失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
+          }
+        }
+      });
+
+      await Promise.all(workers);
+      await Promise.allSettled(applyPromises);
+      appStore.setStatus('done', `边搜边填完成：已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
+    } catch (error: any) {
+      appStore.setStatus('error', `边搜边填失败：${error.message}`);
+    } finally {
+      setLiveRunning(false);
+      setLivePaused(false);
+      livePausedRef.current = false;
+    }
   };
 
   const applyCurrentAnswer = () => {
@@ -441,11 +535,28 @@ export function AIPanel() {
             </button>
             <button
               onClick={callAllAI}
-              disabled={batchRunning || status === 'calling_ai'}
+              disabled={batchRunning || liveRunning || status === 'calling_ai'}
               style={{ background: 'rgba(16,185,129,0.16)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
             >
               <ListChecks size={15} /> 批量查询/解析
             </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: liveRunning ? '1fr auto' : '1fr', gap: 8, marginTop: 8 }}>
+            <button
+              onClick={callAllAIAndApplyLive}
+              disabled={liveRunning || batchRunning || status === 'calling_ai'}
+              style={{ background: 'rgba(99,102,241,0.2)', color: '#fff', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, opacity: liveRunning || batchRunning || status === 'calling_ai' ? 0.55 : 1 }}
+            >
+              <Play size={15} /> 并发查询并自动填入
+            </button>
+            {liveRunning && (
+              <button
+                onClick={toggleLivePause}
+                style={{ background: livePaused ? 'rgba(16,185,129,0.16)' : 'rgba(245,158,11,0.16)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+              >
+                {livePaused ? <Play size={15} /> : <Pause size={15} />} {livePaused ? '继续' : '暂停'}
+              </button>
+            )}
           </div>
         </div>
       )}

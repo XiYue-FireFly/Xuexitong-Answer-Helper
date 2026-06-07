@@ -703,6 +703,21 @@ class GlobalStore {
     this.emit();
   }
 
+  setAnswerForQuestion(question: QuestionItem, answer: AIAnswerResult, makeCurrent = false) {
+    const normalizedAnswer = { ...answer, questionHash: question.hash };
+    this.state.answerMap = { ...this.state.answerMap, [question.hash]: normalizedAnswer };
+    const entry = { question, answer: normalizedAnswer };
+    this.state.answerHistory = [entry, ...this.state.answerHistory.filter((item) => item.question.hash !== question.hash)].slice(0, 120);
+    this.saveAnswerHistory(this.state.answerHistory);
+    if (makeCurrent || this.state.questions[this.state.currentQuestionIndex]?.hash === question.hash) {
+      this.state.currentAnswer = normalizedAnswer;
+      const index = this.state.questions.findIndex((item) => item.hash === question.hash);
+      if (index >= 0) this.state.currentQuestionIndex = index;
+    }
+    this.addLog('success', `已返回第 ${question.index || question.hash.slice(0, 6)} 题参考答案，置信度 ${(normalizedAnswer.confidence * 100).toFixed(0)}%。`);
+    this.emit();
+  }
+
   clearHistory() {
     this.state.history = [];
     this.saveHistory([]);

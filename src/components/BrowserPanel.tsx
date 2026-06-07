@@ -524,6 +524,7 @@ export function BrowserPanel() {
     const handleApplyAnswers = async (event: Event) => {
       const detail = (event as CustomEvent).detail;
       const items = detail?.items || [];
+      const onComplete = typeof detail?.onComplete === 'function' ? detail.onComplete : null;
       const webview = getActiveWebview();
       const waitForApplyResult = () => new Promise<any>((resolve, reject) => {
         let resolver: ((result: any) => void) | null = null;
@@ -540,14 +541,17 @@ export function BrowserPanel() {
 
       if (!canUseRealWebview || !webview) {
         appStore.setStatus('error', '请先在设置中启用真实 WebView，再填入网页答案。');
+        onComplete?.({ success: false, error: '请先在设置中启用真实 WebView，再填入网页答案。' });
         return;
       }
       if (!Array.isArray(items) || items.length === 0) {
         appStore.setStatus('error', '没有可填入网页的答案。');
+        onComplete?.({ success: false, error: '没有可填入网页的答案。' });
         return;
       }
 
       appStore.setStatus('executing', `正在向当前页面填入 ${items.length} 道题的答案。`);
+      let finalResult: any = { success: true, message: `已填入 ${items.length} 道题。` };
       for (const item of items) {
         const resultPromise = waitForApplyResult();
         const sent = safeWebviewRun(() => webview.send?.('studypilot:apply-answer', {
@@ -562,11 +566,14 @@ export function BrowserPanel() {
         }
         const result = await resultPromise.catch((error: Error) => ({ success: false, error: error.message }));
         if (!result?.success) {
+          finalResult = result;
           appStore.setStatus('error', result?.error || '答案选择失败');
           break;
         }
+        finalResult = result;
         await new Promise((resolve) => window.setTimeout(resolve, 900));
       }
+      onComplete?.(finalResult);
     };
 
     window.addEventListener('studypilot:apply-answers', handleApplyAnswers);
