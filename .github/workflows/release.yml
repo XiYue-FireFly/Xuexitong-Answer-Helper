@@ -32,11 +32,25 @@ jobs:
           $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
           npm run pack:win
 
+      - name: Rename Windows installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer was not found in release/"
+          }
+          Copy-Item $installer.FullName "release/Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe"
+
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          draft: false
-          prerelease: false
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          allowUpdates: true
+          replacesArtifacts: true
+          makeLatest: true
+          artifactErrorsFailBuild: true
+          artifacts: release/Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe
           body: |
             ## New Features
 
@@ -59,6 +73,4 @@ jobs:
 
             ## Download
 
-            Windows 用户下载下方 `学习通答题辅助工具 Setup x.x.x.exe` 安装即可。
-          files: |
-            release/*.exe
+            Windows 用户下载下方 `Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe` 安装即可。

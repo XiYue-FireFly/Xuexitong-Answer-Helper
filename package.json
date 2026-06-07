@@ -1,6 +1,6 @@
 {
   "name": "study-pilot",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
