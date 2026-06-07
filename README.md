@@ -165,9 +165,9 @@ npm run release:win
 - **获取API Key**: 访问 [百度智能云千帆平台](https://cloud.baidu.com/product/wenxinworkshop)
 
 ### 小米AI
-- **Base URL**: `https://api.mixin.chat/v1`
+- **Base URL**: `[https://api.mixin.chat/v1](https://api.xiaomimimo.com/v1)`
 - **模型**: `xiaomi-llm`
-- **获取API Key**: 参考小米AI开放平台文档
+- **获取API Key**:[小米AI开放平台文档]([https://cloud.baidu.com/product/wenxinworkshop](https://platform.xiaomimimo.com/docs/zh-CN/price/tokenplan/quick-access))
 
 ### OpenAI
 - **Base URL**: `https://api.openai.com/v1`
