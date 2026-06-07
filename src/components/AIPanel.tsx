@@ -12,6 +12,7 @@ import {
   Play,
   Search,
   ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import { AIAnswerResult, AIProviderConfig, appStore, QuestionItem, useAppStore } from '../store/appStore';
 
@@ -37,6 +38,7 @@ const typeLabels: Record<string, string> = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+const MAX_AI_CONCURRENCY = 5;
 
 function notifyTaskDone(title: string, body: string) {
   const api = (window as any).electronAPI;
@@ -147,6 +149,7 @@ export function AIPanel() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
+  const [aiConcurrency, setAiConcurrency] = useState(1);
   const livePausedRef = useRef(false);
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
 
@@ -437,10 +440,11 @@ export function AIPanel() {
     }
 
     try {
-      appStore.setStatus('calling_ai', `开始并发查询 ${questions.length} 道题，答案返回后自动填入。`);
+      const safeConcurrency = Math.max(1, Math.min(MAX_AI_CONCURRENCY, Math.floor(aiConcurrency) || 1, pendingQuestions.length || 1));
+      appStore.setStatus('calling_ai', `开始并发查询 ${questions.length} 道题，并发数 ${safeConcurrency}，答案返回后自动填入。`);
       preAnsweredItems.forEach((item) => enqueueApply(item.question, item.answer));
 
-      const workerCount = Math.min(1, Math.max(1, pendingQuestions.length));
+      const workerCount = safeConcurrency;
       const workers = Array.from({ length: workerCount }, async () => {
         while (nextIndex < pendingQuestions.length) {
           await waitWhileLivePaused();
@@ -454,6 +458,10 @@ export function AIPanel() {
             enqueueApply(question, answer);
           } catch (error: any) {
             resolvedCount += 1;
+            if (/429|Too many requests|limitation/i.test(String(error?.message || '')) && safeConcurrency > 1) {
+              setAiConcurrency((current) => Math.max(1, Math.min(current, safeConcurrency - 1)));
+              appStore.addLog('warn', `接口限流，本轮仍会完成；下次自动化填入并发数将降为 ${safeConcurrency - 1}。`);
+            }
             appStore.addLog('error', `第 ${question.index || '?'} 题查询失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
           }
         }
@@ -549,6 +557,51 @@ export function AIPanel() {
           <MousePointer2 size={14} style={{ color: 'var(--primary-color)', marginBottom: 6 }} />
           已解析 {parsedAnswerCount}/{questions.length} 题。多题页面会按题号、题型和选项边界拆分；真实页面抓题和填入需要在设置中启用真实 WebView。
         </div>
+
+        <div
+          className="glass-panel"
+          style={{
+            padding: 12,
+            borderRadius: 8,
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) auto',
+            gap: 12,
+            alignItems: 'center',
+            background: 'rgba(255,255,255,0.025)'
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--text-primary)', fontSize: '0.78rem', fontWeight: 850 }}>
+              <Zap size={14} style={{ color: 'var(--primary-color)' }} /> API 并发数
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', lineHeight: 1.45, marginTop: 4 }}>
+              默认 1 最稳；接口额度足够时可调高。遇到 429 限流后会自动降速。
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={1}
+              max={MAX_AI_CONCURRENCY}
+              step={1}
+              value={aiConcurrency}
+              disabled={liveRunning || batchRunning}
+              onChange={(event) => setAiConcurrency(Number(event.target.value))}
+              style={{ width: 86, accentColor: 'var(--primary-color)', opacity: liveRunning || batchRunning ? 0.55 : 1 }}
+            />
+            <span
+              className="badge badge-primary"
+              style={{
+                minWidth: 48,
+                justifyContent: 'center',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {aiConcurrency} 路
+            </span>
+          </div>
+        </div>
       </div>
 
       <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--primary-color)' }}>
@@ -593,11 +646,13 @@ export function AIPanel() {
             <div>还没有抓取题目。</div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, overflowY: 'auto', paddingRight: 6 }}>
             {questions.map((question, index) => {
               const active = index === currentQuestionIndex;
               const answered = Boolean(answerMap[question.hash]);
               const bankHit = appStore.hasQuestionBankAnswer(question);
+              const stateLabel = answered ? '已解析' : bankHit ? '题库' : '未解析';
+              const stateColor = answered ? 'var(--success-color)' : bankHit ? 'var(--warning-color)' : 'var(--text-muted)';
               return (
                 <button
                   key={question.hash}
@@ -607,16 +662,56 @@ export function AIPanel() {
                     background: active ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
                     border: active ? '1px solid var(--primary-color)' : '1px solid var(--border-glass)',
                     color: 'var(--text-primary)',
-                    padding: 10,
-                    borderRadius: 8
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    minHeight: 82,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    overflow: 'hidden'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--primary-color)', fontWeight: 800 }}>第 {question.index || index + 1} 题 · {typeLabels[question.type] || question.type}</span>
-                    <span style={{ color: answered ? 'var(--success-color)' : bankHit ? 'var(--warning-color)' : 'var(--text-muted)', fontSize: '0.7rem' }}>{answered ? '已解析' : bankHit ? '题库' : '未解析'}</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'center' }}>
+                    <span
+                      style={{
+                        minWidth: 0,
+                        fontSize: '0.76rem',
+                        color: 'var(--primary-color)',
+                        fontWeight: 900,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                    >
+                      第 {question.index || index + 1} 题 · {typeLabels[question.type] || question.type}
+                    </span>
+                    <span
+                      style={{
+                        color: stateColor,
+                        fontSize: '0.7rem',
+                        fontWeight: 850,
+                        lineHeight: 1,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}
+                    >
+                      {stateLabel}
+                    </span>
                   </div>
-                  <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
-                    {question.question.slice(0, 64)}{question.question.length > 64 ? '...' : ''}
+                  <div
+                    style={{
+                      fontSize: '0.76rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.5,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      wordBreak: 'break-word',
+                      textWrap: 'pretty'
+                    } as React.CSSProperties}
+                  >
+                    {question.question}
                   </div>
                 </button>
               );
@@ -663,7 +758,7 @@ export function AIPanel() {
               disabled={liveRunning || batchRunning || status === 'calling_ai'}
               style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, opacity: liveRunning || batchRunning || status === 'calling_ai' ? 0.55 : 1 }}
             >
-              <Play size={15} /> 并发查询并自动填入
+              <Play size={15} /> 并发查询并自动填入（{aiConcurrency} 路）
             </button>
             {liveRunning && (
               <button
