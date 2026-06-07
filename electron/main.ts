@@ -949,7 +949,7 @@ app.whenReady().then(() => {
             writeErrorLog({
               source: 'webview:hidden-form-window',
               level: 'info',
-              message: `Keeping form/save endpoint in hidden child window: ${targetUrl}`,
+              message: `Keeping form/save endpoint in hidden child window until it finishes: ${targetUrl}`,
               url: targetUrl
             });
             try {
@@ -957,7 +957,6 @@ app.whenReady().then(() => {
             } catch (error) {
               writeUnknownError('webview:hidden-child-hide', error, undefined, 'warn');
             }
-            childWindow.webContents.once('did-stop-loading', () => closeChildWhenSettled('did-stop-loading'));
             childWindow.webContents.once('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
               writeErrorLog({
                 source: 'webview:hidden-form-window-load-failed',
@@ -965,9 +964,9 @@ app.whenReady().then(() => {
                 message: `${errorCode} ${errorDescription}`,
                 url: validatedURL || targetUrl
               });
-              closeChildWhenSettled(`did-fail-load:${errorCode}`);
+              if (errorCode !== -3) closeChildWhenSettled(`did-fail-load:${errorCode}`);
             });
-            setTimeout(() => closeChildWhenSettled('timeout'), 15000);
+            setTimeout(() => closeChildWhenSettled('timeout'), 45000);
             return;
           }
           if (shouldDropStatKnowledgeUrl(targetUrl)) {

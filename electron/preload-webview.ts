@@ -2339,25 +2339,39 @@ function selectedOptionValue(element: HTMLElement) {
 }
 
 function syncAnswersBeforeSave() {
-  const questionRoots = uniqueElements(Array.from(document.querySelectorAll([
+  const rawQuestionRoots = uniqueElements(Array.from(document.querySelectorAll([
+    '.singleQuestionDiv',
     '.questionLi',
     '[qid][qtype]',
     '[questionid][qtype]',
+    '[data] input[id^="answer"]',
     '.TiMu'
   ].join(','))) as HTMLElement[]);
+  const questionRoots = rawQuestionRoots
+    .map((element) => element.matches('input[id^="answer"]') ? element.closest('.singleQuestionDiv, .questionLi, [qid], [questionid], [data], .TiMu') as HTMLElement | null : element)
+    .filter(Boolean) as HTMLElement[];
   let updated = 0;
   const details: Array<Record<string, unknown>> = [];
 
   for (const root of questionRoots) {
     const qid = root.getAttribute('qid') ||
       root.getAttribute('questionid') ||
+      root.getAttribute('data') ||
       root.querySelector('[qid]')?.getAttribute('qid') ||
       root.querySelector('[questionid]')?.getAttribute('questionid') ||
+      root.querySelector('input[name="questionId"]')?.getAttribute('value') ||
       '';
     if (!qid) continue;
-    const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
+    const hiddenAnswer = (
+      document.querySelector(`#answer${cssEscape(qid)}`) ||
+      document.querySelector(`input[name="answer${cssEscape(qid)}"]`) ||
+      root.querySelector(`#answer${cssEscape(qid)}, input[name="answer${cssEscape(qid)}"]`)
+    ) as HTMLInputElement | null;
     if (!hiddenAnswer) continue;
-    const qtype = root.getAttribute('qtype') || root.querySelector('[qtype]')?.getAttribute('qtype') || '';
+    const qtype = readQuestionTypeHint(root).qtype ||
+      root.getAttribute('qtype') ||
+      root.querySelector('[qtype]')?.getAttribute('qtype') ||
+      '';
     const appliedAnswer = appliedAnswerFor(qid);
     if (appliedAnswer) {
       if (hiddenAnswer.value !== appliedAnswer.answer) {
