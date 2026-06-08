@@ -55,6 +55,8 @@ try {
     }
   }
 
+  node scripts/verify-webview-preload-bundle.mjs $asarPath
+
   $releaseName = "Xuexitong-Answer-Helper-v$version-win-x64-setup.exe"
   $releaseCopyPath = Join-Path $releaseDir $releaseName
   Copy-Item -LiteralPath $installer.FullName -Destination $releaseCopyPath -Force

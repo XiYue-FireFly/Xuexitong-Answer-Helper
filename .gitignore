@@ -9,6 +9,7 @@ out/
 study-pilot/
 
 # Local runtime data and diagnostics
+.codex-run-logs/
 .env
 .env.*
 !.env.example
