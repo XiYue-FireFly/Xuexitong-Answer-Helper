@@ -568,50 +568,32 @@ export function SettingsPanel() {
           />
         </button>
 
-        {showRewardCodes && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-            gap: 12,
-            paddingTop: 2
-          }}>
+        <div
+          className={`reward-codes-shell${showRewardCodes ? ' open' : ''}`}
+          aria-hidden={!showRewardCodes}
+        >
+          <div className="reward-codes-grid">
             {[
               { label: '支付宝', image: REWARD_ALIPAY_IMAGE, color: '#1677ff' },
               { label: '微信支付', image: REWARD_WECHAT_IMAGE, color: '#07c160' }
             ].map((item) => (
               <div
                 key={item.label}
-                style={{
-                  border: '1px solid var(--border-glass)',
-                  borderRadius: 8,
-                  padding: 10,
-                  background: 'rgba(255,255,255,0.035)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 9,
-                  minWidth: 0
-                }}
+                className="reward-code-card"
+                style={{ '--reward-color': item.color } as React.CSSProperties}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--text-primary)', fontSize: '0.78rem', fontWeight: 850 }}>
+                <div className="reward-code-title">
                   <Heart size={14} style={{ color: item.color }} />
                   {item.label}
                 </div>
                 <img
                   src={item.image}
                   alt={`${item.label}赞赏付款码`}
-                  style={{
-                    width: '100%',
-                    maxHeight: 360,
-                    objectFit: 'contain',
-                    borderRadius: 8,
-                    background: '#fff',
-                    border: '1px solid rgba(255,255,255,0.10)'
-                  }}
                 />
               </div>
             ))}
           </div>
-        )}
+        </div>
       </div>
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 16 }}>

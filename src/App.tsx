@@ -123,13 +123,15 @@ export default function App() {
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <AnnouncementBanner />
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              {activeTab === 'automation' && <AIPanel />}
-              {activeTab === 'chapter' && <ChapterLearningPanel />}
-              {activeTab === 'snapshot' && <KnowledgeBase />}
-              {activeTab === 'history' && <HistoryPanel />}
-              {activeTab === 'bugs' && <BugReportPanel />}
-              {activeTab === 'settings' && <SettingsPanel />}
+            <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div key={activeTab} className="side-panel-page">
+                {activeTab === 'automation' && <AIPanel />}
+                {activeTab === 'chapter' && <ChapterLearningPanel />}
+                {activeTab === 'snapshot' && <KnowledgeBase />}
+                {activeTab === 'history' && <HistoryPanel />}
+                {activeTab === 'bugs' && <BugReportPanel />}
+                {activeTab === 'settings' && <SettingsPanel />}
+              </div>
             </div>
           </div>
         </section>
