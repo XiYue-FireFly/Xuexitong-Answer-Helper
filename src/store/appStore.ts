@@ -645,16 +645,17 @@ function normalizeProviders(inputProviders?: AIProviderConfig[]) {
     const saved = byId.get(defaults.id);
     if (!saved) return defaults;
     const preset = AI_PROVIDER_PRESETS[defaults.id];
+    const isCustomProvider = defaults.id === 'custom';
     const next: AIProviderConfig = {
       ...defaults,
       ...saved,
       authHeader: saved.authHeader || defaults.authHeader || 'authorization',
       supportsResponseFormat: saved.supportsResponseFormat ?? defaults.supportsResponseFormat
     };
-    if (preset && !preset.endpoints.some((item) => item.value === next.baseUrl) && !saved.apiKey) {
+    if (!isCustomProvider && preset && !next.baseUrl) {
       next.baseUrl = preset.defaultBaseUrl;
     }
-    if (preset && !preset.models.some((item) => item.value === next.model) && !saved.apiKey) {
+    if (!isCustomProvider && preset && !next.model) {
       next.model = preset.defaultModel;
     }
     if (next.id === 'xiaomi' && (!next.apiKey || next.baseUrl === 'https://api.mixin.chat/v1')) {
@@ -667,9 +668,9 @@ function normalizeProviders(inputProviders?: AIProviderConfig[]) {
       next.baseUrl = defaults.baseUrl;
       next.model = ['deepseek-chat', 'deepseek-reasoner'].includes(next.model) ? defaults.model : next.model;
     }
-    next.authHeader = preset?.authHeader || next.authHeader;
-    next.supportsResponseFormat = preset?.supportsResponseFormat ?? next.supportsResponseFormat;
-    next.name = preset?.name || next.name;
+    next.authHeader = isCustomProvider ? (next.authHeader || 'authorization') : (preset?.authHeader || next.authHeader);
+    next.supportsResponseFormat = isCustomProvider ? (next.supportsResponseFormat ?? false) : (preset?.supportsResponseFormat ?? next.supportsResponseFormat);
+    next.name = isCustomProvider ? (next.name || defaults.name) : (preset?.name || next.name);
     return next;
   });
   const extraProviders = savedProviders

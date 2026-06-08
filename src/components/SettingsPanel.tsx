@@ -189,9 +189,12 @@ export function SettingsPanel() {
   const [testMessages, setTestMessages] = useState<TestChatMessage[]>([]);
   const selectedProvider = settings.providers.find((provider) => provider.id === selectedProviderId) || settings.providers[0];
   const [formData, setFormData] = useState<AIProviderConfig>(selectedProvider);
-  const selectedPreset = AI_PROVIDER_PRESETS[selectedProviderId];
-  const endpointSelectValue = selectedPreset && valueInOptions(formData.baseUrl, selectedPreset.endpoints) ? formData.baseUrl : '__custom__';
-  const modelSelectValue = selectedPreset && valueInOptions(formData.model, selectedPreset.models) ? formData.model : '__custom__';
+  const [customEndpointInput, setCustomEndpointInput] = useState(false);
+  const [customModelInput, setCustomModelInput] = useState(false);
+  const isCustomProvider = selectedProviderId === 'custom';
+  const selectedPreset = isCustomProvider ? undefined : AI_PROVIDER_PRESETS[selectedProviderId];
+  const endpointSelectValue = selectedPreset && !customEndpointInput && valueInOptions(formData.baseUrl, selectedPreset.endpoints) ? formData.baseUrl : '__custom__';
+  const modelSelectValue = selectedPreset && !customModelInput && valueInOptions(formData.model, selectedPreset.models) ? formData.model : '__custom__';
   const providerOptions = settings.providers.map((provider) => ({ label: provider.name, value: provider.id }));
   const endpointOptions = [
     ...(selectedPreset?.endpoints || [{ label: '自定义 Base URL', value: formData.baseUrl }]),
@@ -215,7 +218,10 @@ export function SettingsPanel() {
 
   useEffect(() => {
     const provider = settings.providers.find((item) => item.id === selectedProviderId) || settings.providers[0];
+    const preset = selectedProviderId === 'custom' ? undefined : AI_PROVIDER_PRESETS[selectedProviderId];
     setFormData(provider);
+    setCustomEndpointInput(Boolean(preset && !valueInOptions(provider.baseUrl, preset.endpoints)));
+    setCustomModelInput(Boolean(preset && !valueInOptions(provider.model, preset.models)));
   }, [selectedProviderId, settings.providers]);
 
   useEffect(() => {
@@ -251,8 +257,24 @@ export function SettingsPanel() {
 
   const saveProvider = () => {
     const normalizedProvider = selectedPreset
-      ? { ...formData, name: selectedPreset.name, authHeader: selectedPreset.authHeader, supportsResponseFormat: selectedPreset.supportsResponseFormat }
-      : formData;
+      ? {
+        ...formData,
+        name: selectedPreset.name,
+        baseUrl: formData.baseUrl.trim(),
+        model: formData.model.trim(),
+        apiKey: formData.apiKey.trim(),
+        authHeader: selectedPreset.authHeader,
+        supportsResponseFormat: selectedPreset.supportsResponseFormat
+      }
+      : {
+        ...formData,
+        name: formData.name.trim() || '自定义兼容接口',
+        baseUrl: formData.baseUrl.trim(),
+        model: formData.model.trim(),
+        apiKey: formData.apiKey.trim(),
+        authHeader: formData.authHeader || 'authorization',
+        supportsResponseFormat: formData.supportsResponseFormat ?? false
+      };
     appStore.updateProvider(selectedProviderId, normalizedProvider);
     appStore.updateSettings({ activeProviderId: selectedProviderId });
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
@@ -663,7 +685,7 @@ export function SettingsPanel() {
             options={providerOptions}
             ariaLabel="选择 AI 服务商"
             onChange={(nextId) => {
-              const preset = AI_PROVIDER_PRESETS[nextId];
+              const preset = nextId === 'custom' ? undefined : AI_PROVIDER_PRESETS[nextId];
               setSelectedProviderId(nextId);
               syncSettings({ activeProviderId: nextId });
               if (preset) {
@@ -672,14 +694,29 @@ export function SettingsPanel() {
                   ...(savedProvider || formData),
                   id: nextId,
                   name: preset.name,
-                  baseUrl: preset.defaultBaseUrl,
-                  model: preset.defaultModel,
+                  baseUrl: savedProvider?.baseUrl || preset.defaultBaseUrl,
+                  model: savedProvider?.model || preset.defaultModel,
                   authHeader: preset.authHeader,
                   supportsResponseFormat: preset.supportsResponseFormat
                 };
+                setCustomEndpointInput(!valueInOptions(nextProvider.baseUrl, preset.endpoints));
+                setCustomModelInput(!valueInOptions(nextProvider.model, preset.models));
                 setFormData(nextProvider);
                 appStore.updateProvider(nextId, nextProvider);
+                return;
               }
+              const savedProvider = settings.providers.find((provider) => provider.id === nextId);
+              setCustomEndpointInput(false);
+              setCustomModelInput(false);
+              setFormData(savedProvider || {
+                id: 'custom',
+                name: '自定义兼容接口',
+                baseUrl: '',
+                apiKey: '',
+                model: '',
+                authHeader: 'authorization',
+                supportsResponseFormat: false
+              });
             }}
           />
         </div>
@@ -691,26 +728,43 @@ export function SettingsPanel() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label className="field-label">Base URL</label>
-          <CustomSelect
-            value={endpointSelectValue}
-            options={endpointOptions}
-            ariaLabel="选择 Base URL"
-            onChange={(value) => {
-              if (value === '__custom__') {
-                setFormData((prev) => ({ ...prev, baseUrl: prev.baseUrl || selectedPreset?.defaultBaseUrl || '' }));
-                return;
-              }
-              setFormData((prev) => ({ ...prev, baseUrl: value, authHeader: selectedPreset?.authHeader || prev.authHeader }));
-            }}
-          />
-          {endpointSelectValue === '__custom__' && (
+          {isCustomProvider ? (
             <input
               value={formData.baseUrl}
               onChange={(event) => setFormData((prev) => ({ ...prev, baseUrl: event.target.value }))}
-              placeholder="https://example.com/v1"
+              placeholder="https://api.example.com/v1"
             />
+          ) : (
+            <>
+              <CustomSelect
+                value={endpointSelectValue}
+                options={endpointOptions}
+                ariaLabel="选择 Base URL"
+                onChange={(value) => {
+                  if (value === '__custom__') {
+                    setCustomEndpointInput(true);
+                    setFormData((prev) => ({ ...prev, baseUrl: prev.baseUrl || selectedPreset?.defaultBaseUrl || '' }));
+                    return;
+                  }
+                  setCustomEndpointInput(false);
+                  setFormData((prev) => ({ ...prev, baseUrl: value, authHeader: selectedPreset?.authHeader || prev.authHeader }));
+                }}
+              />
+              {customEndpointInput && (
+                <input
+                  value={formData.baseUrl}
+                  onChange={(event) => setFormData((prev) => ({ ...prev, baseUrl: event.target.value }))}
+                  placeholder="https://example.com/v1"
+                />
+              )}
+            </>
           )}
-          {selectedPreset?.endpoints.find((item) => item.value === formData.baseUrl)?.note && (
+          {isCustomProvider && (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', lineHeight: 1.45 }}>
+              填写 OpenAI 兼容接口根地址，通常以 /v1 结尾；调用时会自动拼接 /chat/completions。
+            </div>
+          )}
+          {!isCustomProvider && selectedPreset?.endpoints.find((item) => item.value === formData.baseUrl)?.note && (
             <div style={{ color: 'var(--warning-color)', fontSize: '0.7rem', lineHeight: 1.45 }}>
               {selectedPreset.endpoints.find((item) => item.value === formData.baseUrl)?.note}
             </div>
@@ -719,26 +773,38 @@ export function SettingsPanel() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label className="field-label">模型</label>
-          <CustomSelect
-            value={modelSelectValue}
-            options={modelOptions}
-            ariaLabel="选择模型"
-            onChange={(value) => {
-              if (value === '__custom__') {
-                setFormData((prev) => ({ ...prev, model: prev.model || selectedPreset?.defaultModel || '' }));
-                return;
-              }
-              setFormData((prev) => ({ ...prev, model: value }));
-            }}
-          />
-          {modelSelectValue === '__custom__' && (
+          {isCustomProvider ? (
             <input
               value={formData.model}
               onChange={(event) => setFormData((prev) => ({ ...prev, model: event.target.value }))}
-              placeholder="model-name"
+              placeholder="例如：gpt-4o-mini、qwen-plus、deepseek-chat"
             />
+          ) : (
+            <>
+              <CustomSelect
+                value={modelSelectValue}
+                options={modelOptions}
+                ariaLabel="选择模型"
+                onChange={(value) => {
+                  if (value === '__custom__') {
+                    setCustomModelInput(true);
+                    setFormData((prev) => ({ ...prev, model: prev.model || selectedPreset?.defaultModel || '' }));
+                    return;
+                  }
+                  setCustomModelInput(false);
+                  setFormData((prev) => ({ ...prev, model: value }));
+                }}
+              />
+              {customModelInput && (
+                <input
+                  value={formData.model}
+                  onChange={(event) => setFormData((prev) => ({ ...prev, model: event.target.value }))}
+                  placeholder="model-name"
+                />
+              )}
+            </>
           )}
-          {selectedPreset?.models.find((item) => item.value === formData.model)?.note && (
+          {!isCustomProvider && selectedPreset?.models.find((item) => item.value === formData.model)?.note && (
             <div style={{ color: 'var(--warning-color)', fontSize: '0.7rem', lineHeight: 1.45 }}>
               {selectedPreset.models.find((item) => item.value === formData.model)?.note}
             </div>

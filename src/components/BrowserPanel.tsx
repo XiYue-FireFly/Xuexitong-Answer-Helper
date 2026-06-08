@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Check,
   Compass,
+  Copy,
   Maximize2,
   Minimize2,
   Plus,
@@ -40,6 +41,14 @@ interface BrowserTab {
   canGoBack: boolean;
   canGoForward: boolean;
 }
+
+type TabContextMenuAction = 'refresh' | 'copy' | 'close' | 'closeOthers' | 'closeRight';
+
+type TabContextMenuState = {
+  tabId: string;
+  x: number;
+  y: number;
+};
 
 const mockQuestions: QuestionItem[] = [
   {
@@ -340,7 +349,7 @@ export function BrowserPanel() {
   const [goal, setGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
   const [mockValues, setMockValues] = useState<Record<string, string | boolean>>({});
   const [mockSubmitted, setMockSubmitted] = useState(false);
-  const [tabContextMenu, setTabContextMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
@@ -843,17 +852,25 @@ export function BrowserPanel() {
     }
   };
 
+  const runTabContextAction = (action: TabContextMenuAction, tabId: string) => {
+    if (action === 'refresh') refreshBrowserTab(tabId);
+    if (action === 'copy') copyTabUrl(tabId);
+    if (action === 'close') closeBrowserTab(tabId);
+    if (action === 'closeOthers') closeOtherTabs(tabId);
+    if (action === 'closeRight') closeTabsToRight(tabId);
+  };
+
   const openTabContextMenu = (event: React.MouseEvent, tabId: string) => {
     event.preventDefault();
     event.stopPropagation();
     setActiveTabId(tabId);
     const viewportPadding = 8;
-    const menuWidth = 176;
-    const menuHeight = 214;
+    const menuWidth = 270;
+    const menuHeight = 262;
     setTabContextMenu({
       tabId,
-      x: Math.min(event.clientX, window.innerWidth - menuWidth - viewportPadding),
-      y: Math.min(event.clientY, window.innerHeight - menuHeight - viewportPadding)
+      x: Math.max(viewportPadding, Math.min(event.clientX, window.innerWidth - menuWidth - viewportPadding)),
+      y: Math.max(viewportPadding, Math.min(event.clientY, window.innerHeight - menuHeight - viewportPadding))
     });
   };
 
@@ -979,6 +996,7 @@ export function BrowserPanel() {
                   tabIndex={0}
                   title="关闭标签页"
                   onClick={(event) => closeBrowserTab(tab.id, event)}
+                  onContextMenu={(event) => openTabContextMenu(event, tab.id)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') closeBrowserTab(tab.id);
                   }}
@@ -998,47 +1016,51 @@ export function BrowserPanel() {
           </button>
           {tabContextMenu && (
             <div
+              className="browser-tab-context-menu"
+              role="menu"
+              aria-label="标签页菜单"
               onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
               style={{
                 position: 'fixed',
                 left: tabContextMenu.x,
                 top: tabContextMenu.y,
-                zIndex: 10020,
-                width: 176,
-                padding: 6,
-                borderRadius: 8,
-                border: '1px solid var(--border-glass)',
-                background: 'var(--bg-panel-solid)',
-                boxShadow: '0 16px 36px rgba(0,0,0,0.38)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2
+                zIndex: 10020
               }}
             >
               {[
-                { label: '刷新标签页', action: () => refreshBrowserTab(tabContextMenu.tabId), disabled: false },
-                { label: '复制标签页地址', action: () => copyTabUrl(tabContextMenu.tabId), disabled: false },
-                { label: '关闭标签页', action: () => closeBrowserTab(tabContextMenu.tabId), disabled: false },
-                { label: '关闭其他标签页', action: () => closeOtherTabs(tabContextMenu.tabId), disabled: tabs.length <= 1 },
-                { label: '关闭右侧标签页', action: () => closeTabsToRight(tabContextMenu.tabId), disabled: tabs.findIndex((tab) => tab.id === tabContextMenu.tabId) >= tabs.length - 1 }
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  disabled={item.disabled}
-                  onClick={item.action}
-                  style={{
-                    textAlign: 'left',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    color: item.disabled ? 'var(--text-muted)' : 'var(--text-primary)',
-                    background: 'transparent',
-                    fontSize: '0.76rem',
-                    opacity: item.disabled ? 0.55 : 1
-                  }}
-                >
-                  {item.label}
-                </button>
+                [
+                  { label: '刷新', shortcut: 'Ctrl+R', action: 'refresh' as const, icon: RefreshCw, disabled: false },
+                  { label: '复制标签页地址', shortcut: 'Ctrl+Shift+C', action: 'copy' as const, icon: Copy, disabled: false }
+                ],
+                [
+                  { label: '关闭标签页', shortcut: 'Ctrl+W', action: 'close' as const, icon: X, disabled: false },
+                  { label: '关闭其他标签页', shortcut: '', action: 'closeOthers' as const, icon: X, disabled: tabs.length <= 1 },
+                  { label: '关闭右侧标签页', shortcut: '', action: 'closeRight' as const, icon: X, disabled: tabs.findIndex((tab) => tab.id === tabContextMenu.tabId) >= tabs.length - 1 }
+                ]
+              ].map((group, groupIndex) => (
+                <div key={groupIndex} className="browser-tab-context-group">
+                  {group.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.label}
+                        type="button"
+                        role="menuitem"
+                        disabled={item.disabled}
+                        onClick={() => runTabContextAction(item.action, tabContextMenu.tabId)}
+                        className="browser-tab-context-item"
+                      >
+                        <Icon size={16} />
+                        <span>{item.label}</span>
+                        {item.shortcut && <kbd>{item.shortcut}</kbd>}
+                      </button>
+                    );
+                  })}
+                </div>
               ))}
             </div>
           )}
