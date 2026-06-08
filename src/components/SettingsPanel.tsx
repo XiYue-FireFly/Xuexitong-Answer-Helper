@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, Copy, Download, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
+import { ChevronDown, Coffee, Copy, Download, ExternalLink, Eye, EyeOff, Heart, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
+
+const REWARD_ALIPAY_IMAGE = new URL('../assets/reward-alipay.jpg', import.meta.url).href;
+const REWARD_WECHAT_IMAGE = new URL('../assets/reward-wechat.jpg', import.meta.url).href;
 
 type TestChatMessage = {
   role: 'user' | 'assistant';
@@ -174,6 +177,7 @@ export function SettingsPanel() {
   const [selectedProviderId, setSelectedProviderId] = useState(settings.activeProviderId);
   const [showKey, setShowKey] = useState(false);
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false);
+  const [showRewardCodes, setShowRewardCodes] = useState(false);
   const [copiedKeyHelpUrl, setCopiedKeyHelpUrl] = useState('');
   const [isClearingSession, setIsClearingSession] = useState(false);
   const [isTestingAI, setIsTestingAI] = useState(false);
@@ -511,6 +515,101 @@ export function SettingsPanel() {
             ) : (
               <div style={{ color: 'var(--danger-color)', fontSize: '0.76rem' }}>{updateInfo.error || '检查更新失败。'}</div>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <button
+          type="button"
+          onClick={() => setShowRewardCodes((prev) => !prev)}
+          aria-expanded={showRewardCodes}
+          style={{
+            width: '100%',
+            padding: 0,
+            background: 'transparent',
+            color: 'inherit',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            textAlign: 'left'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              display: 'grid',
+              placeItems: 'center',
+              color: 'var(--warning-color)',
+              background: 'rgba(245,158,11,0.12)',
+              border: '1px solid rgba(245,158,11,0.24)',
+              flex: '0 0 auto'
+            }}>
+              <Coffee size={18} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <h5 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: 4 }}>赞赏支持</h5>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.74rem', lineHeight: 1.5 }}>
+                如果这个项目对你有帮助，想请作者喝水或者喝杯咖啡，都是可以的~
+              </div>
+            </div>
+          </div>
+          <ChevronDown
+            size={18}
+            style={{
+              color: 'var(--text-muted)',
+              transform: showRewardCodes ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 160ms ease',
+              flex: '0 0 auto'
+            }}
+          />
+        </button>
+
+        {showRewardCodes && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: 12,
+            paddingTop: 2
+          }}>
+            {[
+              { label: '支付宝', image: REWARD_ALIPAY_IMAGE, color: '#1677ff' },
+              { label: '微信支付', image: REWARD_WECHAT_IMAGE, color: '#07c160' }
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  border: '1px solid var(--border-glass)',
+                  borderRadius: 8,
+                  padding: 10,
+                  background: 'rgba(255,255,255,0.035)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 9,
+                  minWidth: 0
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--text-primary)', fontSize: '0.78rem', fontWeight: 850 }}>
+                  <Heart size={14} style={{ color: item.color }} />
+                  {item.label}
+                </div>
+                <img
+                  src={item.image}
+                  alt={`${item.label}赞赏付款码`}
+                  style={{
+                    width: '100%',
+                    maxHeight: 360,
+                    objectFit: 'contain',
+                    borderRadius: 8,
+                    background: '#fff',
+                    border: '1px solid rgba(255,255,255,0.10)'
+                  }}
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>

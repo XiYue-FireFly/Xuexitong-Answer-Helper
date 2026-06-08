@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notify: (title: string, body: string) => ipcRenderer.invoke('app:notify', { title, body }),
   getWebviewSessionState: () => ipcRenderer.invoke('session:get-webview-state'),
   clearWebviewSession: () => ipcRenderer.invoke('session:clear-webview-login'),
+  listCloudQuestionBanks: (source: string) => ipcRenderer.invoke('cloud-bank:list', source),
+  downloadCloudQuestionBank: (payload: any) => ipcRenderer.invoke('cloud-bank:download', payload),
+  uploadCloudQuestionBank: (payload: any) => ipcRenderer.invoke('cloud-bank:upload', payload),
   
   // System logging
   log: (level: string, message: string) => ipcRenderer.send('system:log', { level, message }),

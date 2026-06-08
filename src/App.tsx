@@ -71,7 +71,7 @@ export default function App() {
       <header className="app-shell-bar" style={{ height: 40, borderBottom: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', userSelect: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Brain size={18} style={{ color: 'var(--primary-color)' }} />
-          <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.9rem' }}>StudyPilot 网页自动化</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.9rem' }}>学习通答题辅助工具</span>
           <span className="badge badge-primary" style={{ fontSize: '0.62rem', padding: '1px 7px' }}>v2</span>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>

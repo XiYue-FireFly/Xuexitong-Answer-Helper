@@ -19,6 +19,27 @@ const BLOCKED_STAT_KNOWLEDGE_URL = /\/\/stat\d*-ans\.chaoxing\.com\/study-knowle
 const INCOMPLETE_EXAM_LIST_PATH = /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i;
 const RELEASE_API_URL = 'https://api.github.com/repos/XiYue-FireFly/Xuexitong-Answer-Helper/releases/latest';
 const RELEASES_PAGE_URL = 'https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/latest';
+const RELEASE_DOWNLOAD_BASE_URL = 'https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/download';
+const CLOUD_QUESTION_BANK_REPOS = {
+  github: {
+    label: 'GitHub',
+    owner: 'XiYue-FireFly',
+    repo: 'Xuexitong-Answer-Helper-Question-bank',
+    branch: 'main',
+    manifestPath: 'manifest.json',
+    rawBaseUrl: 'https://raw.githubusercontent.com/XiYue-FireFly/Xuexitong-Answer-Helper-Question-bank/main',
+    contentsApiUrl: 'https://api.github.com/repos/XiYue-FireFly/Xuexitong-Answer-Helper-Question-bank/contents'
+  },
+  gitee: {
+    label: 'Gitee',
+    owner: 'SunandMoon-FireFly',
+    repo: 'xuexitong-answer-helper-question-bank',
+    branch: 'main',
+    manifestPath: 'manifest.json',
+    rawBaseUrl: 'https://gitee.com/SunandMoon-FireFly/xuexitong-answer-helper-question-bank/raw/main',
+    contentsApiUrl: 'https://gitee.com/api/v5/repos/SunandMoon-FireFly/xuexitong-answer-helper-question-bank/contents'
+  }
+} as const;
 
 installProcessErrorLogging();
 if (process.platform === 'win32') app.setAppUserModelId('com.studypilot.desktop');
@@ -120,6 +141,54 @@ function compareVersion(left: string, right: string) {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+function maskDisplayName(name: string) {
+  const value = String(name || '').trim();
+  if (!value) return '匿名用户';
+  if (value.length <= 1) return `${value}*`;
+  if (value.length === 2) return `${value[0]}*`;
+  return `${value[0]}*${value[value.length - 1]}`;
+}
+
+function safeSlug(input: string) {
+  const slug = String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42);
+  return slug || `bank-${Date.now().toString(36)}`;
+}
+
+function normalizeCloudBankManifest(input: any) {
+  const banks = Array.isArray(input?.banks) ? input.banks : Array.isArray(input) ? input : [];
+  return {
+    version: 1,
+    updatedAt: String(input?.updatedAt || new Date().toISOString()),
+    banks: banks
+      .filter((item: any) => item && typeof item === 'object')
+      .map((item: any) => ({
+        id: String(item.id || safeSlug(item.name || item.path || 'bank')),
+        name: String(item.name || '未命名题库').slice(0, 80),
+        remark: String(item.remark || '').slice(0, 240),
+        count: Math.max(0, Number(item.count) || 0),
+        author: maskDisplayName(String(item.author || item.user || '匿名用户')),
+        path: String(item.path || '').replace(/^\/+/, ''),
+        updatedAt: String(item.updatedAt || '')
+      }))
+      .filter((item: any) => item.path && /^banks\/[^/]+\.json$/i.test(item.path))
+  };
+}
+
+function cloudRepo(source: string) {
+  if (source === 'gitee') return CLOUD_QUESTION_BANK_REPOS.gitee;
+  return CLOUD_QUESTION_BANK_REPOS.github;
+}
+
+function buildDownloadUrlForTag(tag: string) {
+  const normalizedTag = tag.startsWith('v') ? tag : `v${tag}`;
+  return `${RELEASE_DOWNLOAD_BASE_URL}/${normalizedTag}/Xuexitong-Answer-Helper-${normalizedTag}-win-x64-setup.exe`;
 }
 
 function readRecentErrorLogs(limit = 80) {
@@ -666,6 +735,12 @@ function createWindow() {
     icon: path.join(__dirname, '../public/icon.png')
   });
 
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown') {
+      mainWindow?.webContents.toggleDevTools();
+    }
+  });
+
   // Load Vite Dev server if available, otherwise load built dist
   const devUrl = 'http://localhost:3000';
   if (app.isPackaged || process.env.NODE_ENV === 'production') {
@@ -676,7 +751,6 @@ function createWindow() {
     const req = http.get(devUrl, (res: any) => {
       if (res.statusCode === 200 && mainWindow) {
         mainWindow.loadURL(devUrl);
-        mainWindow.webContents.openDevTools();
       } else if (mainWindow) {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
       }
@@ -794,8 +868,27 @@ ipcMain.handle('diagnostics:get-recent-error-logs', (_event, limit?: number) => 
 });
 
 ipcMain.handle('app:check-update', async () => {
+  const currentVersion = app.getVersion();
   try {
-    const currentVersion = app.getVersion();
+    const latestPage = await fetchText(RELEASES_PAGE_URL);
+    const latestTag = latestPage.finalUrl.match(/\/releases\/tag\/(v?[\w.-]+)/i)?.[1] || '';
+    if (latestTag) {
+      const latestVersion = latestTag.replace(/^v/i, '');
+      const normalizedTag = latestTag.startsWith('v') ? latestTag : `v${latestTag}`;
+      return {
+        success: true,
+        currentVersion,
+        latestVersion,
+        hasUpdate: compareVersion(latestVersion, currentVersion) > 0,
+        releaseUrl: `https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/${normalizedTag}`,
+        downloadUrl: buildDownloadUrlForTag(normalizedTag),
+        assetName: `Xuexitong-Answer-Helper-${normalizedTag}-win-x64-setup.exe`,
+        body: '',
+        publishedAt: '',
+        warning: '已通过 Releases 页面检查更新，未占用 GitHub API 额度。'
+      };
+    }
+
     const release = await fetchJson(RELEASE_API_URL);
     const latestVersion = String(release?.tag_name || release?.name || '').replace(/^v/i, '') || currentVersion;
     const assets = Array.isArray(release?.assets) ? release.assets : [];
@@ -815,8 +908,8 @@ ipcMain.handle('app:check-update', async () => {
     writeUnknownError('app:check-update', error);
     return {
       success: true,
-      currentVersion: app.getVersion(),
-      latestVersion: app.getVersion(),
+      currentVersion,
+      latestVersion: currentVersion,
       hasUpdate: false,
       releaseUrl: RELEASES_PAGE_URL,
       downloadUrl: RELEASES_PAGE_URL,
@@ -833,6 +926,173 @@ ipcMain.handle('app:open-url', async (_event, targetUrl?: string) => {
   if (!/^https?:\/\//i.test(url)) return { success: false, error: '只允许打开 http/https 链接。' };
   await shell.openExternal(url);
   return { success: true };
+});
+
+ipcMain.handle('cloud-bank:list', async (_event, source = 'github') => {
+  try {
+    const repo = cloudRepo(String(source));
+    const manifestUrl = `${repo.rawBaseUrl}/${repo.manifestPath}?t=${Date.now()}`;
+    const response = await fetchText(manifestUrl);
+    if (response.statusCode === 404) {
+      return { success: true, source: repo.label, banks: [], warning: '云端题库清单还未创建。上传第一份题库后会自动生成。' };
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(`清单返回 ${response.statusCode}：${response.text.slice(0, 160)}`);
+    }
+    const manifest = normalizeCloudBankManifest(safeParseJson(response.text, manifestUrl));
+    return { success: true, source: repo.label, banks: manifest.banks, updatedAt: manifest.updatedAt };
+  } catch (error: any) {
+    writeUnknownError('cloud-bank:list', error);
+    return { success: false, error: error?.message || '读取云端题库失败。', banks: [] };
+  }
+});
+
+ipcMain.handle('cloud-bank:download', async (_event, payload) => {
+  try {
+    const repo = cloudRepo(String(payload?.source || 'github'));
+    const bankPath = String(payload?.path || '').replace(/^\/+/, '');
+    if (!/^banks\/[^/]+\.json$/i.test(bankPath)) throw new Error('云端题库路径不合法。');
+    const fileUrl = `${repo.rawBaseUrl}/${bankPath}?t=${Date.now()}`;
+    const response = await fetchText(fileUrl);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(`题库返回 ${response.statusCode}：${response.text.slice(0, 160)}`);
+    }
+    const parsed = safeParseJson(response.text, fileUrl);
+    const entries = Array.isArray(parsed) ? parsed : parsed.entries;
+    if (!Array.isArray(entries)) throw new Error('云端题库格式不正确。');
+    return { success: true, source: repo.label, entries, meta: parsed.meta || null };
+  } catch (error: any) {
+    writeUnknownError('cloud-bank:download', error);
+    return { success: false, error: error?.message || '下载云端题库失败。' };
+  }
+});
+
+async function fetchRepoContent(repo: ReturnType<typeof cloudRepo>, targetPath: string, token: string) {
+  if (repo.label === 'GitHub') {
+    const response = await fetchText(`${repo.contentsApiUrl}/${encodeURIComponent(targetPath).replace(/%2F/g, '/')}?ref=${repo.branch}`, 0, {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    });
+    if (response.statusCode === 404) return null;
+    if (response.statusCode < 200 || response.statusCode >= 300) throw new Error(`读取 ${targetPath} 失败：${response.statusCode}`);
+    return safeParseJson(response.text, targetPath);
+  }
+  const response = await fetchText(`${repo.contentsApiUrl}/${encodeURIComponent(targetPath).replace(/%2F/g, '/')}?access_token=${encodeURIComponent(token)}&ref=${repo.branch}`);
+  if (response.statusCode === 404) return null;
+  if (response.statusCode < 200 || response.statusCode >= 300) throw new Error(`读取 ${targetPath} 失败：${response.statusCode}`);
+  return safeParseJson(response.text, targetPath);
+}
+
+function requestJson(url: string, method: string, body: any, headers: Record<string, string>) {
+  return new Promise<any>((resolve, reject) => {
+    const data = Buffer.from(JSON.stringify(body), 'utf8');
+    const parsed = new URL(url);
+    const client = parsed.protocol === 'https:' ? https : http;
+    const request = client.request(parsed, {
+      method,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': String(data.length),
+        'User-Agent': `StudyPilot/${app.getVersion()} (Windows Electron)`
+      }
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+          reject(new Error(`接口返回 ${res.statusCode}：${text.slice(0, 300)}`));
+          return;
+        }
+        resolve(text ? safeParseJson(text, url) : {});
+      });
+    });
+    request.setTimeout(20000, () => request.destroy(new Error('接口请求超时。')));
+    request.on('error', reject);
+    request.write(data);
+    request.end();
+  });
+}
+
+async function writeRepoContent(repo: ReturnType<typeof cloudRepo>, targetPath: string, contentText: string, message: string, token: string) {
+  const existing = await fetchRepoContent(repo, targetPath, token);
+  const content = Buffer.from(contentText, 'utf8').toString('base64');
+  if (repo.label === 'GitHub') {
+    return requestJson(`${repo.contentsApiUrl}/${encodeURIComponent(targetPath).replace(/%2F/g, '/')}`, 'PUT', {
+      message,
+      content,
+      branch: repo.branch,
+      sha: existing?.sha
+    }, {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    });
+  }
+  return requestJson(`${repo.contentsApiUrl}/${encodeURIComponent(targetPath).replace(/%2F/g, '/')}`, existing?.sha ? 'PUT' : 'POST', {
+    access_token: token,
+    message,
+    content,
+    branch: repo.branch,
+    sha: existing?.sha
+  }, {});
+}
+
+ipcMain.handle('cloud-bank:upload', async (_event, payload) => {
+  try {
+    const repo = cloudRepo(String(payload?.source || 'github'));
+    const token = String(payload?.token || '').trim();
+    const name = String(payload?.name || '').trim();
+    const remark = String(payload?.remark || '').trim();
+    const author = String(payload?.author || '').trim();
+    const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+    if (!token) throw new Error(`请先填写 ${repo.label} Token。`);
+    if (!name) throw new Error('请填写题库名字。');
+    if (!entries.length) throw new Error('当前本地题库为空，无法上传。');
+
+    const id = `${safeSlug(name)}-${Date.now().toString(36)}`;
+    const bankPath = `banks/${id}.json`;
+    const now = new Date().toISOString();
+    const bankBody = JSON.stringify({
+      meta: {
+        id,
+        name,
+        remark,
+        author: maskDisplayName(author),
+        count: entries.length,
+        source: repo.label,
+        updatedAt: now
+      },
+      entries
+    }, null, 2);
+
+    const manifestContent = await fetchRepoContent(repo, repo.manifestPath, token).catch(() => null);
+    const manifest = normalizeCloudBankManifest(manifestContent?.content
+      ? JSON.parse(Buffer.from(String(manifestContent.content).replace(/\s+/g, ''), 'base64').toString('utf8'))
+      : { version: 1, banks: [] });
+    manifest.updatedAt = now;
+    manifest.banks = [
+      {
+        id,
+        name,
+        remark,
+        count: entries.length,
+        author: maskDisplayName(author),
+        path: bankPath,
+        updatedAt: now
+      },
+      ...manifest.banks.filter((item: any) => item.path !== bankPath)
+    ].slice(0, 200);
+
+    await writeRepoContent(repo, bankPath, bankBody, `upload question bank: ${name}`, token);
+    await writeRepoContent(repo, repo.manifestPath, JSON.stringify(manifest, null, 2), `update question bank manifest: ${name}`, token);
+    return { success: true, source: repo.label, name, count: entries.length, path: bankPath };
+  } catch (error: any) {
+    writeUnknownError('cloud-bank:upload', error);
+    return { success: false, error: error?.message || '上传云端题库失败。' };
+  }
 });
 
 ipcMain.handle('app:notify', async (_event, payload?: { title?: string; body?: string }) => {
@@ -930,10 +1190,10 @@ ipcMain.handle('automation:execute-plan', async (_, payload) => {
 });
 
 // Helper to perform simple GET requests from native process.
-function fetchText(url: string, redirectCount = 0): Promise<{ statusCode: number; statusMessage: string; headers: http.IncomingHttpHeaders; text: string }> {
+function fetchText(url: string, redirectCount = 0, extraHeaders: Record<string, string> = {}): Promise<{ statusCode: number; statusMessage: string; headers: http.IncomingHttpHeaders; text: string; finalUrl: string }> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
-    const request = client.get(url, { headers: createRequestHeaders(url) }, (res) => {
+    const request = client.get(url, { headers: { ...createRequestHeaders(url), ...extraHeaders } }, (res) => {
       const statusCode = res.statusCode || 0;
       const location = res.headers.location;
       if (statusCode >= 300 && statusCode < 400 && location) {
@@ -943,7 +1203,7 @@ function fetchText(url: string, redirectCount = 0): Promise<{ statusCode: number
           return;
         }
         const nextUrl = new URL(location, url).toString();
-        fetchText(nextUrl, redirectCount + 1).then(resolve).catch(reject);
+        fetchText(nextUrl, redirectCount + 1, extraHeaders).then(resolve).catch(reject);
         return;
       }
 
@@ -957,7 +1217,8 @@ function fetchText(url: string, redirectCount = 0): Promise<{ statusCode: number
           statusCode,
           statusMessage: res.statusMessage || '',
           headers: res.headers,
-          text
+          text,
+          finalUrl: url
         });
       });
     });
@@ -1025,6 +1286,12 @@ app.whenReady().then(() => {
   // to the renderer so the embedded browser can create an internal tab.
   app.on('web-contents-created', (_, contents) => {
     if (contents.getType() === 'webview') {
+      contents.on('before-input-event', (_event, input) => {
+        if (input.key === 'F12' && input.type === 'keyDown') {
+          contents.toggleDevTools();
+        }
+      });
+
       contents.on('console-message', (_event, level, message, line, sourceId) => {
         if (shouldSkipConsoleMessage(message)) return;
 
