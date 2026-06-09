@@ -51,6 +51,7 @@ export interface QuestionItem {
   source: 'mock' | 'webview' | 'manual';
   pageUrl?: string;
   pageTitle?: string;
+  context?: string;
   capturedAt: number;
   index?: number;
   selector?: string;
@@ -78,11 +79,26 @@ export interface AIAnswerResult {
   createdAt: number;
 }
 
+export interface TokenUsageRecord {
+  id: string;
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  source: 'answer' | 'test';
+  questionIndex?: number;
+  questionTitle?: string;
+  createdAt: number;
+  durationMs?: number;
+}
+
 export interface QuestionBankEntry {
   id: string;
   questionKey: string;
   question: string;
   options: string[];
+  context?: string;
   answer: AIAnswerResult;
   updatedAt: number;
   hits: number;
@@ -145,6 +161,7 @@ export interface AppSettings {
   theme: 'dark' | 'light';
   providers: AIProviderConfig[];
   activeProviderId: string;
+  apiConcurrency: number;
 }
 
 export interface ChapterVideoInfo {
@@ -635,8 +652,15 @@ const defaultSettings: AppSettings = {
   mockModeUrl: 'https://study-demo.studypilot.local/automation',
   theme: 'dark',
   providers: defaultProviders,
-  activeProviderId: 'dashscope'
+  activeProviderId: 'dashscope',
+  apiConcurrency: 5
 };
+
+function normalizeApiConcurrency(value: unknown) {
+  const numberValue = Math.floor(Number(value));
+  if (!Number.isFinite(numberValue)) return 5;
+  return Math.max(1, Math.min(5, numberValue));
+}
 
 function normalizeProviders(inputProviders?: AIProviderConfig[]) {
   const savedProviders = inputProviders?.length ? inputProviders : [];
@@ -685,7 +709,8 @@ function normalizeSettings(input: Partial<AppSettings> | null): AppSettings {
     ...defaultSettings,
     ...input,
     providers: normalizeProviders(input.providers),
-    activeProviderId: input.activeProviderId || defaultSettings.activeProviderId
+    activeProviderId: input.activeProviderId || defaultSettings.activeProviderId,
+    apiConcurrency: normalizeApiConcurrency(input.apiConcurrency ?? defaultSettings.apiConcurrency)
   };
 }
 
@@ -710,6 +735,7 @@ class GlobalStore {
     questionBank: this.loadQuestionBank(),
     history: this.loadHistory(),
     answerHistory: this.loadAnswerHistory(),
+    tokenUsage: this.loadTokenUsage(),
     isElectron: typeof window !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron')
   };
 
@@ -779,6 +805,47 @@ class GlobalStore {
     localStorage.setItem('studypilot_answer_history', JSON.stringify(history));
   }
 
+  private loadTokenUsage(): TokenUsageRecord[] {
+    try {
+      const saved = localStorage.getItem('studypilot_token_usage_v1');
+      if (saved) {
+        const records = JSON.parse(saved);
+        if (Array.isArray(records)) {
+          return records
+            .map((record): TokenUsageRecord | null => {
+              if (!record || typeof record !== 'object') return null;
+              const totalTokens = Number(record.totalTokens || 0);
+              const promptTokens = Number(record.promptTokens || 0);
+              const completionTokens = Number(record.completionTokens || 0);
+              if (!Number.isFinite(totalTokens + promptTokens + completionTokens)) return null;
+              return {
+                id: String(record.id || Math.random().toString(36).slice(2)),
+                provider: String(record.provider || '未知服务商'),
+                model: String(record.model || 'unknown'),
+                promptTokens: Math.max(0, promptTokens),
+                completionTokens: Math.max(0, completionTokens),
+                totalTokens: Math.max(0, totalTokens || promptTokens + completionTokens),
+                source: record.source === 'test' ? 'test' : 'answer',
+                questionIndex: typeof record.questionIndex === 'number' ? record.questionIndex : undefined,
+                questionTitle: record.questionTitle ? String(record.questionTitle) : undefined,
+                createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
+                durationMs: typeof record.durationMs === 'number' ? record.durationMs : undefined
+              };
+            })
+            .filter((record): record is TokenUsageRecord => Boolean(record))
+            .slice(0, 2000);
+        }
+      }
+    } catch {
+      // 空统计即可。
+    }
+    return [];
+  }
+
+  private saveTokenUsage(records: TokenUsageRecord[]) {
+    localStorage.setItem('studypilot_token_usage_v1', JSON.stringify(records));
+  }
+
   private loadQuestionBank(): QuestionBankEntry[] {
     try {
       const saved = localStorage.getItem('studypilot_question_bank_v1');
@@ -826,6 +893,7 @@ class GlobalStore {
         hash: item.answer?.questionHash || '',
         question: item.question,
         options: Array.isArray(item.options) ? item.options : [],
+        context: item.context,
         type: 'unknown',
         source: 'manual',
         capturedAt: item.updatedAt || Date.now()
@@ -857,12 +925,14 @@ class GlobalStore {
 
   normalizeQuestionContentKey(question: QuestionItem) {
     const questionKey = this.normalizeQuestionKey(question);
+    const contextKey = question.context ? this.normalizeQuestionKey(question.context).slice(0, 800) : '';
     const optionKey = (question.options || [])
-      .map((option) => this.normalizeQuestionKey(String(option).replace(/^\s*[A-D]\s*[.\s:：、。)]*/i, '')))
+      .map((option) => this.normalizeQuestionKey(String(option).replace(/^\s*[A-H]\s*[.\s:：、。)]*/i, '')))
       .filter(Boolean)
       .sort()
       .join('|');
-    return optionKey ? `${questionKey}::${optionKey}` : questionKey;
+    const baseKey = optionKey ? `${questionKey}::${optionKey}` : questionKey;
+    return contextKey ? `${contextKey}::${baseKey}` : baseKey;
   }
 
   private textSimilarity(left: string, right: string) {
@@ -921,6 +991,7 @@ class GlobalStore {
       hash: entry.answer?.questionHash || '',
       question: entry.question,
       options: Array.isArray(entry.options) ? entry.options : [],
+      context: entry.context,
       type: 'unknown',
       source: 'manual',
       capturedAt: entry.updatedAt || Date.now()
@@ -930,33 +1001,52 @@ class GlobalStore {
   private findExactQuestionBankEntry(question: QuestionItem) {
     const contentKey = this.normalizeQuestionContentKey(question);
     const legacyKey = this.normalizeQuestionKey(question);
+    const allowLegacyQuestionOnly = !question.context;
     let best: QuestionBankEntry | null = null;
+    let legacyBest: QuestionBankEntry | null = null;
     for (const entry of this.state.questionBank) {
       const entryKey = this.questionBankEntryKey(entry);
       const entryLegacyKey = this.normalizeQuestionKey(entry.question);
       const matches = entry.questionKey === contentKey ||
-        entry.questionKey === legacyKey ||
+        (allowLegacyQuestionOnly && entry.questionKey === legacyKey) ||
         entryKey === contentKey ||
-        entryLegacyKey === legacyKey;
-      if (!matches || !this.questionBankOptionsCompatible(question, entry)) continue;
-      best = best ? this.preferQuestionBankEntry(best, entry) : entry;
+        (allowLegacyQuestionOnly && entryLegacyKey === legacyKey);
+      if (matches && this.questionBankOptionsCompatible(question, entry)) {
+        best = best ? this.preferQuestionBankEntry(best, entry) : entry;
+        continue;
+      }
+
+      const legacyCompatible = Boolean(question.context) &&
+        !entry.context &&
+        entryLegacyKey === legacyKey &&
+        this.questionBankOptionsCompatible(question, entry);
+      if (legacyCompatible) {
+        legacyBest = legacyBest ? this.preferQuestionBankEntry(legacyBest, entry) : entry;
+      }
     }
-    return best;
+    return best || legacyBest;
   }
 
   private findFuzzyQuestionBankEntry(question: QuestionItem) {
-    const questionKey = this.normalizeQuestionKey(question);
+    const questionKey = question.context ? this.normalizeQuestionContentKey(question) : this.normalizeQuestionKey(question);
     if (questionKey.length < QUESTION_BANK_FUZZY_MIN_KEY_LENGTH) return null;
 
     let best: { entry: QuestionBankEntry; score: number } | null = null;
+    let legacyBest: { entry: QuestionBankEntry; score: number } | null = null;
     for (const entry of this.state.questionBank) {
       if (!this.questionBankOptionsCompatible(question, entry)) continue;
-      const entryKey = this.normalizeQuestionKey(entry.question);
+      const entryKey = question.context ? this.questionBankEntryKey(entry) : this.normalizeQuestionKey(entry.question);
       const score = this.textSimilarity(questionKey, entryKey);
       if (!best || score > best.score) best = { entry, score };
+
+      if (question.context && !entry.context) {
+        const legacyScore = this.textSimilarity(this.normalizeQuestionKey(question), this.normalizeQuestionKey(entry.question));
+        if (!legacyBest || legacyScore > legacyBest.score) legacyBest = { entry, score: legacyScore };
+      }
     }
 
-    return best && best.score >= QUESTION_BANK_FUZZY_THRESHOLD ? best : null;
+    if (best && best.score >= QUESTION_BANK_FUZZY_THRESHOLD) return best;
+    return legacyBest && legacyBest.score >= QUESTION_BANK_FUZZY_THRESHOLD ? legacyBest : null;
   }
 
   findQuestionBankAnswer(question: QuestionItem) {
@@ -998,15 +1088,15 @@ class GlobalStore {
   private normalizeManualAnswer(input: ManualQuestionBankInput, questionHash: string): AIAnswerResult {
     const answer = input.answer.trim();
     const labels = new Set<string>();
-    Array.from(answer.matchAll(/(?:^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
+    Array.from(answer.matchAll(/(?:^|[^A-Za-z])([A-H])(?:[^A-Za-z]|$)/gi))
       .map((match) => match[1].toUpperCase())
       .forEach((label) => labels.add(label));
-    const compactLabels = answer.replace(/\s+/g, '').match(/^[A-D]{1,8}$/i)?.[0] || '';
+    const compactLabels = answer.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
     compactLabels.split('').forEach((label) => labels.add(label.toUpperCase()));
 
     const matchedOptions = input.options.filter((option, index) => {
       const label = this.optionLabelFromText(option, index);
-      const optionBody = this.normalizeQuestionKey(option.replace(/^\s*[A-D]\s*[.\s:：、。)]*/i, ''));
+      const optionBody = this.normalizeQuestionKey(option.replace(/^\s*[A-H]\s*[.\s:：、。)]*/i, ''));
       const answerBody = this.normalizeQuestionKey(answer);
       return labels.has(label) || (optionBody.length > 0 && answerBody.includes(optionBody));
     });
@@ -1065,11 +1155,13 @@ class GlobalStore {
       }
       const question = String(item.question).trim();
       const options = Array.isArray(item.options) ? item.options.map((option) => String(option).trim()).filter(Boolean) : [];
-      const key = item.questionKey || this.normalizeQuestionContentKey({
+      const context = item.context ? String(item.context) : undefined;
+      const key = item.questionKey && !context ? item.questionKey : this.normalizeQuestionContentKey({
         id: 'import',
         hash: '',
         question,
         options,
+        context,
         type: options.length > 0 ? 'single' : 'completion',
         source: 'manual',
         capturedAt: Date.now()
@@ -1079,6 +1171,7 @@ class GlobalStore {
         questionKey: key,
         question,
         options,
+        context,
         answer: {
           questionHash: item.answer.questionHash || this.hashText(`${question}\n${options.join('\n')}`),
           provider: item.answer.provider || '本地导入题库',
@@ -1116,6 +1209,7 @@ class GlobalStore {
         questionKey: key,
         question: question.question,
         options: question.options,
+        context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),
         hits: existing.hits
@@ -1125,6 +1219,7 @@ class GlobalStore {
       if (preferred === incomingEntry) {
         existing.question = question.question;
         existing.options = question.options;
+        existing.context = question.context;
         existing.answer = normalizedAnswer;
         existing.updatedAt = incomingEntry.updatedAt;
       }
@@ -1134,6 +1229,7 @@ class GlobalStore {
         questionKey: key,
         question: question.question,
         options: question.options,
+        context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),
         hits: 0
@@ -1148,6 +1244,27 @@ class GlobalStore {
     this.state.settings = normalizeSettings({ ...this.state.settings, ...updates });
     this.saveSettings(this.state.settings);
     this.addLog('info', '设置已更新。');
+    this.emit();
+  }
+
+  recordTokenUsage(input: Omit<TokenUsageRecord, 'id' | 'createdAt'> & { id?: string; createdAt?: number }) {
+    const record: TokenUsageRecord = {
+      id: input.id || Math.random().toString(36).slice(2),
+      provider: input.provider || '未知服务商',
+      model: input.model || 'unknown',
+      promptTokens: Math.max(0, Math.floor(Number(input.promptTokens) || 0)),
+      completionTokens: Math.max(0, Math.floor(Number(input.completionTokens) || 0)),
+      totalTokens: Math.max(0, Math.floor(Number(input.totalTokens) || 0)),
+      source: input.source,
+      questionIndex: input.questionIndex,
+      questionTitle: input.questionTitle,
+      durationMs: input.durationMs,
+      createdAt: input.createdAt || Date.now()
+    };
+    if (record.totalTokens <= 0) record.totalTokens = record.promptTokens + record.completionTokens;
+    if (record.totalTokens <= 0) return;
+    this.state.tokenUsage = [record, ...this.state.tokenUsage].slice(0, 2000);
+    this.saveTokenUsage(this.state.tokenUsage);
     this.emit();
   }
 
@@ -1266,6 +1383,13 @@ class GlobalStore {
     this.state.answerMap = {};
     this.saveAnswerHistory([]);
     this.addLog('info', '答案历史已清空。');
+    this.emit();
+  }
+
+  clearTokenUsage() {
+    this.state.tokenUsage = [];
+    this.saveTokenUsage([]);
+    this.addLog('info', 'Token 消耗统计已清空。');
     this.emit();
   }
 

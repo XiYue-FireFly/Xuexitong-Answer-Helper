@@ -67,7 +67,7 @@ export function visibleText(element: Element) {
 
 export function normalizeText(text: string) {
   return cleanText(text)
-    .replace(/^[A-ZＡ-Ｄ][.\s:：、．。)]*/i, '')
+    .replace(/^[A-ZＡ-Ｈ][.\s:：、．。)]*/i, '')
     .replace(/[，。,.、；;：:\s"'“”‘’【】\[\]（）()]/g, '')
     .toLowerCase();
 }
@@ -105,12 +105,12 @@ export function optionIndexFromLabel(label: string) {
 }
 
 export function optionLabel(label: string, text: string) {
-  const body = cleanText(text).replace(/^[A-ZＡ-Ｄ][.\s:：、．。)]*/i, '');
+  const body = cleanText(text).replace(/^[A-ZＡ-Ｈ][.\s:：、．。)]*/i, '');
   return `${label.toUpperCase()}. ${body || label.toUpperCase()}`;
 }
 
 export function isOnlyOptionMarker(text: string) {
-  return /^[A-D]$/i.test(cleanText(text));
+  return /^[A-H]$/i.test(cleanText(text));
 }
 
 export function optionTextCandidate(element: HTMLElement, label: string) {

@@ -40,6 +40,26 @@ const typeLabels: Record<string, string> = {
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 const MAX_AI_CONCURRENCY = 5;
 
+function normalizeApiConcurrency(value: unknown) {
+  const numberValue = Math.floor(Number(value));
+  if (!Number.isFinite(numberValue)) return 5;
+  return Math.max(1, Math.min(MAX_AI_CONCURRENCY, numberValue));
+}
+
+function isApiBalanceError(message: string) {
+  return /(insufficient|balance|quota|credit|billing|payment|required|prepaid|arrear|余额|额度|欠费|账户余额|资源包|配额|费用|充值|无可用额度|not enough)/i.test(message);
+}
+
+function apiFailureHint(message: string) {
+  if (isApiBalanceError(message)) {
+    return 'AI 接口提示余额或额度不足，请到对应服务商控制台充值、开通计费或更换可用 API Key。';
+  }
+  if (/429|Too many requests|rate limit|limitation/i.test(message)) {
+    return 'AI 接口限流，请降低并发数或稍后重试。';
+  }
+  return '';
+}
+
 function notifyTaskDone(title: string, body: string) {
   const api = (window as any).electronAPI;
   if (!api?.notify) return;
@@ -62,7 +82,7 @@ function buildPrompt(question: QuestionItem) {
 要求：
 1. 只返回 JSON，不要返回 Markdown 代码块。
 2. answer 字段写最可能的答案；选择题请返回选项字母和简短选项文本。
-3. choiceLabels 字段返回命中的选项字母数组，例如 ["A"] 或 ["A","C"]。
+3. choiceLabels 字段返回命中的选项字母数组，例如 ["A"]、["A","C"] 或七选五 ["G"]。
 4. matchedOptions 字段返回命中的完整选项文本数组。
 5. confidence 是 0 到 1 之间的小数。
 6. analysis 给出简洁解析。
@@ -70,6 +90,7 @@ function buildPrompt(question: QuestionItem) {
 
 题号：${question.index || ''}
 题型：${question.type}
+${question.context ? `阅读/文章上下文：\n${question.context}\n` : ''}
 题目：${question.question}
 ${question.options.length ? `选项：\n${question.options.join('\n')}` : ''}
 
@@ -87,14 +108,14 @@ JSON 格式：
 function normalizeOptionText(text: string) {
   return text
     .replace(/\s+/g, ' ')
-    .replace(/^[A-ZＡ-Ｄ][.\s:：、．。)]*/i, '')
+    .replace(/^[A-HＡ-Ｈ][.\s:：、．。)]*/i, '')
     .replace(/[，。,.、；;：:\s"'“”‘’【】\[\]（）()]/g, '')
     .trim()
     .toLowerCase();
 }
 
 function extractChoiceLabels(answer: string) {
-  const labels = Array.from(String(answer || '').matchAll(/(?:答案|选项|选择|^|[^A-Z])([A-D])(?:[^A-Z]|$)/gi))
+  const labels = Array.from(String(answer || '').matchAll(/(?:答案|选项|选择|^|[^A-Z])([A-H])(?:[^A-Z]|$)/gi))
     .map((match) => match[1].toUpperCase());
   return Array.from(new Set(labels));
 }
@@ -117,7 +138,7 @@ function normalizeAnswer(question: QuestionItem, rawAnswer: string, rawLabels?: 
 
   const byLabel = question.options.filter((option, index) => {
     const fallbackLabel = String.fromCharCode(65 + index);
-    const optionLabel = option.match(/^\s*([A-Z])\s*[.\s:：、．。)]/i)?.[1]?.toUpperCase() || fallbackLabel;
+    const optionLabel = option.match(/^\s*([A-H])\s*[.\s:：、．。)]/i)?.[1]?.toUpperCase() || fallbackLabel;
     return labels.includes(optionLabel);
   });
   const byText = question.options.filter((option) => textMatches(answer, option));
@@ -149,9 +170,12 @@ export function AIPanel() {
   const [batchRunning, setBatchRunning] = useState(false);
   const [liveRunning, setLiveRunning] = useState(false);
   const [livePaused, setLivePaused] = useState(false);
-  const [aiConcurrency, setAiConcurrency] = useState(1);
   const livePausedRef = useRef(false);
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
+  const aiConcurrency = normalizeApiConcurrency(settings.apiConcurrency);
+  const updateAiConcurrency = (value: number) => {
+    appStore.updateSettings({ apiConcurrency: normalizeApiConcurrency(value) });
+  };
 
   const runAutomationAction = (action: 'extract-question') => {
     window.dispatchEvent(new CustomEvent('studypilot:automation-action', {
@@ -186,6 +210,7 @@ export function AIPanel() {
     if (activeProvider.supportsResponseFormat !== false && activeProvider.authHeader !== 'api-key' && activeProvider.authHeader !== 'none') {
       requestBody.response_format = { type: 'json_object' };
     }
+    const startedAt = Date.now();
     const response = await fetch(`${activeProvider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: buildAIHeaders(activeProvider),
@@ -194,9 +219,32 @@ export function AIPanel() {
     });
     window.clearTimeout(timeoutId);
 
-    if (!response.ok) throw new Error(`接口返回 ${response.status}：${await response.text()}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      const message = `接口返回 ${response.status}：${errorText}`;
+      const hint = apiFailureHint(message);
+      if (hint) appStore.addLog(isApiBalanceError(message) ? 'error' : 'warn', hint);
+      throw new Error(hint ? `${message}\n${hint}` : message);
+    }
 
     const data = await response.json();
+    const usage = data.usage || data.token_usage || {};
+    const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens ?? 0);
+    const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens ?? 0);
+    const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? promptTokens + completionTokens);
+    if (Number.isFinite(totalTokens) && totalTokens > 0) {
+      appStore.recordTokenUsage({
+        provider: activeProvider.name,
+        model: activeProvider.model,
+        promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+        completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+        totalTokens,
+        source: 'answer',
+        questionIndex: question.index,
+        questionTitle: question.question.slice(0, 120),
+        durationMs: Date.now() - startedAt
+      });
+    }
     const content = data.choices?.[0]?.message?.content || '{}';
     const parsed = JSON.parse(String(content).replace(/```json|```/g, '').trim());
     const answer = parsed.answer || '未识别到答案';
@@ -231,7 +279,12 @@ export function AIPanel() {
       } catch (error: any) {
         lastError = error;
         const message = String(error?.message || '');
-        if (!/429|Too many requests|limitation/i.test(message) || attempt === 3) break;
+        const hint = apiFailureHint(message);
+        if (hint && !/429|Too many requests|rate limit|limitation/i.test(message)) {
+          appStore.setStatus('error', hint);
+          break;
+        }
+        if (!/429|Too many requests|rate limit|limitation/i.test(message) || attempt === 3) break;
         const waitMs = 2200 * 2 ** attempt;
         appStore.addLog('warn', `AI 接口限流，等待 ${(waitMs / 1000).toFixed(1)} 秒后重试第 ${question.index || '?'} 题。`);
         await sleep(waitMs);
@@ -445,9 +498,11 @@ export function AIPanel() {
       preAnsweredItems.forEach((item) => enqueueApply(item.question, item.answer));
 
       const workerCount = safeConcurrency;
+      let fatalApiError = '';
       const workers = Array.from({ length: workerCount }, async () => {
-        while (nextIndex < pendingQuestions.length) {
+        while (!fatalApiError && nextIndex < pendingQuestions.length) {
           await waitWhileLivePaused();
+          if (fatalApiError) break;
           const question = pendingQuestions[nextIndex];
           nextIndex += 1;
           appStore.setStatus('calling_ai', `正在并发查询第 ${question.index || nextIndex} 题，进度 ${resolvedCount}/${questions.length}。`);
@@ -458,8 +513,16 @@ export function AIPanel() {
             enqueueApply(question, answer);
           } catch (error: any) {
             resolvedCount += 1;
-            if (/429|Too many requests|limitation/i.test(String(error?.message || '')) && safeConcurrency > 1) {
-              setAiConcurrency((current) => Math.max(1, Math.min(current, safeConcurrency - 1)));
+            const errorMessage = String(error?.message || '');
+            const hint = apiFailureHint(errorMessage);
+            if (hint) appStore.addLog(isApiBalanceError(errorMessage) ? 'error' : 'warn', hint);
+            if (isApiBalanceError(errorMessage)) {
+              fatalApiError = hint || 'AI 接口余额或额度不足，本轮自动化已停止。';
+              nextIndex = pendingQuestions.length;
+              appStore.setStatus('error', fatalApiError);
+            }
+            if (/429|Too many requests|rate limit|limitation/i.test(errorMessage) && safeConcurrency > 1) {
+              updateAiConcurrency(Math.max(1, safeConcurrency - 1));
               appStore.addLog('warn', `接口限流，本轮仍会完成；下次自动化填入并发数将降为 ${safeConcurrency - 1}。`);
             }
             appStore.addLog('error', `第 ${question.index || '?'} 题查询失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
@@ -469,6 +532,10 @@ export function AIPanel() {
 
       await Promise.all(workers);
       await Promise.allSettled(applyPromises);
+      if (fatalApiError) {
+        appStore.setStatus('error', `${fatalApiError} 已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
+        return;
+      }
       appStore.setStatus('done', `边搜边填完成：已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
       notifyTaskDone('自动化填入已完成', `已解析 ${resolvedCount}/${questions.length} 题，已填入 ${appliedCount} 题。`);
     } catch (error: any) {
@@ -575,7 +642,7 @@ export function AIPanel() {
               <Zap size={14} style={{ color: 'var(--primary-color)' }} /> API 并发数
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', lineHeight: 1.45, marginTop: 4 }}>
-              默认 1 最稳；接口额度足够时可调高。遇到 429 限流后会自动降速。
+              默认 5 路并会持久化保存；遇到 429 限流或接口不稳定时可降到 1-2 路。
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -586,7 +653,7 @@ export function AIPanel() {
               step={1}
               value={aiConcurrency}
               disabled={liveRunning || batchRunning}
-              onChange={(event) => setAiConcurrency(Number(event.target.value))}
+              onChange={(event) => updateAiConcurrency(Number(event.target.value))}
               style={{ width: 86, accentColor: 'var(--primary-color)', opacity: liveRunning || batchRunning ? 0.55 : 1 }}
             />
             <span

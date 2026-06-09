@@ -196,6 +196,36 @@ function shouldBlockInternalBrowserTab(targetUrl: string) {
   return BLOCKED_INTERNAL_BROWSER_TAB_URL.test(String(targetUrl || ''));
 }
 
+function comparableNavigationUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    ['t', '_', 'timestamp', 'rand'].forEach((name) => parsed.searchParams.delete(name));
+    const query = parsed.searchParams.toString();
+    return `${parsed.origin}${parsed.pathname}${query ? `?${query}` : ''}`;
+  } catch {
+    return String(rawUrl || '').split('#')[0];
+  }
+}
+
+function chapterNavigationIdentity(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    const id = parsed.searchParams.get('chapterId') ||
+      parsed.searchParams.get('chapterid') ||
+      parsed.searchParams.get('knowledgeId') ||
+      parsed.searchParams.get('knowledgeid');
+    return id ? `chapter:${id}` : comparableNavigationUrl(rawUrl);
+  } catch {
+    return comparableNavigationUrl(rawUrl);
+  }
+}
+
+function isSameChapterNavigation(currentUrl: string, targetUrl: string) {
+  if (!currentUrl || !targetUrl) return false;
+  return comparableNavigationUrl(currentUrl) === comparableNavigationUrl(targetUrl) ||
+    chapterNavigationIdentity(currentUrl) === chapterNavigationIdentity(targetUrl);
+}
+
 function isExamStartUrl(targetUrl: string) {
   try {
     const parsed = new URL(targetUrl);
@@ -551,7 +581,33 @@ export function BrowserPanel() {
     if (event.channel === 'studypilot:chapter-open-next') {
       const payload = event.args?.[0] || {};
       const targetUrl = payload.url;
-      if (targetUrl) {
+      if (payload.clickedInPage) {
+        const clickedAtUrl = safeWebviewRead(() => webviewRefs.current[tabId]?.getURL?.(), '');
+        window.setTimeout(() => {
+          const currentUrl = safeWebviewRead(() => webviewRefs.current[tabId]?.getURL?.(), '');
+          const clickDidNotNavigate = clickedAtUrl && currentUrl && comparableNavigationUrl(clickedAtUrl) === comparableNavigationUrl(currentUrl);
+          if (targetUrl && clickDidNotNavigate && !isSameChapterNavigation(currentUrl, targetUrl)) {
+            const webview = webviewRefs.current[tabId];
+            handleTabStateChange(tabId, { url: targetUrl, title: payload.title || friendlyTitle(targetUrl), loading: true });
+            const result = safeWebviewRead(() => webview?.loadURL?.(targetUrl), undefined as Promise<void> | undefined);
+            if (result?.catch) {
+              result.catch((error: any) => {
+                if (error?.code === 'ERR_ABORTED' || error?.errno === -3) return;
+                appStore.addLog('warn', `下一章节兜底跳转失败：${error?.message || targetUrl}`);
+              });
+            }
+            window.setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
+                detail: { action: 'start', options: payload.options || {} }
+              }));
+            }, 2600);
+            return;
+          }
+          window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
+            detail: { action: 'start', options: payload.options || {} }
+          }));
+        }, 2600);
+      } else if (targetUrl) {
         openBrowserTab(targetUrl, { title: payload.title || '下一章节', openerTabId: tabId });
         window.setTimeout(() => {
           window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
@@ -566,7 +622,7 @@ export function BrowserPanel() {
       if (result?.success) appStore.completePlan(result.message || '已在当前页面完成自动化操作。');
       else appStore.setStatus('error', result?.error || '自动化执行失败。');
     }
-  }, [openBrowserTab]);
+  }, [handleTabStateChange, openBrowserTab]);
 
   const loadWebviewUrl = useCallback((targetUrl: string, stopCurrent = false, tabId = activeTabId) => {
     const webview = webviewRefs.current[tabId];

@@ -1,6 +1,16 @@
-import type { QuestionOptionTarget, QuestionType } from './types';
+import type { QuestionOptionTarget, QuestionPayload, QuestionType } from './types';
 import { parseJudgementValueStable } from './answer-matcher';
 import { cleanText, cssEscape, hashText, isVisible, normalizeText, optionLabel, optionLetter, optionTextCandidate, removeNoise, selectorFor, uniqueBy, visibleText } from './dom-utils';
+
+type ExtractedQuestion = QuestionPayload & {
+  id: string;
+  optionTargets: QuestionOptionTarget[];
+  type: QuestionType;
+  source: string;
+  pageUrl: string;
+  pageTitle: string;
+  capturedAt: number;
+};
 
 export const QUESTION_CONTAINER_SELECTORS = [
   '.questionLi',
@@ -143,6 +153,15 @@ function isNoiseText(text: string) {
   return codeHits > Math.max(12, normalized.length / 20);
 }
 
+function isLikelyReadingContext(text: string) {
+  const value = cleanText(text);
+  if (value.length < 120) return false;
+  const englishWords = (value.match(/[A-Za-z]{3,}/g) || []).length;
+  const optionMarkers = (value.match(/(?:^|\s)[A-HＡ-Ｈ]\s*[.、．)]/g) || []).length;
+  const questionMarkers = (value.match(/(?:^|\s)\d{1,3}[.、．)]\s*/g) || []).length;
+  return englishWords >= 30 || (value.length >= 220 && optionMarkers >= 4 && questionMarkers >= 2);
+}
+
 export function nearestClickableOption(element: HTMLElement) {
   return element.closest([
     'label',
@@ -175,8 +194,8 @@ export function nearestClickableOption(element: HTMLElement) {
 
 function optionLabelFromText(rawText: string, dataValue: string, index: number) {
   const text = cleanText(rawText);
-  const dataLabel = /^[A-D]$/i.test(dataValue) ? dataValue : '';
-  const firstToken = text.match(/^\s*([A-D])\s*[.\s:：、。)]?/i)?.[1];
+  const dataLabel = /^[A-H]$/i.test(dataValue) ? dataValue : '';
+  const firstToken = text.match(/^\s*([A-H])\s*[.\s:：、。)]?/i)?.[1];
   if (dataLabel) return dataLabel.toUpperCase();
   if (firstToken) return firstToken.toUpperCase();
   return optionLetter(index);
@@ -196,7 +215,7 @@ export function optionTargetFromElement(element: HTMLElement, index: number): Qu
     (input as HTMLInputElement | null)?.value ||
     '';
   const rawText = visibleText(element) || element.getAttribute('aria-label') || dataValue;
-  const labelMatch = rawText.match(/^\s*([A-ZＡ-Ｄ])\s*[.\s:：、．。)]/i);
+  const labelMatch = rawText.match(/^\s*([A-ZＡ-Ｈ])\s*[.\s:：、．。)]/i);
   const dataLabel = /^[A-Z]$/i.test(dataValue) ? dataValue : '';
   const label = (dataLabel || labelMatch?.[1] || optionLetter(index)).toUpperCase();
   const clickTarget = nearestClickableOption(element) || element;
@@ -246,7 +265,7 @@ export function extractOptionTargets(root: HTMLElement) {
   const letterTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('*')) as HTMLElement[])
     .filter((element) => {
       const text = cleanText(element.textContent || '');
-      return /^[A-D]$/.test(text) && isVisible(element);
+      return /^[A-H]$/.test(text) && isVisible(element);
     })
     .map((element, index) => optionTargetFromElement(nearestClickableOption(element) || element, index)));
   if (letterTargets.length >= 2) return letterTargets.slice(0, 12);
@@ -255,7 +274,7 @@ export function extractOptionTargets(root: HTMLElement) {
 }
 
 function extractOptionsFromText(body: string) {
-  const matches = Array.from(body.matchAll(/(?:^|\s)([A-DＡ-Ｄ])\s*[.、．)]?\s*(.*?)(?=\s+[A-DＡ-Ｄ]\s*[.、．)]?\s+|$)/g));
+  const matches = Array.from(body.matchAll(/(?:^|\s)([A-HＡ-Ｈ])\s*[.、．)]?\s*(.*?)(?=\s+[A-HＡ-Ｈ]\s*[.、．)]?\s+|$)/g));
   if (matches.length < 2) return { question: cleanText(body), options: [] as string[] };
 
   const firstIndex = matches[0].index || 0;
@@ -297,7 +316,7 @@ function findQuestionText(root: HTMLElement, optionTargets: QuestionOptionTarget
   return cleanText(text);
 }
 
-function questionFromRoot(root: HTMLElement, index: number) {
+function questionFromRoot(root: HTMLElement, index: number): ExtractedQuestion | null {
   const optionTargets = extractOptionTargets(root);
   const options = optionTargets.map((target) => target.text);
   const question = findQuestionText(root, optionTargets);
@@ -340,7 +359,7 @@ function splitContinuousText(rawText: string) {
   }).filter((item) => item.body.length > 8 && !isNoiseText(item.body));
 }
 
-function questionFromSegment(segment: { number: number; typeLabel: string; body: string }) {
+function questionFromSegment(segment: { number: number; typeLabel: string; body: string }): ExtractedQuestion | null {
   const parsed = extractOptionsFromText(segment.body);
   const question = parsed.question || segment.body;
   const options = parsed.options;
@@ -358,6 +377,143 @@ function questionFromSegment(segment: { number: number; typeLabel: string; body:
     capturedAt: Date.now(),
     index: segment.number
   };
+}
+
+function textBeforeFirstQuestion(text: string, firstQuestionIndex: number) {
+  return cleanText(text.slice(Math.max(0, firstQuestionIndex - 5000), firstQuestionIndex));
+}
+
+function splitReadingQuestions(rawText: string): ExtractedQuestion[] {
+  const text = cleanText(rawText);
+  if (isNoiseText(text) || text.length < 160) return [];
+
+  const questionPattern = /(?:^|\s)(\d{1,3})[.、．)]\s+([\s\S]*?)(?=\s+[A-HＡ-Ｈ]\s*[.、．)]\s+)/g;
+  const questionMatches = Array.from(text.matchAll(questionPattern))
+    .filter((match) => typeof match.index === 'number');
+  if (questionMatches.length === 0) return [];
+
+  const questionStarts = questionMatches.map((match) => match.index || 0);
+  const firstQuestionStart = Math.min(...questionStarts);
+  const sharedContext = textBeforeFirstQuestion(text, firstQuestionStart);
+  if (!isLikelyReadingContext(sharedContext)) return [];
+
+  const results: ExtractedQuestion[] = [];
+  for (let index = 0; index < questionMatches.length; index += 1) {
+    const match = questionMatches[index];
+    const start = match.index || 0;
+    const nextStart = index + 1 < questionMatches.length ? questionMatches[index + 1].index || text.length : text.length;
+    const body = cleanText(text.slice(start, nextStart).replace(/^\s*\d{1,3}[.、．)]\s*/, ''));
+    const parsed = extractOptionsFromText(body);
+    if (parsed.options.length < 2) continue;
+    const number = Number(match[1]);
+    const question = parsed.question || cleanText(match[2] || body);
+    if (!question || isNoiseText(question)) continue;
+    results.push({
+      id: `q_${Date.now()}_${number}`,
+      hash: hashText(`${number}\n${sharedContext}\n${question}\n${parsed.options.join('\n')}`),
+      question,
+      options: parsed.options,
+      optionTargets: [],
+      type: inferTypeFromText(body, parsed.options),
+      source: 'webview',
+      pageUrl: window.location.href,
+      pageTitle: cleanText(document.title) || window.location.href,
+      capturedAt: Date.now(),
+      index: number,
+      context: sharedContext
+    });
+  }
+
+  return results;
+}
+
+function contextAroundBlank(context: string, number: number) {
+  const escaped = String(number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`[_\\s]{2,}${escaped}[_\\s]{2,}`),
+    new RegExp(`_{2,}\\s*${escaped}\\s*_{2,}`),
+    new RegExp(`\\b${escaped}\\b`)
+  ];
+  const index = patterns
+    .map((pattern) => {
+      const match = pattern.exec(context);
+      return match?.index ?? -1;
+    })
+    .find((value) => value >= 0) ?? -1;
+  if (index < 0) return '';
+  return cleanText(context.slice(Math.max(0, index - 180), Math.min(context.length, index + 220)));
+}
+
+function splitClozeOptionQuestions(rawText: string): ExtractedQuestion[] {
+  const text = cleanText(rawText);
+  if (isNoiseText(text) || text.length < 160) return [];
+
+  const optionRowPattern = /(?:^|\s)(\d{1,3})[.、．)]\s+(?=[A-HＡ-Ｈ]\s*[.、．)]\s+)/g;
+  const rowMatches = Array.from(text.matchAll(optionRowPattern))
+    .filter((match) => typeof match.index === 'number');
+  if (rowMatches.length < 2) return [];
+
+  const firstRowStart = rowMatches[0].index || 0;
+  const sharedContext = textBeforeFirstQuestion(text, firstRowStart);
+  const hasBlankCue = /_{2,}\s*\d{1,3}\s*_{2,}|_{4,}|\b\d{1,3}\b\s*[，,.。;]/.test(sharedContext);
+  if (!isLikelyReadingContext(sharedContext) || !hasBlankCue) return [];
+
+  const results: ExtractedQuestion[] = [];
+  for (let index = 0; index < rowMatches.length; index += 1) {
+    const match = rowMatches[index];
+    const start = match.index || 0;
+    const nextStart = index + 1 < rowMatches.length ? rowMatches[index + 1].index || text.length : text.length;
+    const number = Number(match[1]);
+    const rowBody = cleanText(text.slice(start, nextStart).replace(/^\s*\d{1,3}[.、．)]\s*/, ''));
+    const parsed = extractOptionsFromText(rowBody);
+    if (parsed.options.length < 2) continue;
+    const nearby = contextAroundBlank(sharedContext, number);
+    const question = nearby
+      ? `根据文章上下文，选择第 ${number} 空的最佳答案：${nearby}`
+      : `根据文章上下文，选择第 ${number} 空的最佳答案。`;
+    results.push({
+      id: `q_${Date.now()}_${number}`,
+      hash: hashText(`${number}\n${sharedContext}\n${question}\n${parsed.options.join('\n')}`),
+      question,
+      options: parsed.options,
+      optionTargets: [],
+      type: 'single',
+      source: 'webview',
+      pageUrl: window.location.href,
+      pageTitle: cleanText(document.title) || window.location.href,
+      capturedAt: Date.now(),
+      index: number,
+      context: sharedContext
+    });
+  }
+
+  return results;
+}
+
+function sharedReadingContextFromText(rawText: string) {
+  const text = cleanText(rawText);
+  if (isNoiseText(text) || text.length < 160) return '';
+  const marker = /(?:^|\s)\d{1,3}[.、．)]\s+/.exec(text);
+  if (!marker || typeof marker.index !== 'number') return '';
+  const context = textBeforeFirstQuestion(text, marker.index);
+  return isLikelyReadingContext(context) ? context : '';
+}
+
+function attachReadingContext(questions: ExtractedQuestion[], rawText: string) {
+  if (questions.length === 0 || questions.some((question) => question.context)) return questions;
+  const context = sharedReadingContextFromText(rawText);
+  if (!context) return questions;
+  const articleQuestionCount = questions.filter((question) =>
+    question.options.length >= 2 &&
+    question.question.length < 500 &&
+    !isLikelyReadingContext(question.question)
+  ).length;
+  if (articleQuestionCount < 2) return questions;
+  return questions.map((question) => ({
+    ...question,
+    context,
+    hash: hashText(`${question.index || ''}\n${context}\n${question.question}\n${question.options.join('\n')}`)
+  }));
 }
 
 export function extractQuestions() {
@@ -384,12 +540,20 @@ export function extractQuestions() {
 
   const domQuestions = roots
     .map((root, index) => questionFromRoot(root, index + 1))
-    .filter(Boolean) as any[];
-
-  if (domQuestions.length > 0) return uniqueBy(domQuestions, (question) => question.hash);
+    .filter(Boolean) as ExtractedQuestion[];
 
   const bodyClone = document.body.cloneNode(true) as HTMLElement;
   removeNoise(bodyClone);
+  const bodyText = bodyClone.textContent || '';
+
+  if (domQuestions.length > 0) return uniqueBy(attachReadingContext(domQuestions, bodyText), (question) => question.hash);
+
+  const readingQuestions = splitReadingQuestions(bodyClone.textContent || '');
+  if (readingQuestions.length > 0) return uniqueBy(readingQuestions, (question) => question.hash);
+
+  const clozeQuestions = splitClozeOptionQuestions(bodyClone.textContent || '');
+  if (clozeQuestions.length > 0) return uniqueBy(clozeQuestions, (question) => question.hash);
+
   const textQuestions = splitContinuousText(bodyClone.textContent || '')
     .map(questionFromSegment)
     .filter(Boolean) as any[];

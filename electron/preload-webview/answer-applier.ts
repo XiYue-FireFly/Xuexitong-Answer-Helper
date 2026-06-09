@@ -160,18 +160,18 @@ function isMultipleChoicePayload(payload: AnswerApplyPayload) {
 function normalizeChoiceLabels(labels: string[], allowMultiple: boolean) {
   const unique = Array.from(new Set(labels
     .map((label) => String(label || '').trim().toUpperCase())
-    .filter((label) => /^[A-D]$/.test(label))));
+    .filter((label) => /^[A-H]$/.test(label))));
   return allowMultiple ? unique : unique.slice(0, 1);
 }
 
 function labelsFromAnswerText(text: string, allowMultiple: boolean) {
   const value = String(text || '').trim();
   const labels: string[] = [];
-  const compact = value.replace(/\s+/g, '').match(/^[A-D]{1,8}$/i)?.[0] || '';
+  const compact = value.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
   if (compact) {
     labels.push(...compact.split(''));
   } else {
-    labels.push(...Array.from(value.matchAll(/(?:答案|选项|选择|^|[^A-Za-z])([A-D])(?:[^A-Za-z]|$)/gi))
+    labels.push(...Array.from(value.matchAll(/(?:答案|选项|选择|^|[^A-Za-z])([A-H])(?:[^A-Za-z]|$)/gi))
       .map((match) => match[1]));
   }
   return normalizeChoiceLabels(labels, allowMultiple);
@@ -262,6 +262,14 @@ function fillElementValue(element: HTMLElement, value: string) {
     const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set;
     nativeSetter?.call(element, value);
     element.value = value;
+    const pageAny = window as any;
+    const editorName = element.getAttribute('name') || element.id || '';
+    try {
+      const editor = editorName && pageAny.UE?.getEditor?.(editorName);
+      if (editor?.setContent) editor.setContent(value);
+    } catch {
+      // Ignore editor sync failures; native field events still fire below.
+    }
   } else if (element.isContentEditable) {
     element.textContent = value;
   }
@@ -269,27 +277,90 @@ function fillElementValue(element: HTMLElement, value: string) {
   element.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
+function isCompletionField(element: HTMLElement) {
+  if (!isVisible(element)) return false;
+  if (element instanceof HTMLInputElement) {
+    const type = (element.getAttribute('type') || 'text').toLowerCase();
+    if (['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'password'].includes(type)) return false;
+    const nameText = `${element.name || ''} ${element.id || ''} ${element.className || ''} ${element.placeholder || ''}`;
+    if (/(search|keyword|captcha|verify|phone|mobile|email|username|password|token)/i.test(nameText)) return false;
+  }
+  const disabled = (element as HTMLInputElement | HTMLTextAreaElement).disabled || element.getAttribute('aria-disabled') === 'true';
+  const readOnly = (element as HTMLInputElement | HTMLTextAreaElement).readOnly || element.getAttribute('readonly') !== null;
+  return !disabled && !readOnly;
+}
+
+function cleanCompletionValue(rawValue: string) {
+  return cleanText(rawValue)
+    .replace(/^(?:答案|参考答案|填空答案)\s*[:：]\s*/i, '')
+    .replace(/\s*(?:解析|分析|说明)\s*[:：][\s\S]*$/i, '')
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    .trim();
+}
+
+function completionValuesFromPayload(payload: AnswerApplyPayload) {
+  const raw = [
+    payload.answer,
+    ...(payload.matchedOptions || [])
+  ].map((item) => cleanCompletionValue(item)).filter(Boolean).join('\n');
+  const explicit = Array.from(raw.matchAll(/(?:第?\s*(\d+)\s*(?:空|题)?|blank\s*(\d+))\s*[:：.、)]\s*([^\n;；|]+)/gi))
+    .map((match) => cleanCompletionValue(match[3] || ''))
+    .filter(Boolean);
+  if (explicit.length > 0) return explicit;
+
+  const parts = raw
+    .split(/(?:\n|;|；|\|)/g)
+    .map((part) => cleanCompletionValue(part).replace(/^第?\d+\s*[空题]?\s*[:：.、)]?\s*/, ''))
+    .filter(Boolean);
+  if (parts.length > 1) return parts;
+
+  const commaParts = raw
+    .split(/[,，、]/g)
+    .map((part) => cleanCompletionValue(part).replace(/^第?\d+\s*[空题]?\s*[:：.、)]?\s*/, ''))
+    .filter(Boolean);
+  if (commaParts.length > 1 && commaParts.every((part) => part.length <= 40)) return commaParts;
+
+  return [cleanCompletionValue(payload.answer || raw || '')].filter(Boolean);
+}
+
+function syncCompletionAnswerWithPage(qid: string, values: string[]) {
+  if (!qid) return;
+  const pageAny = window as any;
+  const value = values.join('|');
+  for (const functionName of ['setBlankAnswer', 'setClozeTextAnswer', 'fillBlank']) {
+    const handler = pageAny[functionName];
+    if (typeof handler !== 'function') continue;
+    try {
+      handler(qid, value);
+    } catch (error) {
+      reportWebviewError('webview:completion-page-sync-failed', {
+        level: 'warn',
+        message: `${functionName} 同步填空答案失败，已保留可见输入框内容。`,
+        details: { qid, error: String(error) }
+      });
+    }
+  }
+  if (typeof pageAny.answerContentChange === 'function') {
+    try {
+      pageAny.answerContentChange();
+    } catch (error) {
+      reportWebviewError('webview:completion-change-callback-failed', {
+        level: 'warn',
+        message: 'answerContentChange 回调失败，已保留可见输入框内容。',
+        details: { qid, error: String(error) }
+      });
+    }
+  }
+}
+
 function applyCompletionAnswer(payload: AnswerApplyPayload) {
   const root = questionRootForPayload(payload);
   const fields = (Array.from(root.querySelectorAll('textarea, input[type="text"], input:not([type]), [contenteditable="true"]')) as HTMLElement[])
-    .filter((element) => {
-      if (!isVisible(element)) return false;
-      if (element instanceof HTMLInputElement) {
-        const type = (element.getAttribute('type') || 'text').toLowerCase();
-        return !['hidden', 'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image'].includes(type);
-      }
-      return true;
-    });
+    .filter(isCompletionField);
   if (fields.length === 0) return { success: false, error: '未找到可填写的填空输入框。' };
 
-  const parts = [
-    payload.answer,
-    ...(payload.matchedOptions || []),
-    ...String(payload.answer || '').split(/(?:\n|;|；|,|，|、|\|)/g)
-  ]
-    .map((part) => cleanText(part).replace(/^第?\d+\s*[空题]?\s*[:：.、)]?\s*/, ''))
-    .filter(Boolean);
-  const values = parts.length > 1 ? parts : [cleanText(payload.answer || parts[0] || '')];
+  const values = completionValuesFromPayload(payload);
+  if (values.length === 0) return { success: false, error: '填空答案为空，未执行填入。' };
   fields.forEach((field, index) => fillElementValue(field, values[index] || values[0] || ''));
 
   const qid = qidForPayload(payload);
@@ -301,9 +372,31 @@ function applyCompletionAnswer(payload: AnswerApplyPayload) {
     }
   }
 
+  syncCompletionAnswerWithPage(qid, values);
+
+  const failedFields = fields.filter((field, index) => {
+    const expected = values[index] || values[0] || '';
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      return cleanText(field.value) !== cleanText(expected);
+    }
+    return cleanText(field.textContent || '') !== cleanText(expected);
+  });
+  if (failedFields.length > 0) {
+    return { success: false, error: `填空答案写入后校验失败：${failedFields.length} 个输入框未保持目标值。`, values };
+  }
+
+  const warning = fields.length > values.length ? `答案数量少于空格数量，已将第一个答案复用到剩余 ${fields.length - values.length} 个空。` : '';
+  if (warning) {
+    reportWebviewError('webview:completion-answer-count-mismatch', {
+      level: 'warn',
+      message: warning,
+      details: { fieldCount: fields.length, valueCount: values.length, qid }
+    });
+  }
+
   return {
     success: true,
-    message: `已填入 ${Math.min(fields.length, values.length)} 个填空答案。`,
+    message: warning || `已填入 ${Math.min(fields.length, values.length)} 个填空答案。`,
     values
   };
 }

@@ -34,6 +34,7 @@ export interface QuestionPayload {
   type?: QuestionType;
   selector?: string;
   index?: number;
+  context?: string;
 }
 
 export interface AnswerApplyPayload {

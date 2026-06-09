@@ -1,11 +1,11 @@
 {
   "name": "study-pilot",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && npx vite build",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/build-webview-preload.mjs",
     "electron": "npm run electron:build && electron .",
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",

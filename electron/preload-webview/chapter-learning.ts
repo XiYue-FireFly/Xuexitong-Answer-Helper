@@ -29,6 +29,11 @@ interface ChapterAudioEntry {
   index: number;
 }
 
+type ChapterMediaElement = HTMLVideoElement | HTMLAudioElement;
+type ChapterMediaEntry = ChapterVideoEntry | ChapterAudioEntry;
+
+const chapterLinkElements = new Map<string, HTMLElement>();
+
 function chapterLearningOptions(): Required<ChapterLearningOptions> {
   const pageAny = window as any;
   return {
@@ -126,6 +131,104 @@ function collectChapterAudios() {
   return entries;
 }
 
+function mediaDuration(media: ChapterMediaElement) {
+  return Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0;
+}
+
+function mediaCurrentTime(media: ChapterMediaElement) {
+  return Number.isFinite(media.currentTime) && media.currentTime > 0 ? media.currentTime : 0;
+}
+
+function isMediaEnded(media: ChapterMediaElement) {
+  const duration = mediaDuration(media);
+  return media.ended || (duration > 0 && mediaCurrentTime(media) >= duration - 0.8);
+}
+
+function mediaArea(media: ChapterMediaElement) {
+  const rect = media.getBoundingClientRect();
+  return Math.max(0, rect.width) * Math.max(0, rect.height);
+}
+
+function isMediaInViewport(media: ChapterMediaElement) {
+  const rect = media.getBoundingClientRect();
+  return rect.bottom > 0 &&
+    rect.right > 0 &&
+    rect.top < window.innerHeight &&
+    rect.left < window.innerWidth;
+}
+
+function mediaScore(entry: ChapterMediaEntry) {
+  const media = 'video' in entry ? entry.video : entry.audio;
+  const duration = mediaDuration(media);
+  const area = mediaArea(media);
+  let score = 0;
+  if (!isMediaEnded(media)) score += 3000;
+  if (!media.paused) score += 2500;
+  if (isVisible(media)) score += 2000;
+  if (isMediaInViewport(media)) score += 1200;
+  if (mediaCurrentTime(media) > 0) score += 800;
+  if (duration > 0) score += 600;
+  if (media.readyState >= 2) score += 400;
+  if (media.currentSrc || media.src) score += 300;
+  score += Math.min(area / 100, 1000);
+  score -= entry.frame.depth * 80;
+  return score;
+}
+
+function isUsablePrimaryMedia(media: ChapterMediaElement) {
+  return media.isConnected && (
+    isVisible(media) ||
+    isMediaInViewport(media) ||
+    !media.paused ||
+    (isMediaEnded(media) && mediaArea(media) > 0)
+  );
+}
+
+function sortMediaEntries<T extends ChapterMediaEntry>(entries: T[]) {
+  return entries.slice().sort((left, right) => mediaScore(right) - mediaScore(left));
+}
+
+function selectPrimaryVideo(entries = collectChapterVideos()) {
+  const previous = (window as any).__studyPilotChapterPrimaryVideo as HTMLVideoElement | undefined;
+  const previousEntry = previous ? entries.find((entry) => entry.video === previous) : undefined;
+  if (previousEntry && isUsablePrimaryMedia(previousEntry.video)) return previousEntry;
+
+  const visibleEntries = entries.filter((entry) => isUsablePrimaryMedia(entry.video));
+  return sortMediaEntries(visibleEntries.filter((entry) => !isMediaEnded(entry.video)))[0] ||
+    sortMediaEntries(visibleEntries)[0] ||
+    sortMediaEntries(entries.filter((entry) => !isMediaEnded(entry.video)))[0] ||
+    sortMediaEntries(entries)[0];
+}
+
+function selectPrimaryAudio(entries = collectChapterAudios()) {
+  const previous = (window as any).__studyPilotChapterPrimaryAudio as HTMLAudioElement | undefined;
+  const previousEntry = previous ? entries.find((entry) => entry.audio === previous) : undefined;
+  if (previousEntry && isUsablePrimaryMedia(previousEntry.audio)) return previousEntry;
+
+  const visibleEntries = entries.filter((entry) => isUsablePrimaryMedia(entry.audio));
+  return sortMediaEntries(visibleEntries.filter((entry) => !isMediaEnded(entry.audio)))[0] ||
+    sortMediaEntries(visibleEntries)[0] ||
+    sortMediaEntries(entries.filter((entry) => !isMediaEnded(entry.audio)))[0] ||
+    sortMediaEntries(entries)[0];
+}
+
+function rememberPrimaryMedia(videoEntry?: ChapterVideoEntry, audioEntry?: ChapterAudioEntry) {
+  const pageAny = window as any;
+  pageAny.__studyPilotChapterPrimaryVideo = videoEntry?.video || null;
+  pageAny.__studyPilotChapterPrimaryAudio = audioEntry?.audio || null;
+}
+
+function pauseNonPrimaryMedia(videoEntry?: ChapterVideoEntry, audioEntry?: ChapterAudioEntry) {
+  const primaryVideo = videoEntry?.video;
+  const primaryAudio = audioEntry?.audio;
+  for (const { video } of collectChapterVideos()) {
+    if (video !== primaryVideo && !video.paused) video.pause();
+  }
+  for (const { audio } of collectChapterAudios()) {
+    if (audio !== primaryAudio && !audio.paused) audio.pause();
+  }
+}
+
 function audioInfo(audio: HTMLAudioElement, index: number, frameLabel?: string) {
   return {
     index,
@@ -195,6 +298,112 @@ function chapterLinkText(anchor: HTMLAnchorElement) {
   ).slice(0, 120);
 }
 
+function elementLinkText(element: HTMLElement) {
+  return cleanText(
+    element.innerText ||
+    element.textContent ||
+    element.getAttribute('title') ||
+    element.getAttribute('aria-label') ||
+    ''
+  ).slice(0, 120);
+}
+
+function normalizeChapterCandidateUrl(rawValue: string, baseUrl = window.location.href) {
+  const raw = String(rawValue || '').trim();
+  if (!raw || /^javascript:/i.test(raw)) return '';
+  try {
+    const url = new URL(raw, baseUrl).toString();
+    if (!/^https?:\/\//i.test(url) || isBlockedInternalTabUrl(url)) return '';
+    return url;
+  } catch {
+    return '';
+  }
+}
+
+function comparableChapterUrl(rawValue: string) {
+  try {
+    const url = new URL(rawValue, window.location.href);
+    ['t', '_', 'timestamp', 'rand'].forEach((name) => url.searchParams.delete(name));
+    return `${url.origin}${url.pathname}?${url.searchParams.toString()}`.replace(/\?$/, '').split('#')[0];
+  } catch {
+    return String(rawValue || '').split('#')[0];
+  }
+}
+
+function chapterIdentity(rawValue: string) {
+  try {
+    const url = new URL(rawValue, window.location.href);
+    const id = url.searchParams.get('chapterId') ||
+      url.searchParams.get('chapterid') ||
+      url.searchParams.get('knowledgeId') ||
+      url.searchParams.get('knowledgeid');
+    return id ? `chapter:${id}` : comparableChapterUrl(url.toString());
+  } catch {
+    return comparableChapterUrl(rawValue);
+  }
+}
+
+function urlFromInlineHandler(value: string) {
+  const inline = String(value || '');
+  const direct = inline.match(/https?:\/\/[^\s"'<>\\)]+/i)?.[0] ||
+    inline.match(/['"]((?:\/|\.\.?\/)?(?:mycourse|mooc1|mooc2|mooc2-ans|study-knowledge)\/[^'"]+)['"]/i)?.[1];
+  if (direct) return normalizeChapterCandidateUrl(direct);
+
+  const chapterId = inline.match(/(?:chapterId|chapterid|knowledgeId|knowledgeid)\s*[:=,]\s*['"]?(\d+)/i)?.[1];
+  if (!chapterId) return '';
+  try {
+    const current = new URL(window.location.href);
+    current.searchParams.set('chapterId', chapterId);
+    current.searchParams.set('t', String(Date.now()));
+    return current.toString();
+  } catch {
+    return '';
+  }
+}
+
+function chapterUrlFromElement(element: HTMLElement) {
+  if (element instanceof HTMLAnchorElement) {
+    return normalizeChapterCandidateUrl(element.href || element.getAttribute('href') || '');
+  }
+
+  const attrs = [
+    'href',
+    'data-url',
+    'data-href',
+    'url',
+    'link',
+    'data-link',
+    'data-chapter-url'
+  ];
+  for (const name of attrs) {
+    const url = normalizeChapterCandidateUrl(element.getAttribute(name) || '');
+    if (url) return url;
+  }
+
+  const inlineUrl = urlFromInlineHandler(element.getAttribute('onclick') || String((element as any).onclick || ''));
+  if (inlineUrl) return inlineUrl;
+
+  const chapterId = element.getAttribute('chapterId') ||
+    element.getAttribute('chapterid') ||
+    element.getAttribute('data-chapterid') ||
+    element.getAttribute('data-chapter-id') ||
+    element.getAttribute('knowledgeId') ||
+    element.getAttribute('knowledgeid') ||
+    element.getAttribute('data-knowledgeid');
+  if (chapterId) {
+    try {
+      const current = new URL(window.location.href);
+      current.searchParams.set('chapterId', chapterId);
+      current.searchParams.set('t', String(Date.now()));
+      return current.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  return '';
+}
+
 function isLikelyChapterAnchor(anchor: HTMLAnchorElement) {
   const text = chapterLinkText(anchor);
   const haystack = `${text} ${anchor.href} ${anchor.className || ''} ${anchor.getAttribute('onclick') || ''}`;
@@ -204,35 +413,62 @@ function isLikelyChapterAnchor(anchor: HTMLAnchorElement) {
 }
 
 function collectChapterLinks() {
-  const anchors = safeFrameContexts()
+  chapterLinkElements.clear();
+  const candidates = safeFrameContexts()
     .flatMap((frame) => {
       try {
-        return Array.from(frame.document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+        return Array.from(frame.document.querySelectorAll([
+          'a[href]',
+          '[onclick]',
+          '[chapterId]',
+          '[chapterid]',
+          '[knowledgeId]',
+          '[knowledgeid]',
+          '[data-chapterid]',
+          '[data-chapter-id]',
+          '[data-knowledgeid]',
+          '[data-url]',
+          '[data-href]',
+          '.chapter',
+          '.chapterItem',
+          '.catalog_item',
+          '.knowledge'
+        ].join(','))) as HTMLElement[];
       } catch {
         return [];
       }
     });
-  const currentUrl = window.location.href.split('#')[0];
+  const currentUrl = comparableChapterUrl(window.location.href);
+  const currentIdentity = chapterIdentity(window.location.href);
   const links = uniqueBy(
-    anchors
-      .filter((anchor) => isVisible(anchor) && isLikelyChapterAnchor(anchor))
-      .map((anchor) => {
-        const url = new URL(anchor.href, window.location.href).toString();
-        const active = url.split('#')[0] === currentUrl ||
-          /(^|\s)(active|current|on|cur|selected)(\s|$)/i.test(String(anchor.className || '')) ||
-          Boolean(anchor.closest('.active,.current,.on,.cur,.selected'));
+    candidates
+      .filter((element) => isVisible(element) && (element instanceof HTMLAnchorElement ? isLikelyChapterAnchor(element) : true))
+      .map((element) => {
+        const url = chapterUrlFromElement(element);
+        if (!url) return null;
+        const text = element instanceof HTMLAnchorElement ? chapterLinkText(element) : elementLinkText(element);
+        const haystack = `${text} ${url} ${element.className || ''} ${element.getAttribute('onclick') || ''}`;
+        if (!/(章节|任务点|视频|学习|第\s*\d+|chapter|knowledge|course|clazz|mooc|ans|jobid|courseid|clazzid|chapterId|knowledgeId)/i.test(haystack)) return null;
+        const active = comparableChapterUrl(url) === currentUrl ||
+          chapterIdentity(url) === currentIdentity ||
+          /(^|\s)(active|current|on|cur|selected)(\s|$)/i.test(String(element.className || '')) ||
+          Boolean(element.closest('.active,.current,.on,.cur,.selected'));
+        chapterLinkElements.set(url, element);
+        chapterLinkElements.set(comparableChapterUrl(url), element);
+        chapterLinkElements.set(chapterIdentity(url), element);
         return {
-          title: chapterLinkText(anchor) || url,
+          title: text || url,
           url,
           active
         };
-      }),
+      })
+      .filter((item): item is { title: string; url: string; active: boolean } => Boolean(item)),
     (item) => item.url
   ).slice(0, 80);
 
   let activeChapterIndex = links.findIndex((item) => item.active);
   if (activeChapterIndex < 0) {
-    activeChapterIndex = links.findIndex((item) => item.url.split('#')[0] === currentUrl);
+    activeChapterIndex = links.findIndex((item) => comparableChapterUrl(item.url) === currentUrl || chapterIdentity(item.url) === currentIdentity);
   }
   const nextChapter = activeChapterIndex >= 0 ? links[activeChapterIndex + 1] : links[0];
   return { links, activeChapterIndex, nextChapter };
@@ -381,23 +617,29 @@ async function playAllMediaElements() {
   if (!options.autoPlay || Number(options.playbackRate) <= 0) return;
 
   const videoEntries = collectChapterVideos();
-  for (const { video } of videoEntries) {
-    applyChapterVideoOptions(video);
-    if (!video.ended && video.paused) {
+  const audioEntries = collectChapterAudios();
+  const primaryVideo = selectPrimaryVideo(videoEntries);
+  const primaryAudio = primaryVideo ? undefined : selectPrimaryAudio(audioEntries);
+  rememberPrimaryMedia(primaryVideo, primaryAudio);
+  pauseNonPrimaryMedia(primaryVideo, primaryAudio);
+
+  if (primaryVideo) {
+    applyChapterVideoOptions(primaryVideo.video);
+    if (!isMediaEnded(primaryVideo.video) && primaryVideo.video.paused) {
       try {
-        await video.play();
+        await primaryVideo.video.play();
       } catch {
         // Requires user interaction
       }
     }
+    return;
   }
 
-  const audioEntries = collectChapterAudios();
-  for (const { audio } of audioEntries) {
-    applyChapterAudioOptions(audio);
-    if (!audio.ended && audio.paused) {
+  if (primaryAudio) {
+    applyChapterAudioOptions(primaryAudio.audio);
+    if (!isMediaEnded(primaryAudio.audio) && primaryAudio.audio.paused) {
       try {
-        await audio.play();
+        await primaryAudio.audio.play();
       } catch {
         // Requires user interaction
       }
@@ -521,17 +763,58 @@ function attachChapterVideoWatchersDeep() {
   }
 }
 
+function attachPrimaryChapterVideoWatchers() {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotChapterWatchedPrimaryVideos) pageAny.__studyPilotChapterWatchedPrimaryVideos = new WeakSet();
+  const watched = pageAny.__studyPilotChapterWatchedPrimaryVideos as WeakSet<HTMLVideoElement>;
+  for (const { video } of collectChapterVideos()) {
+    if (watched.has(video)) continue;
+    watched.add(video);
+    video.addEventListener('ended', () => {
+      if (!pageAny.__studyPilotChapterRunning) return;
+      if (pageAny.__studyPilotChapterPrimaryVideo && pageAny.__studyPilotChapterPrimaryVideo !== video) return;
+      openNextChapterIfAvailableDeep('primary-video-ended');
+    });
+    video.addEventListener('play', () => {
+      if (pageAny.__studyPilotChapterPrimaryVideo === video) sendChapterLearningState('视频正在播放。');
+    });
+    video.addEventListener('pause', () => {
+      if (!video.ended && pageAny.__studyPilotChapterPrimaryVideo === video) sendChapterLearningState('视频已暂停。');
+    });
+  }
+}
+
 function openNextChapterIfAvailableDeep(reason: string) {
   const options = chapterLearningOptions();
   const pageAny = window as any;
   if (!options.autoNext || !pageAny.__studyPilotChapterRunning) return false;
-  if (pageAny.__studyPilotChapterOpeningNext && Date.now() - pageAny.__studyPilotChapterOpeningNext < 8000) return true;
+  if (pageAny.__studyPilotChapterOpeningNext && Date.now() - pageAny.__studyPilotChapterOpeningNext < 12000) return true;
   const { nextChapter } = collectChapterLinks();
   if (!nextChapter?.url) {
     sendChapterLearningState('当前视频已自然播放结束，但未识别到下一章节。');
     return false;
   }
   pageAny.__studyPilotChapterOpeningNext = Date.now();
+  const targetElement = chapterLinkElements.get(nextChapter.url) ||
+    chapterLinkElements.get(comparableChapterUrl(nextChapter.url)) ||
+    chapterLinkElements.get(chapterIdentity(nextChapter.url));
+  if (targetElement && targetElement.ownerDocument?.contains(targetElement)) {
+    try {
+      targetElement.scrollIntoView({ block: 'center', inline: 'center' });
+      targetElement.click();
+      ipcRenderer.sendToHost('studypilot:chapter-open-next', {
+        url: nextChapter.url,
+        title: nextChapter.title,
+        reason: `${reason}-click`,
+        options,
+        clickedInPage: true
+      });
+      sendChapterLearningState(`当前媒体已完成，正在点击下一章节：${nextChapter.title}`);
+      return true;
+    } catch {
+      // Fall back to opening the resolved URL below.
+    }
+  }
   ipcRenderer.sendToHost('studypilot:chapter-open-next', {
     url: nextChapter.url,
     title: nextChapter.title,
@@ -543,32 +826,13 @@ function openNextChapterIfAvailableDeep(reason: string) {
 }
 
 async function playChapterVideosDeep() {
-  const options = chapterLearningOptions();
-  const entries = collectChapterVideos();
-  broadcastChapterFrameCommand('play', options);
-  if (entries.length === 0) {
-    sendChapterLearningState('当前页面暂未识别到可控制的视频，已向子页面发送播放指令并继续轮询。');
+  const state = await playPrimaryChapterMedia();
+  const endedCount = state.videoEntries.filter((entry) => isMediaEnded(entry.video)).length;
+  if (state.videoEntries.length === 0) {
+    sendChapterLearningState('\u5f53\u524d\u9875\u9762\u6682\u672a\u8bc6\u522b\u5230\u53ef\u63a7\u5236\u7684\u89c6\u9891\uff0c\u6b63\u5728\u7b49\u5f85\u9875\u9762\u5185\u5bb9\u52a0\u8f7d\u3002');
     return;
   }
-  attachChapterVideoWatchersDeep();
-  let played = 0;
-  for (const { video } of entries) {
-    applyChapterVideoOptions(video);
-    if (options.autoPlay && Number(options.playbackRate) > 0) {
-      try {
-        await video.play();
-        played += 1;
-      } catch (error: any) {
-        reportWebviewError('webview:chapter-video-play', {
-          level: 'warn',
-          message: `视频播放需要页面允许或用户手动点击：${error?.message || 'unknown'}`,
-          details: { options }
-        });
-      }
-    }
-  }
-  const endedCount = entries.filter((entry) => entry.video.ended).length;
-  sendChapterLearningState(`已识别 ${entries.length} 个视频，已尝试播放 ${played} 个，已结束 ${endedCount} 个。`);
+  sendChapterLearningState(`\u5df2\u8bc6\u522b ${state.videoEntries.length} \u4e2a\u89c6\u9891\uff0c\u6b63\u5728\u63a7\u5236\u4e3b\u89c6\u9891 ${state.primaryVideo ? state.primaryVideo.index + 1 : 0}\uff0c\u672c\u8f6e\u64ad\u653e ${state.played} \u4e2a\uff0c\u5df2\u7ed3\u675f ${endedCount} \u4e2a\u3002`);
 }
 
 function stopChapterLearningLoop() {
@@ -577,6 +841,51 @@ function stopChapterLearningLoop() {
     window.clearInterval(pageAny.__studyPilotChapterTimer);
     pageAny.__studyPilotChapterTimer = null;
   }
+}
+
+async function playPrimaryChapterMedia() {
+  const options = chapterLearningOptions();
+  const videoEntries = collectChapterVideos();
+  const audioEntries = collectChapterAudios();
+  const primaryVideo = selectPrimaryVideo(videoEntries);
+  const primaryAudio = primaryVideo ? undefined : selectPrimaryAudio(audioEntries);
+
+  rememberPrimaryMedia(primaryVideo, primaryAudio);
+  pauseNonPrimaryMedia(primaryVideo, primaryAudio);
+  broadcastChapterFrameCommand('apply-options', options);
+
+  if (!options.autoPlay || Number(options.playbackRate) <= 0) {
+    return { videoEntries, audioEntries, primaryVideo, primaryAudio, played: 0 };
+  }
+
+  let played = 0;
+  if (primaryVideo && !isMediaEnded(primaryVideo.video)) {
+    applyChapterVideoOptions(primaryVideo.video);
+    if (primaryVideo.video.paused) {
+      try {
+        await primaryVideo.video.play();
+        played = primaryVideo.video.paused ? 0 : 1;
+      } catch (error: any) {
+        reportWebviewError('webview:chapter-video-play', {
+          level: 'warn',
+          message: `视频播放需要页面允许或用户手动点击：${error?.message || 'unknown'}`,
+          details: { options }
+        });
+      }
+    }
+  } else if (primaryAudio && !isMediaEnded(primaryAudio.audio)) {
+    applyChapterAudioOptions(primaryAudio.audio);
+    if (primaryAudio.audio.paused) {
+      try {
+        await primaryAudio.audio.play();
+        played = primaryAudio.audio.paused ? 0 : 1;
+      } catch {
+        // Some players require one user gesture first; the loop will retry.
+      }
+    }
+  }
+
+  return { videoEntries, audioEntries, primaryVideo, primaryAudio, played };
 }
 
 function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
@@ -590,16 +899,13 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
     try {
       const options = chapterLearningOptions();
 
-      attachChapterVideoWatchersDeep();
+      attachPrimaryChapterVideoWatchers();
       const videoEntries = collectChapterVideos();
       const audioEntries = collectChapterAudios();
 
       for (const { video } of videoEntries) applyChapterVideoOptions(video);
       for (const { audio } of audioEntries) applyChapterAudioOptions(audio);
-      broadcastChapterFrameCommand('apply-options', options);
-
-      await playAllMediaElements();
-      broadcastChapterFrameCommand('play', options);
+      const primaryState = await playPrimaryChapterMedia();
 
       if (options.autoReadDocument) {
         const readers = findDocumentReaders();
@@ -618,22 +924,16 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
         }
       }
 
-      const allVideosEnded = videoEntries.length > 0 && videoEntries.every((entry) =>
-        entry.video.ended ||
-        (Number.isFinite(entry.video.duration) && entry.video.duration > 0 && entry.video.currentTime >= entry.video.duration - 0.5)
-      );
-
-      const allAudiosEnded = audioEntries.length > 0 && audioEntries.every((entry) =>
-        entry.audio.ended ||
-        (Number.isFinite(entry.audio.duration) && entry.audio.duration > 0 && entry.audio.currentTime >= entry.audio.duration - 0.5)
-      );
+      const primaryVideoEnded = Boolean(primaryState.primaryVideo && isMediaEnded(primaryState.primaryVideo.video));
+      const primaryAudioEnded = Boolean(!primaryState.primaryVideo && primaryState.primaryAudio && isMediaEnded(primaryState.primaryAudio.audio));
+      const currentMediaEnded = primaryVideoEnded || primaryAudioEnded;
 
       const allTasksCompleted = isAllTaskPointsCompleted();
 
-      if ((allVideosEnded && allAudiosEnded) || allTasksCompleted) {
+      if (currentMediaEnded || allTasksCompleted) {
         const shouldProceed = await checkIfShouldProceedToNext(extractQuestions);
         if (shouldProceed) {
-          openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'all-media-ended');
+          openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'current-media-ended');
           return;
         }
       }
@@ -694,23 +994,27 @@ export async function handleChapterLearningCommand(command: ChapterLearningComma
   setChapterLearningOptions(command.options);
   const pageAny = window as any;
   if (command.action === 'scan') {
-    attachChapterVideoWatchersDeep();
+    attachPrimaryChapterVideoWatchers();
     sendChapterLearningState('已扫描当前章节。');
     return;
   }
   if (command.action === 'start') {
     pageAny.__studyPilotChapterRunning = true;
     startChapterLearningLoop(extractQuestions);
-    await playChapterVideosDeep();
+    attachPrimaryChapterVideoWatchers();
+    await playPrimaryChapterMedia();
     return;
   }
   if (command.action === 'play') {
     pageAny.__studyPilotChapterRunning = true;
     startChapterLearningLoop(extractQuestions);
-    await playChapterVideosDeep();
+    attachPrimaryChapterVideoWatchers();
+    await playPrimaryChapterMedia();
     return;
   }
   if (command.action === 'pause') {
+    pageAny.__studyPilotChapterRunning = false;
+    stopChapterLearningLoop();
     for (const { video } of collectChapterVideos()) video.pause();
     for (const { audio } of collectChapterAudios()) audio.pause();
     broadcastChapterFrameCommand('pause', chapterLearningOptions());
@@ -746,11 +1050,21 @@ export function installChapterFrameMessageHandler() {
     const options = chapterLearningOptions();
     const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
     const audios = Array.from(document.querySelectorAll('audio')) as HTMLAudioElement[];
+    const primaryVideo = selectPrimaryVideo(videos.map((video, index) => ({
+      video,
+      frame: { window, document, label: 'frame', url: window.location.href, depth: 0 },
+      index
+    })));
+    const primaryAudio = primaryVideo ? undefined : selectPrimaryAudio(audios.map((audio, index) => ({
+      audio,
+      frame: { window, document, label: 'frame', url: window.location.href, depth: 0 },
+      index
+    })));
 
     for (const video of videos) {
       applyChapterVideoOptions(video);
       if (data.action === 'pause') video.pause();
-      if (data.action === 'play' && options.autoPlay && Number(options.playbackRate) > 0) {
+      if (data.action === 'play' && video === primaryVideo?.video && options.autoPlay && Number(options.playbackRate) > 0) {
         try {
           await video.play();
         } catch {
@@ -762,7 +1076,7 @@ export function installChapterFrameMessageHandler() {
     for (const audio of audios) {
       applyChapterAudioOptions(audio);
       if (data.action === 'pause') audio.pause();
-      if (data.action === 'play' && options.autoPlay && Number(options.playbackRate) > 0) {
+      if (data.action === 'play' && audio === primaryAudio?.audio && options.autoPlay && Number(options.playbackRate) > 0) {
         try {
           await audio.play();
         } catch {

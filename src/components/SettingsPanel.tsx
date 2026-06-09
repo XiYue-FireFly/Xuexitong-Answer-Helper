@@ -153,6 +153,33 @@ function extractNonStreamAnswer(payload: any) {
   ).trim();
 }
 
+function usageFromPayload(payload: any) {
+  const usage = payload?.usage || payload?.token_usage || {};
+  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens ?? 0);
+  const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens ?? 0);
+  const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? promptTokens + completionTokens);
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return null;
+  return {
+    promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+    completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+    totalTokens
+  };
+}
+
+function isApiBalanceError(message: string) {
+  return /(insufficient|balance|quota|credit|billing|payment|required|prepaid|arrear|余额|额度|欠费|账户余额|资源包|配额|费用|充值|无可用额度|not enough)/i.test(message);
+}
+
+function apiFailureHint(message: string) {
+  if (isApiBalanceError(message)) {
+    return '接口提示余额或额度不足，请到服务商控制台充值、开通计费或更换可用 API Key。';
+  }
+  if (/429|Too many requests|rate limit|limitation/i.test(message)) {
+    return '接口限流，请稍后重试，或在自动化页降低 API 并发数。';
+  }
+  return '';
+}
+
 function buildAIHeaders(provider: AIProviderConfig) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -322,6 +349,7 @@ export function SettingsPanel() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 60000);
     try {
+      const startedAt = Date.now();
       const response = await fetch(`${formData.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: buildAIHeaders(formData),
@@ -339,10 +367,14 @@ export function SettingsPanel() {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`接口返回 ${response.status}：${errorText.slice(0, 500)}`);
+        const message = `接口返回 ${response.status}：${errorText.slice(0, 500)}`;
+        const hint = apiFailureHint(message);
+        if (hint) appStore.addLog(isApiBalanceError(message) ? 'error' : 'warn', hint);
+        throw new Error(hint ? `${message}\n${hint}` : message);
       }
 
       let answer = '';
+      let tokenUsage: ReturnType<typeof usageFromPayload> = null;
       const contentType = response.headers.get('content-type') || '';
       if (response.body && !contentType.includes('application/json')) {
         const reader = response.body.getReader();
@@ -357,6 +389,7 @@ export function SettingsPanel() {
           if (!dataText || dataText === '[DONE]') return;
           try {
             const payload = JSON.parse(dataText);
+            tokenUsage = usageFromPayload(payload) || tokenUsage;
             const delta = extractStreamDelta(payload);
             if (delta) {
               answer += delta;
@@ -381,11 +414,25 @@ export function SettingsPanel() {
 
         if (!answer.trim()) {
           const parsed = JSON.parse(rawText);
+          tokenUsage = usageFromPayload(parsed) || tokenUsage;
           answer = extractNonStreamAnswer(parsed);
         }
       } else {
         const data = await response.json();
+        tokenUsage = usageFromPayload(data);
         answer = extractNonStreamAnswer(data);
+      }
+
+      if (tokenUsage) {
+        appStore.recordTokenUsage({
+          provider: formData.name,
+          model: formData.model,
+          promptTokens: tokenUsage.promptTokens,
+          completionTokens: tokenUsage.completionTokens,
+          totalTokens: tokenUsage.totalTokens,
+          source: 'test',
+          durationMs: Date.now() - startedAt
+        });
       }
 
       const assistantMessage = answer.trim() || '接口已返回，但没有识别到 message.content。';

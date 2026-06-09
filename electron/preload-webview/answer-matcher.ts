@@ -40,7 +40,7 @@ export function parseJudgementValue(text: string): 'true' | 'false' | null {
 
 export function parseStrictJudgementOption(text: string): 'true' | 'false' | null {
   const raw = String(text || '')
-    .replace(/^[A-D]\s*[.、．):：]?\s*/i, '')
+    .replace(/^[A-H]\s*[.、．):：]?\s*/i, '')
     .trim();
   const value = raw
     .toLowerCase()
@@ -102,7 +102,7 @@ export function clearMatchString(text: string) {
   return String(text || '')
     .trim()
     .toLowerCase()
-    .replace(/^[A-ZＡ-Ｄ]\s*[^A-Za-z0-9\u2E80-\u9FFF]+/i, '')
+    .replace(/^[A-ZＡ-Ｈ]\s*[^A-Za-z0-9\u2E80-\u9FFF]+/i, '')
     .replace(/[^\u2E80-\u9FFFA-Za-z0-9]+/g, '');
 }
 
