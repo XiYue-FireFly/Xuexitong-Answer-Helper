@@ -378,6 +378,7 @@ export function BrowserPanel() {
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
   const [goal, setGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
   const [mockValues, setMockValues] = useState<Record<string, string | boolean>>({});
+  const [mockSelectedAnswers, setMockSelectedAnswers] = useState<Record<string, string[]>>({});
   const [mockSubmitted, setMockSubmitted] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
 
@@ -719,7 +720,7 @@ export function BrowserPanel() {
       window.removeEventListener('studypilot:extract-question-request', handleExtractQuestionRequest);
       window.removeEventListener('studypilot:exam-next-question', handleExamNextQuestion);
     };
-  }, [canUseRealWebview, getActiveWebview]);
+  }, [activeSource, canUseRealWebview, getActiveWebview]);
 
   useEffect(() => {
     const handleApplyAnswers = async (event: Event) => {
@@ -741,6 +742,39 @@ export function BrowserPanel() {
       });
 
       if (!canUseRealWebview || !webview) {
+        if (activeSource === 'mock' && Array.isArray(items) && items.length > 0) {
+          const nextSelected: Record<string, string[]> = {};
+          const appliedItems = items.map((item: any) => {
+            const question = item.question as QuestionItem | undefined;
+            const rawLabels = Array.isArray(item.answer?.choiceLabels) ? item.answer.choiceLabels : [];
+            const labels = rawLabels
+              .map((label: unknown) => String(label || '').trim().toUpperCase())
+              .filter((label: string) => /^[A-H]$/.test(label));
+            if (question?.hash && labels.length > 0) nextSelected[question.hash] = labels;
+            return { question, labels };
+          }).filter((item) => item.question?.hash && item.labels.length > 0);
+
+          if (appliedItems.length === 0) {
+            const result = { success: false, error: '没有可填入本地演示页的选择题答案。' };
+            appStore.setStatus('error', result.error);
+            onComplete?.(result);
+            return;
+          }
+
+          setMockSelectedAnswers((prev) => ({ ...prev, ...nextSelected }));
+          const labels = appliedItems
+            .map((item) => `第 ${item.question?.index || '?'} 题 ${item.labels.join('、')}`)
+            .join('，');
+          const result = {
+            success: true,
+            message: `本地演示页已填入：${labels}`,
+            labels: appliedItems.flatMap((item) => item.labels)
+          };
+          appStore.setStatus('done', result.message);
+          onComplete?.(result);
+          return;
+        }
+
         appStore.setStatus('error', '请先在设置中启用真实 WebView，再填入网页答案。');
         onComplete?.({ success: false, error: '请先在设置中启用真实 WebView，再填入网页答案。' });
         return;
@@ -1178,12 +1212,21 @@ export function BrowserPanel() {
                     <div className="question-title" style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.95rem', marginBottom: 10 }}>
                       {question.index}.（单选题）{question.question}
                     </div>
-                    {question.options.map((option) => (
-                      <label key={option} data-option style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: 8 }}>
-                        <input type="radio" name={`demo-question-${question.index}`} />
+                    {question.options.map((option, optionIndex) => {
+                      const optionLabel = option.match(/^\s*([A-H])\s*[.\s:：、。)]/i)?.[1]?.toUpperCase() || String.fromCharCode(65 + optionIndex);
+                      const selectedLabels = mockSelectedAnswers[question.hash] || [];
+                      return (
+                      <label key={option} data-option={optionLabel} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-secondary)', fontSize: '0.82rem', marginBottom: 8 }}>
+                        <input
+                          type="radio"
+                          name={`demo-question-${question.index}`}
+                          checked={selectedLabels.includes(optionLabel)}
+                          onChange={() => setMockSelectedAnswers((prev) => ({ ...prev, [question.hash]: [optionLabel] }))}
+                        />
                         {option}
                       </label>
-                    ))}
+                      );
+                    })}
                   </div>
                 ))}
               </section>

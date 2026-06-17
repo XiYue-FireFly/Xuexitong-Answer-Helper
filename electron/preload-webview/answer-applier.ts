@@ -50,6 +50,10 @@ function qidForPayload(payload: AnswerApplyPayload) {
 }
 
 function optionTargetByLabel(payload: AnswerApplyPayload, label: string): QuestionOptionTarget | null {
+  const savedTarget = (payload.question?.optionTargets || [])
+    .find((target) => target.label.toUpperCase() === label.toUpperCase());
+  if (savedTarget) return savedTarget;
+
   const root = questionRootForPayload(payload);
   const qid = qidForPayload(payload);
   const upper = label.toUpperCase();
@@ -249,6 +253,15 @@ function pickAnswerTargets(payload: AnswerApplyPayload) {
   }
 
   return selected;
+}
+
+function shouldRewritePageSelection(payload: AnswerApplyPayload, targets: QuestionOptionTarget[]) {
+  if (isJudgementPayload(payload, targets)) return true;
+  if (!targets.some((target) => target.selector || target.inputSelector || target.clickSelector)) return true;
+  const requestedLabels = labelsFromPayload(payload);
+  if (requestedLabels.length === 0) return true;
+  const selectedLabels = targets.map((target) => target.label.toUpperCase());
+  return !requestedLabels.every((label) => selectedLabels.includes(label.toUpperCase()));
 }
 
 function answerPartsFromPayload(payload: AnswerApplyPayload) {
@@ -732,8 +745,10 @@ export async function applyAnswerV2(payload: AnswerApplyPayload) {
       console.log('[StudyPilot] 点击目标:', target.label, target.text);
       await clickAnswerTarget(target);
     }
-    console.log('[StudyPilot] 点击完成，调用 applyAnswerDirectly');
-    applyAnswerDirectly(payload, targets, false);
+    console.log('[StudyPilot] 点击完成，按需同步页面答案字段');
+    if (shouldRewritePageSelection(payload, targets)) {
+      applyAnswerDirectly(payload, targets, false);
+    }
     if (!ensureAppliedAnswerValue(payload, targets)) {
       console.log('[StudyPilot] 答案字段校验失败');
       return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };

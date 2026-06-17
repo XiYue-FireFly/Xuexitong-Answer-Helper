@@ -196,9 +196,60 @@ function optionLabelFromText(rawText: string, dataValue: string, index: number) 
   const text = cleanText(rawText);
   const dataLabel = /^[A-H]$/i.test(dataValue) ? dataValue : '';
   const firstToken = text.match(/^\s*([A-H])\s*[.\s:：、。)]?/i)?.[1];
-  if (dataLabel) return dataLabel.toUpperCase();
   if (firstToken) return firstToken.toUpperCase();
+  if (dataLabel) return dataLabel.toUpperCase();
   return optionLetter(index);
+}
+
+function optionSortAnchor(element: HTMLElement) {
+  const clickable = nearestClickableOption(element) || element;
+  return isVisible(clickable) ? clickable : element;
+}
+
+function sortOptionElementsByVisualOrder<T extends HTMLElement>(elements: T[]) {
+  return elements
+    .map((element, index) => {
+      const anchor = optionSortAnchor(element);
+      const rect = anchor.getBoundingClientRect();
+      return {
+        element,
+        index,
+        top: rect.top,
+        left: rect.left,
+        height: rect.height
+      };
+    })
+    .filter((item) => isVisible(optionSortAnchor(item.element)) || isVisible(item.element))
+    .sort((left, right) => {
+      const rowTolerance = Math.max(6, Math.min(left.height || 0, right.height || 0) / 2);
+      if (Math.abs(left.top - right.top) > rowTolerance) return left.top - right.top;
+      if (Math.abs(left.left - right.left) > 1) return left.left - right.left;
+      return left.index - right.index;
+    })
+    .map((item) => item.element);
+}
+
+function optionTargetsFromElements(elements: HTMLElement[]) {
+  return sortOptionElementsByVisualOrder(elements)
+    .map((element, index) => optionTargetFromElement(element, index));
+}
+
+function optionLabelRank(label: string) {
+  const normalized = String(label || '').trim().toUpperCase();
+  return /^[A-H]$/.test(normalized) ? normalized.charCodeAt(0) - 65 : -1;
+}
+
+function sortOptionTargetsByLabelOrder(targets: QuestionOptionTarget[]) {
+  const ranks = targets.map((target) => optionLabelRank(target.label));
+  const canSortByLabel = targets.length >= 2 &&
+    ranks.every((rank) => rank >= 0) &&
+    new Set(ranks).size === ranks.length;
+  if (!canSortByLabel) return targets;
+  return targets.slice().sort((left, right) => optionLabelRank(left.label) - optionLabelRank(right.label));
+}
+
+function normalizeOptionTargets(targets: QuestionOptionTarget[]) {
+  return sortOptionTargetsByLabelOrder(dedupeOptionTargets(targets));
 }
 
 export function optionTargetFromElement(element: HTMLElement, index: number): QuestionOptionTarget {
@@ -217,7 +268,7 @@ export function optionTargetFromElement(element: HTMLElement, index: number): Qu
   const rawText = visibleText(element) || element.getAttribute('aria-label') || dataValue;
   const labelMatch = rawText.match(/^\s*([A-ZＡ-Ｈ])\s*[.\s:：、．。)]/i);
   const dataLabel = /^[A-Z]$/i.test(dataValue) ? dataValue : '';
-  const label = (dataLabel || labelMatch?.[1] || optionLetter(index)).toUpperCase();
+  const label = (labelMatch?.[1] || dataLabel || optionLetter(index)).toUpperCase();
   const clickTarget = nearestClickableOption(element) || element;
   const judgementValue = parseJudgementValueStable(dataValue);
   const displayText = judgementValue === 'true'
@@ -244,30 +295,28 @@ export function dedupeOptionTargets(targets: QuestionOptionTarget[]) {
 }
 
 export function extractOptionTargets(root: HTMLElement) {
-  const chaoxingExamTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[])
-    .filter((element) => element.querySelector('.num_option, .num_option_dx') && element.querySelector('.answer_p'))
-    .map((element, index) => optionTargetFromElement(element, index)));
+  const chaoxingExamTargets = normalizeOptionTargets(optionTargetsFromElements((Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[])
+    .filter((element) => element.querySelector('.num_option, .num_option_dx') && element.querySelector('.answer_p'))));
   if (chaoxingExamTargets.length >= 2) return chaoxingExamTargets.slice(0, 12);
 
-  const inputTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('input[type="radio"], input[type="checkbox"]')) as HTMLInputElement[])
-    .map((input, index) => {
+  const inputTargets = normalizeOptionTargets(optionTargetsFromElements((Array.from(root.querySelectorAll('input[type="radio"], input[type="checkbox"]')) as HTMLInputElement[])
+    .map((input) => {
       const label = input.closest('label') || (input.id ? document.querySelector(`label[for="${cssEscape(input.id)}"]`) : null);
-      return optionTargetFromElement((label || input) as HTMLElement, index);
-    }));
+      return (label || input) as HTMLElement;
+    })));
   if (inputTargets.length >= 2) return inputTargets.slice(0, 12);
 
   for (const selector of OPTION_SELECTORS) {
-    const targets = dedupeOptionTargets(Array.from(root.querySelectorAll(selector))
-      .map((element, index) => optionTargetFromElement(element as HTMLElement, index)));
+    const targets = normalizeOptionTargets(optionTargetsFromElements(Array.from(root.querySelectorAll(selector)) as HTMLElement[]));
     if (targets.length >= 2) return targets.slice(0, 12);
   }
 
-  const letterTargets = dedupeOptionTargets((Array.from(root.querySelectorAll('*')) as HTMLElement[])
+  const letterTargets = normalizeOptionTargets(optionTargetsFromElements((Array.from(root.querySelectorAll('*')) as HTMLElement[])
     .filter((element) => {
       const text = cleanText(element.textContent || '');
       return /^[A-H]$/.test(text) && isVisible(element);
     })
-    .map((element, index) => optionTargetFromElement(nearestClickableOption(element) || element, index)));
+    .map((element) => nearestClickableOption(element) || element)));
   if (letterTargets.length >= 2) return letterTargets.slice(0, 12);
 
   return [];
