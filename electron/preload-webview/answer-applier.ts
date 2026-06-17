@@ -29,14 +29,24 @@ function questionRootForPayload(payload: AnswerApplyPayload) {
 
 function qidForPayload(payload: AnswerApplyPayload) {
   const root = questionRootForPayload(payload);
-  return (
-    root.getAttribute('qid') ||
-    root.getAttribute('questionid') ||
-    root.getAttribute('data') ||
-    root.querySelector('[qid]')?.getAttribute('qid') ||
-    root.querySelector('[questionid]')?.getAttribute('questionid') ||
-    ''
-  );
+  const normalizeQid = (value: string | null | undefined) => {
+    const normalized = cleanText(value || '');
+    return /^\d{4,}$/.test(normalized) ? normalized : '';
+  };
+  const hiddenAnswer = root.querySelector<HTMLInputElement>('input[id^="answer"], input[name^="answer"]');
+  const hiddenMatch = hiddenAnswer?.id?.match(/^answer(.+)$/i)?.[1] ||
+    hiddenAnswer?.name?.match(/^answer(.+)$/i)?.[1] ||
+    '';
+  const candidates = [
+    root.getAttribute('qid'),
+    root.getAttribute('questionid'),
+    root.querySelector('[qid]')?.getAttribute('qid'),
+    root.querySelector('[questionid]')?.getAttribute('questionid'),
+    root.querySelector<HTMLInputElement>('input[name="questionId"]')?.value,
+    hiddenMatch,
+    root.getAttribute('data')
+  ];
+  return candidates.map(normalizeQid).find(Boolean) || '';
 }
 
 function optionTargetByLabel(payload: AnswerApplyPayload, label: string): QuestionOptionTarget | null {

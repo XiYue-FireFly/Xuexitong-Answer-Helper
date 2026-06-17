@@ -11,17 +11,42 @@ function optionValueForSubmit(element: HTMLElement) {
   const input = element.matches('input[type="radio"], input[type="checkbox"]')
     ? element as HTMLInputElement
     : element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
+  const ownData = element.getAttribute('data') || '';
+  const ownValue = element.getAttribute('value') || '';
+  const markerData = marker && marker !== element ? marker.getAttribute('data') || marker.getAttribute('value') || '' : '';
+  const elementLooksLikeOption = isSubmitOptionElement(element);
   return cleanText(
-    element.getAttribute('data') ||
-    marker?.getAttribute('data') ||
-    element.getAttribute('value') ||
-    marker?.getAttribute('value') ||
+    markerData ||
     input?.value ||
+    (elementLooksLikeOption ? ownData : '') ||
+    (elementLooksLikeOption ? ownValue : '') ||
     ''
   );
 }
 
+function isSubmitQuestionContainer(element: HTMLElement) {
+  if (element.matches('.answerBg, .workTextWrap, .num_option, .num_option_dx')) return false;
+  if (element.matches('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) return false;
+  if (element.className && /\bchoice\d+\b/.test(String(element.className))) return false;
+  return element.matches(SUBMIT_QUESTION_CONTAINER_SELECTOR) ||
+    Boolean(element.getAttribute('qtype')) ||
+    Boolean(element.querySelectorAll('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]').length > 1);
+}
+
+function isSubmitOptionElement(element: HTMLElement) {
+  if (isSubmitQuestionContainer(element)) return false;
+  if (element.matches('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) return true;
+  if (element.matches('.answerBg, .workTextWrap, .num_option, .num_option_dx')) return true;
+  if (element.className && /\bchoice\d+\b/.test(String(element.className))) return true;
+  const data = cleanText(element.getAttribute('data') || '');
+  const value = cleanText(element.getAttribute('value') || '');
+  if (/^[A-H]$/i.test(data) || /^[A-H]$/i.test(value)) return true;
+  if (parseStrictJudgementOption(data) || parseJudgementValueStable(data) || parseStrictJudgementOption(value) || parseJudgementValueStable(value)) return true;
+  return Boolean(element.querySelector('.num_option, .num_option_dx, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]'));
+}
+
 function selectedOptionValue(element: HTMLElement) {
+  if (!isSubmitOptionElement(element)) return '';
   const input = element.matches('input[type="radio"], input[type="checkbox"]')
     ? element as HTMLInputElement
     : element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
@@ -153,10 +178,18 @@ function collectSubmitQuestionRoots() {
 function optionElementsForSubmit(root: HTMLElement, qid: string) {
   const scopedByQid = uniqueElements(Array.from(root.querySelectorAll([
     `.choice${cssEscape(qid)}`,
-    `[qid="${cssEscape(qid)}"][data]`,
-    `[questionid="${cssEscape(qid)}"][data]`
+    `.choice${cssEscape(qid)}[data]`,
+    `.choice${cssEscape(qid)} .answerBg`,
+    `.choice${cssEscape(qid)} .workTextWrap`,
+    `[qid="${cssEscape(qid)}"] .answerBg`,
+    `[qid="${cssEscape(qid)}"] .workTextWrap`,
+    `[questionid="${cssEscape(qid)}"] .answerBg`,
+    `[questionid="${cssEscape(qid)}"] .workTextWrap`,
+    `[qid="${cssEscape(qid)}"][data]:not([qtype])`,
+    `[questionid="${cssEscape(qid)}"][data]:not([qtype])`
   ].join(','))) as HTMLElement[]);
-  if (scopedByQid.length > 0) return scopedByQid;
+  const scopedOptions = scopedByQid.filter(isSubmitOptionElement);
+  if (scopedOptions.length > 0) return scopedOptions;
   if (root === document.body) return [];
   return uniqueElements(Array.from(root.querySelectorAll([
     '.answerBg',
@@ -165,7 +198,7 @@ function optionElementsForSubmit(root: HTMLElement, qid: string) {
     'input[type="checkbox"]',
     '[role="radio"]',
     '[role="checkbox"]'
-  ].join(','))) as HTMLElement[]);
+  ].join(','))) as HTMLElement[]).filter(isSubmitOptionElement);
 }
 
 export function syncAnswersBeforeSave() {
