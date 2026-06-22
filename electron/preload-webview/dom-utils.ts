@@ -5,20 +5,43 @@ export function cssEscape(value: string) {
 
 export function selectorFor(element: Element): string {
   const el = element as HTMLElement;
+  const unique = (selector: string) => {
+    try {
+      const matches = Array.from(document.querySelectorAll(selector));
+      return matches.length === 1 && matches[0] === el ? selector : '';
+    } catch {
+      return '';
+    }
+  };
   const dataControl = el.getAttribute('data-sp-control');
-  if (dataControl) return `[data-sp-control="${cssEscape(dataControl)}"]`;
-  if (el.id) return `#${cssEscape(el.id)}`;
+  if (dataControl) {
+    const selector = unique(`[data-sp-control="${cssEscape(dataControl)}"]`);
+    if (selector) return selector;
+  }
+  if (el.id) {
+    const selector = unique(`#${cssEscape(el.id)}`);
+    if (selector) return selector;
+  }
   if (el.getAttribute('qid') && el.getAttribute('data')) {
-    return `${el.tagName.toLowerCase()}[qid="${cssEscape(el.getAttribute('qid') || '')}"][data="${cssEscape(el.getAttribute('data') || '')}"]`;
+    const selector = unique(`${el.tagName.toLowerCase()}[qid="${cssEscape(el.getAttribute('qid') || '')}"][data="${cssEscape(el.getAttribute('data') || '')}"]`);
+    if (selector) return selector;
   }
   if (el.getAttribute('qid') && el.getAttribute('qtype')) {
-    return `${el.tagName.toLowerCase()}[qid="${cssEscape(el.getAttribute('qid') || '')}"][qtype="${cssEscape(el.getAttribute('qtype') || '')}"]`;
+    const selector = unique(`${el.tagName.toLowerCase()}[qid="${cssEscape(el.getAttribute('qid') || '')}"][qtype="${cssEscape(el.getAttribute('qtype') || '')}"]`);
+    if (selector) return selector;
   }
   if (el.getAttribute('questionid') && el.getAttribute('qtype')) {
-    return `${el.tagName.toLowerCase()}[questionid="${cssEscape(el.getAttribute('questionid') || '')}"][qtype="${cssEscape(el.getAttribute('qtype') || '')}"]`;
+    const selector = unique(`${el.tagName.toLowerCase()}[questionid="${cssEscape(el.getAttribute('questionid') || '')}"][qtype="${cssEscape(el.getAttribute('qtype') || '')}"]`);
+    if (selector) return selector;
   }
-  if (el.getAttribute('name')) return `${el.tagName.toLowerCase()}[name="${cssEscape(el.getAttribute('name') || '')}"]`;
-  if (el.getAttribute('aria-label')) return `${el.tagName.toLowerCase()}[aria-label="${cssEscape(el.getAttribute('aria-label') || '')}"]`;
+  if (el.getAttribute('name')) {
+    const selector = unique(`${el.tagName.toLowerCase()}[name="${cssEscape(el.getAttribute('name') || '')}"]`);
+    if (selector) return selector;
+  }
+  if (el.getAttribute('aria-label')) {
+    const selector = unique(`${el.tagName.toLowerCase()}[aria-label="${cssEscape(el.getAttribute('aria-label') || '')}"]`);
+    if (selector) return selector;
+  }
 
   const parent = el.parentElement;
   if (!parent) return el.tagName.toLowerCase();
