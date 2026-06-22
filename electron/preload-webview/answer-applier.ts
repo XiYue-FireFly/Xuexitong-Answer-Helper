@@ -2,7 +2,7 @@ import type { AnswerApplyPayload, QuestionOptionTarget } from './types';
 import { appliedAnswerFor, rememberAppliedAnswer } from './applied-answer-store';
 import { answerAliases, compareTwoStrings, judgementValueFromElement, judgementValueFromOptionTarget, judgementValueFromText, parseJudgementValueStable } from './answer-matcher';
 import { reportWebviewError } from './bridge';
-import { cleanText, cssEscape, dispatchInput, isVisible, optionLetter, selectedClassHit, selectorFor, uniqueElements } from './dom-utils';
+import { cleanText, cssEscape, dispatchInput, isVisible, normalizeText, optionLetter, selectedClassHit, selectorFor, uniqueElements } from './dom-utils';
 import { dispatchUserClick } from './interaction';
 import { extractOptionTargets, nearestClickableOption, optionTargetFromElement, readQuestionTypeHint } from './question-extractor';
 
@@ -33,16 +33,27 @@ function qidForPayload(payload: AnswerApplyPayload) {
     const normalized = cleanText(value || '');
     return /^\d{4,}$/.test(normalized) ? normalized : '';
   };
-  const hiddenAnswer = root.querySelector<HTMLInputElement>('input[id^="answer"], input[name^="answer"]');
+  const isBroadRoot = root === document.body;
+  const hiddenAnswers = Array.from(root.querySelectorAll<HTMLInputElement>('input[id^="answer"], input[name^="answer"]'));
+  const hiddenAnswer = !isBroadRoot || hiddenAnswers.length === 1 ? hiddenAnswers[0] : null;
   const hiddenMatch = hiddenAnswer?.id?.match(/^answer(.+)$/i)?.[1] ||
     hiddenAnswer?.name?.match(/^answer(.+)$/i)?.[1] ||
     '';
+  const uniqueDescendantQid = (attribute: 'qid' | 'questionid') => {
+    const values = Array.from(root.querySelectorAll(`[${attribute}]`))
+      .map((element) => normalizeQid(element.getAttribute(attribute)))
+      .filter(Boolean);
+    const unique = Array.from(new Set(values));
+    return !isBroadRoot || unique.length === 1 ? unique[0] || '' : '';
+  };
   const candidates = [
     root.getAttribute('qid'),
     root.getAttribute('questionid'),
-    root.querySelector('[qid]')?.getAttribute('qid'),
-    root.querySelector('[questionid]')?.getAttribute('questionid'),
-    root.querySelector<HTMLInputElement>('input[name="questionId"]')?.value,
+    uniqueDescendantQid('qid'),
+    uniqueDescendantQid('questionid'),
+    !isBroadRoot || root.querySelectorAll('input[name="questionId"]').length === 1
+      ? root.querySelector<HTMLInputElement>('input[name="questionId"]')?.value
+      : '',
     hiddenMatch,
     root.getAttribute('data')
   ];
@@ -638,9 +649,68 @@ function answerStateSignature(element: HTMLElement) {
   return `${classState}|${checkedState}`;
 }
 
+function optionValueFromElement(element: HTMLElement) {
+  const marker = element.matches('.num_option, .num_option_dx, [data], [value]')
+    ? element
+    : element.querySelector('.num_option, .num_option_dx, [data], [value]');
+  const input = element.matches('input[type="radio"], input[type="checkbox"]')
+    ? element as HTMLInputElement
+    : element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
+  return cleanText(
+    marker?.getAttribute('data') ||
+    marker?.getAttribute('value') ||
+    input?.value ||
+    element.getAttribute('data') ||
+    element.getAttribute('value') ||
+    ''
+  );
+}
+
+function targetMatchScore(element: HTMLElement, target: QuestionOptionTarget) {
+  let score = 0;
+  const value = optionValueFromElement(element);
+  const targetValue = cleanText(target.value || '');
+  if (targetValue && value && value.toUpperCase() === targetValue.toUpperCase()) score += 100;
+
+  const text = cleanText(element.textContent || '');
+  const targetText = cleanText(target.text || '');
+  if (targetText) {
+    if (text === targetText) score += 90;
+    else if (normalizeText(text) === normalizeText(targetText)) score += 80;
+    else if (text.includes(targetText) && text.length <= targetText.length + 30) score += 45;
+  }
+
+  const optionCount = element.querySelectorAll('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]').length;
+  if (optionCount > 1) score -= 80;
+  return score;
+}
+
+function expandOptionLikeElements(element: HTMLElement) {
+  const descendants = Array.from(element.querySelectorAll([
+    '.answerBg',
+    '.workTextWrap',
+    'input[type="radio"]',
+    'input[type="checkbox"]',
+    '[role="radio"]',
+    '[role="checkbox"]',
+    '[data]'
+  ].join(','))) as HTMLElement[];
+  return descendants.length > 1 ? descendants : [];
+}
+
 function resolveAnswerClickCandidates(target: QuestionOptionTarget) {
   const selectors = [target.inputSelector, target.clickSelector, target.selector].filter(Boolean) as string[];
-  const baseElements = selectors.map((selector) => document.querySelector(selector) as HTMLElement | null);
+  const matchedElements = selectors.flatMap((selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector)) as HTMLElement[];
+    } catch {
+      return [];
+    }
+  });
+  const baseElements = uniqueElements([
+    ...matchedElements,
+    ...matchedElements.flatMap(expandOptionLikeElements)
+  ]).sort((left, right) => targetMatchScore(right, target) - targetMatchScore(left, target));
   const candidates: Array<HTMLElement | null | undefined> = [];
   for (const element of baseElements) {
     if (!element) continue;
