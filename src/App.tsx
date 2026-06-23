@@ -9,7 +9,7 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { appStore, useAppStore } from './store/appStore';
-import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, Database, History, Minimize2, Settings, Square, Terminal, X } from 'lucide-react';
+import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Settings, Square, Terminal, X } from 'lucide-react';
 
 type TabId = 'automation' | 'chapter' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'settings';
 
@@ -43,6 +43,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
+  const [sideCollapsed, setSideCollapsed] = useState(false);
 
   useEffect(() => {
     const seen = localStorage.getItem(START_NOTICE_KEY);
@@ -92,12 +93,35 @@ export default function App() {
       </header>
 
       <main style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <section style={{ width: '62%', minWidth: 0, borderRight: '1px solid var(--border-glass)', background: 'var(--bg-panel)' }}>
+        <section style={{ flex: 1, minWidth: 0, borderRight: '1px solid var(--border-glass)', background: 'var(--bg-panel)' }}>
           <BrowserPanel />
         </section>
-        <section style={{ width: '38%', minWidth: 360, display: 'flex', flexDirection: 'column', background: 'var(--bg-panel)' }}>
-          <div className="app-side-tabs" style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto' }}>
-            {tabs.map((tab) => {
+        <section style={{
+          width: sideCollapsed ? 48 : 'clamp(360px, 30vw, 560px)',
+          flex: '0 0 auto',
+          minWidth: sideCollapsed ? 48 : 360,
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--bg-panel)',
+          transition: 'width 180ms ease, min-width 180ms ease'
+        }}>
+          <div className="app-side-tabs" style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto', alignItems: 'stretch' }}>
+            <button
+              onClick={() => setSideCollapsed((value) => !value)}
+              title={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
+              style={{
+                flex: '0 0 48px',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--text-secondary)',
+                background: 'transparent',
+                borderRight: '1px solid var(--border-glass)',
+                borderRadius: 0
+              }}
+            >
+              {sideCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {!sideCollapsed && tabs.map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
               return (
@@ -125,7 +149,7 @@ export default function App() {
               );
             })}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {!sideCollapsed && <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <AnnouncementBanner />
             <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div key={activeTab} className="side-panel-page">
@@ -138,7 +162,7 @@ export default function App() {
                 {activeTab === 'settings' && <SettingsPanel />}
               </div>
             </div>
-          </div>
+          </div>}
         </section>
       </main>
 

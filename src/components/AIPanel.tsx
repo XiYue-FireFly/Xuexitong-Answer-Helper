@@ -77,75 +77,174 @@ function buildAIHeaders(provider: AIProviderConfig) {
   return headers;
 }
 
+function questionTypeHint(type?: string) {
+  if (type === 'single') return 'Single choice. Return the one correct option content.';
+  if (type === 'multiple') return 'Multiple choice. Return every correct option content in matchedOptions.';
+  if (type === 'judgement') return 'Judgement. Return only true/correct or false/wrong.';
+  if (type === 'completion') return 'Fill-in-the-blank. Separate multiple blanks with ##.';
+  if (type === 'essay') return 'Short answer. Return a concise answer that can be filled directly.';
+  return 'Infer the question type from the stem and options first.';
+}
+
 function buildPrompt(question: QuestionItem) {
-  return `你是一个学习辅助解析助手。请根据题目内容给出参考答案和解析。
-要求：
-1. 只返回 JSON，不要返回 Markdown 代码块。
-2. answer 字段写最可能的答案；选择题请返回选项字母和简短选项文本。
-3. choiceLabels 字段返回命中的选项字母数组，例如 ["A"]、["A","C"] 或七选五 ["G"]。
-4. matchedOptions 字段返回命中的完整选项文本数组。
-5. confidence 是 0 到 1 之间的小数。
-6. analysis 给出简洁解析。
-7. warnings 用数组提示不确定性或题目歧义。
+  const optionLines = question.options.map((option, index) => {
+    const label = optionLabelFromText(option, index);
+    const text = option.replace(/^\s*[A-H]\s*[.\s:\uff1a\u3001\u3002)]\s*/i, '').trim();
+    return `${label}. ${text}`;
+  });
+  return [
+    'You are solving Chaoxing/Xuexitong questions. Use the OCS/ZError style: for choice questions, prefer returning the full correct option text, not only A/B/C/D. Page option letters or hidden values may be shuffled.',
+    '',
+    'Rules:',
+    '1. Return JSON only. Do not return Markdown or code fences.',
+    '2. For choice questions, answer should be the correct option content; matchedOptions must contain the full option text whenever possible.',
+    '3. choiceLabels may contain A/B/C/D inferred from the option order below, but matchedOptions is the primary source for local matching.',
+    '4. If the question is incomplete or uncertain, add warnings and set confidence below 0.55. Do not fabricate.',
+    '5. For judgement questions, answer only true/correct or false/wrong. For fill-in questions, separate blanks with ##.',
+    '',
+    `Question number: ${question.index || ''}`,
+    `Question type: ${question.type}`,
+    `Type hint: ${questionTypeHint(question.type)}`,
+    question.context ? `Context:\n${question.context}` : '',
+    `Question: ${question.question}`,
+    optionLines.length ? `Options in page display order:\n${optionLines.join('\n')}` : '',
+    '',
+    'JSON schema:',
+    '{',
+    '  "answer": "correct answer content",',
+    '  "choiceLabels": ["A"],',
+    '  "matchedOptions": ["A. full correct option text"],',
+    '  "confidence": 0.9,',
+    '  "analysis": "brief reason",',
+    '  "warnings": []',
+    '}'
+  ].filter(Boolean).join('\n');
+}
 
-题号：${question.index || ''}
-题型：${question.type}
-${question.context ? `阅读/文章上下文：\n${question.context}\n` : ''}
-题目：${question.question}
-${question.options.length ? `选项：\n${question.options.join('\n')}` : ''}
+function toHalfWidth(text: string) {
+  return String(text || '').replace(/[\uff01-\uff5e]/g, (char) =>
+    String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+  ).replace(/\u3000/g, ' ');
+}
 
-JSON 格式：
-{
-  "answer": "...",
-  "choiceLabels": ["A"],
-  "matchedOptions": ["A. ..."],
-  "confidence": 0.9,
-  "analysis": "...",
-  "warnings": []
-}`;
+function optionLabelFor(index: number) {
+  return String.fromCharCode(65 + index);
+}
+
+function optionLabelFromText(option: string, index: number) {
+  return toHalfWidth(option).match(/^\s*([A-H])\s*[.\s:\uff1a\u3001\u3002)]/i)?.[1]?.toUpperCase() || optionLabelFor(index);
 }
 
 function normalizeOptionText(text: string) {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/^[A-HＡ-Ｈ][.\s:：、．。)]*/i, '')
-    .replace(/[，。,.、；;：:\s"'“”‘’【】\[\]（）()]/g, '')
+  return toHalfWidth(text)
+    .replace(/^\s*(?:answer|answers|\u6b63\u786e\u7b54\u6848|\u53c2\u8003\u7b54\u6848|\u7b54\u6848|\u9009\u9879|\u9009\u62e9)\s*[:\uff1a]?\s*/i, '')
+    .replace(/^\s*[A-H]\s*[.\s:\uff1a\u3001\u3002)]\s*/i, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[^\u2E80-\u9FFFA-Za-z0-9]+/g, '')
     .trim()
     .toLowerCase();
 }
 
 function extractChoiceLabels(answer: string) {
-  const labels = Array.from(String(answer || '').matchAll(/(?:答案|选项|选择|^|[^A-Z])([A-H])(?:[^A-Z]|$)/gi))
-    .map((match) => match[1].toUpperCase());
-  return Array.from(new Set(labels));
+  const value = toHalfWidth(answer);
+  const compact = value.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
+  const labels = compact
+    ? compact.split('')
+    : Array.from(value.matchAll(/(?:\u7b54\u6848|\u9009\u9879|\u9009\u62e9|^|[^A-Z])([A-H])(?:[^A-Z]|$)/gi)).map((match) => match[1]);
+  return Array.from(new Set(labels.map((label) => label.toUpperCase())));
 }
 
-function textMatches(answer: string, option: string) {
-  const answerText = normalizeOptionText(answer);
-  const optionText = normalizeOptionText(option);
-  if (!answerText || !optionText) return false;
-  if (answerText.includes(optionText) || optionText.includes(answerText)) return true;
-  if (/正确|對|对|true|yes|是/.test(answerText) && /正确|對|对|true|yes|是/.test(optionText)) return true;
-  if (/错误|錯|错|false|no|否/.test(answerText) && /错误|錯|错|false|no|否/.test(optionText)) return true;
-  return false;
+function textSimilarity(left: string, right: string) {
+  if (left === right) return 1;
+  if (!left || !right) return 0;
+  if (left.includes(right) || right.includes(left)) {
+    return Math.min(left.length, right.length) / Math.max(left.length, right.length);
+  }
+  if (left.length < 2 || right.length < 2) return 0;
+  const grams = new Map<string, number>();
+  for (let index = 0; index < left.length - 1; index += 1) {
+    const gram = left.slice(index, index + 2);
+    grams.set(gram, (grams.get(gram) || 0) + 1);
+  }
+  let intersection = 0;
+  for (let index = 0; index < right.length - 1; index += 1) {
+    const gram = right.slice(index, index + 2);
+    const count = grams.get(gram) || 0;
+    if (count > 0) {
+      grams.set(gram, count - 1);
+      intersection += 1;
+    }
+  }
+  return (2 * intersection) / (left.length + right.length - 2);
+}
+
+function answerParts(rawAnswer: string, rawMatched?: unknown) {
+  const matched = Array.isArray(rawMatched) ? rawMatched.map((item) => String(item)).filter(Boolean) : [];
+  return Array.from(new Set([
+    String(rawAnswer || ''),
+    ...matched,
+    ...String(rawAnswer || '').split(/[\u3001,\uff0c;\uff1b\n/]+/g)
+  ].map((item) => item.trim()).filter(Boolean)));
+}
+
+function parseAIAnswerContent(content: string) {
+  const raw = String(content || '').replace(/```json|```/gi, '').trim();
+  const tryParse = (value: string) => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParse(raw);
+  if (direct && typeof direct === 'object') return direct;
+
+  const jsonBlock = raw.match(/\{[\s\S]*\}/)?.[0] || '';
+  const block = jsonBlock ? tryParse(jsonBlock) : null;
+  if (block && typeof block === 'object') return block;
+
+  const answerMatch = raw.match(/["']?(?:answer|anwser)["']?\s*[:?]\s*["']?([^"',?\n\r}]+)/i);
+  return {
+    answer: answerMatch?.[1]?.trim() || raw,
+    choiceLabels: extractChoiceLabels(raw),
+    matchedOptions: [],
+    confidence: 0.62,
+    analysis: raw,
+    warnings: ['Model did not return strict JSON; fallback parsing was used.']
+  };
+}
+
+function matchOptionsByText(question: QuestionItem, rawAnswer: string, rawMatched?: unknown) {
+  const parts = answerParts(rawAnswer, rawMatched).map(normalizeOptionText).filter(Boolean);
+  if (parts.length === 0) return [];
+  const scored = question.options.map((option, index) => {
+    const optionText = normalizeOptionText(option);
+    const bestScore = Math.max(...parts.map((part) => textSimilarity(part, optionText)), 0);
+    return { option, label: optionLabelFromText(option, index), score: bestScore };
+  }).sort((left, right) => right.score - left.score);
+  const best = scored[0];
+  if (!best || best.score < 0.72) return [];
+  const second = scored[1]?.score || 0;
+  if (best.score < 0.95 && best.score - second < 0.12) return [];
+  return scored.filter((item) => item.score >= 0.95 || (item.score >= 0.72 && item.score === best.score));
 }
 
 function normalizeAnswer(question: QuestionItem, rawAnswer: string, rawLabels?: unknown, rawMatched?: unknown) {
-  const answer = String(rawAnswer || '未识别到答案');
-  const labels = Array.isArray(rawLabels)
-    ? rawLabels.map((item) => String(item).trim().toUpperCase()).filter(Boolean)
+  const answer = String(rawAnswer || '\u672a\u8bc6\u522b\u5230\u7b54\u6848');
+  const providedLabels = Array.isArray(rawLabels)
+    ? rawLabels.map((item) => String(item).trim().toUpperCase()).filter((label) => /^[A-H]$/.test(label))
     : extractChoiceLabels(answer);
-
-  const byLabel = question.options.filter((option, index) => {
-    const fallbackLabel = String.fromCharCode(65 + index);
-    const optionLabel = option.match(/^\s*([A-H])\s*[.\s:：、．。)]/i)?.[1]?.toUpperCase() || fallbackLabel;
-    return labels.includes(optionLabel);
-  });
-  const byText = question.options.filter((option) => textMatches(answer, option));
-
+  const textMatches = matchOptionsByText(question, answer, rawMatched);
+  const textLabels = textMatches.map((item) => item.label);
+  const allowMultiple = question.type === 'multiple' || providedLabels.length > 1;
+  const labels = textLabels.length > 0 ? textLabels : providedLabels;
+  const choiceLabels = Array.from(new Set(allowMultiple ? labels : labels.slice(0, 1)));
+  const byLabel = question.options.filter((option, index) => choiceLabels.includes(optionLabelFromText(option, index)));
   const providedMatched = Array.isArray(rawMatched) ? rawMatched.map((item) => String(item)).filter(Boolean) : [];
-  const matchedOptions = Array.from(new Set([...providedMatched, ...byLabel, ...byText]));
-  return { choiceLabels: labels, matchedOptions };
+  const matchedOptions = Array.from(new Set([...providedMatched, ...textMatches.map((item) => item.option), ...byLabel]));
+  return { choiceLabels, matchedOptions };
 }
 
 function demoAnswer(question: QuestionItem): AIAnswerResult {
@@ -246,8 +345,8 @@ export function AIPanel() {
       });
     }
     const content = data.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(String(content).replace(/```json|```/g, '').trim());
-    const answer = parsed.answer || '未识别到答案';
+    const parsed = parseAIAnswerContent(content);
+    const answer = parsed.answer || parsed.anwser || 'No answer recognized';
     const normalized = normalizeAnswer(
       question,
       answer,
@@ -263,7 +362,7 @@ export function AIPanel() {
       choiceLabels: normalized.choiceLabels,
       matchedOptions: normalized.matchedOptions,
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.75,
-      analysis: parsed.analysis || '模型未返回详细解析。',
+      analysis: parsed.analysis || 'Model did not return detailed analysis.',
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
       createdAt: Date.now()
     };
