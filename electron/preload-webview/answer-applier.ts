@@ -209,6 +209,14 @@ function labelsFromPayload(payload: AnswerApplyPayload) {
   return labelsFromAnswerText(payload.answer || '', allowMultiple);
 }
 
+function answerValuesFromTargets(targets: QuestionOptionTarget[], allowMultiple: boolean) {
+  const values = targets
+    .map((target) => cleanText(target.value || target.label).toUpperCase())
+    .filter(Boolean);
+  const unique = Array.from(new Set(values));
+  return allowMultiple ? unique.slice().sort() : unique.slice(0, 1);
+}
+
 function textScore(answer: string, option: string) {
   const answerValues = answerAliases(answer);
   const optionValues = answerAliases(option);
@@ -455,7 +463,10 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   const root = questionRootForPayload(payload);
   const isJudgement = Boolean(judgementValue) || root.getAttribute('qtype') === '3' || Boolean(root.querySelector('[qtype="3"]'));
   const isMultiple = !isJudgement && (root.getAttribute('qtype') === '1' || Boolean(root.querySelector('[qtype="1"], [qtype="21"]')));
-  const answer = isJudgement && judgementValue ? judgementValue : (isMultiple ? labels.slice().sort() : labels).join('');
+  const pageValues = !isJudgement && targets.length > 0
+    ? answerValuesFromTargets(targets, isMultiple)
+    : (isMultiple ? labels.slice().sort() : labels);
+  const answer = isJudgement && judgementValue ? judgementValue : pageValues.join('');
 
   console.log('[StudyPilot] isJudgement:', isJudgement, 'isMultiple:', isMultiple, 'answer:', answer);
 
@@ -495,6 +506,10 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
     `[qid="${cssEscape(qid)}"]`,
     `[questionid="${cssEscape(qid)}"]`
   ].join(','))) as HTMLElement[]);
+  const optionTargetElements = uniqueElements((payload.question?.optionTargets || targets)
+    .flatMap((target) => optionElementsForTarget(target)));
+  const allOptionElements = uniqueElements([...optionElements, ...optionTargetElements])
+    .filter((element) => isSingleOptionElement(element));
 
   console.log('[StudyPilot] 找到 optionElements 数量:', optionElements.length);
 
@@ -557,9 +572,13 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   }
 
   // 标准处理逻辑
-  for (const option of optionElements) {
+  for (const option of allOptionElements) {
     const value = isJudgement ? judgementValueFromElement(option) : (option.getAttribute('data') || '').toUpperCase();
-    const selected = isJudgement ? value === answer : labels.includes(String(value || '').toUpperCase());
+    const selected = isJudgement
+      ? value === answer
+      : targets.length > 0
+        ? targets.some((target) => elementMatchesTarget(option, target))
+        : labels.includes(String(value || '').toUpperCase());
     const input = option.matches('input[type="radio"], input[type="checkbox"]')
       ? option as HTMLInputElement
       : option.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
@@ -583,20 +602,23 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   const pageAny = window as any;
   if (typeof pageAny.loadAnswerSheet === 'function') pageAny.loadAnswerSheet(qid, answer);
   if (typeof pageAny.answerContentChange === 'function') pageAny.answerContentChange();
-  return Boolean(hiddenAnswer || optionElements.length > 0);
+  return Boolean(hiddenAnswer || allOptionElements.length > 0);
 }
 
 function ensureAppliedAnswerValue(payload: AnswerApplyPayload, targets: QuestionOptionTarget[]) {
   const answerText = `${payload.answer || ''} ${(payload.matchedOptions || []).join(' ')}`;
   const judgementValue = isJudgementPayload(payload, targets) ? parseJudgementValueStable(answerText) : null;
   const labels = judgementValue ? [] : (targets.length > 0 ? targets.map((target) => target.label.toUpperCase()) : labelsFromPayload(payload));
+  const pageValues = !judgementValue && targets.length > 0
+    ? answerValuesFromTargets(targets, isMultipleChoicePayload(payload))
+    : labels;
   const qid = qidForPayload(payload);
-  if (!qid || (!judgementValue && labels.length === 0)) return true;
+  if (!qid || (!judgementValue && pageValues.length === 0)) return true;
 
   const root = questionRootForPayload(payload);
   const isJudgement = Boolean(judgementValue) || root.getAttribute('qtype') === '3' || Boolean(root.querySelector('[qtype="3"]'));
   const isMultiple = !isJudgement && (root.getAttribute('qtype') === '1' || Boolean(root.querySelector('[qtype="1"], [qtype="21"]')));
-  const expected = isJudgement && judgementValue ? judgementValue : (isMultiple ? labels.slice().sort() : labels).join('');
+  const expected = isJudgement && judgementValue ? judgementValue : (isMultiple ? pageValues.slice().sort() : pageValues).join('');
   const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
   if (!hiddenAnswer) {
     rememberAppliedAnswer(qid, expected, labels);
@@ -618,22 +640,49 @@ function ensureAppliedAnswerValue(payload: AnswerApplyPayload, targets: Question
   return hiddenAnswer.value === expected;
 }
 
-function isElementSelected(element: HTMLElement, target: QuestionOptionTarget) {
-  const input = element.matches('input[type="radio"], input[type="checkbox"]')
-    ? element as HTMLInputElement
-    : element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
+function isSingleOptionElement(element: HTMLElement) {
+  if (element.matches('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) return true;
+  if (element.querySelector('.num_option, .num_option_dx, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) {
+    const nestedOptions = element.querySelectorAll('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]');
+    return nestedOptions.length <= 1;
+  }
+  return false;
+}
+
+function optionElementsForTarget(target: QuestionOptionTarget) {
+  const matched = targetElementsFor(target);
+  const candidates = uniqueElements(matched.flatMap((element) => [
+    element,
+    answerOptionContainer(element),
+    nearestClickableOption(element),
+    element.closest('label') as HTMLElement | null,
+    element.closest('li') as HTMLElement | null
+  ]));
+  return candidates.filter((element) => isSingleOptionElement(element) && elementMatchesTarget(element, target));
+}
+
+function selectedInsideSingleOption(element: HTMLElement) {
+  if (element.matches('input[type="radio"], input[type="checkbox"]')) {
+    return (element as HTMLInputElement).checked;
+  }
+  const input = element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
   if (input?.checked) return true;
   if (element.getAttribute('aria-checked') === 'true' || element.getAttribute('aria-pressed') === 'true') return true;
   if (selectedClassHit(element)) return true;
-  if (Array.from(element.querySelectorAll('*')).some((child) => selectedClassHit(child as HTMLElement))) return true;
-  const clickable = nearestClickableOption(element);
-  if (clickable && clickable !== element) {
-    const clickableInput = clickable.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
-    if (clickableInput?.checked) return true;
-    if (clickable.getAttribute('aria-checked') === 'true' || clickable.getAttribute('aria-pressed') === 'true') return true;
-    if (selectedClassHit(clickable) || Array.from(clickable.querySelectorAll('*')).some((child) => selectedClassHit(child as HTMLElement))) return true;
-  }
-  return false;
+  if (!isSingleOptionElement(element)) return false;
+  return Array.from(element.querySelectorAll('.num_option, .num_option_dx, [role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]'))
+    .some((child) => selectedClassHit(child as HTMLElement) ||
+      child.getAttribute('aria-checked') === 'true' ||
+      child.getAttribute('aria-pressed') === 'true' ||
+      ((child as HTMLInputElement).checked === true));
+}
+
+function isElementSelected(element: HTMLElement, target: QuestionOptionTarget) {
+  const targetOptions = optionElementsForTarget(target);
+  const probes = targetOptions.length > 0
+    ? targetOptions
+    : (isSingleOptionElement(element) && elementMatchesTarget(element, target) ? [element] : []);
+  return probes.some(selectedInsideSingleOption);
 }
 
 function answerStateSignature(element: HTMLElement) {
@@ -685,6 +734,27 @@ function targetMatchScore(element: HTMLElement, target: QuestionOptionTarget) {
   return score;
 }
 
+function targetElementsFor(target: QuestionOptionTarget) {
+  const selectors = [target.inputSelector, target.clickSelector, target.selector].filter(Boolean) as string[];
+  return uniqueElements(selectors.flatMap((selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector)) as HTMLElement[];
+    } catch {
+      return [];
+    }
+  }));
+}
+
+function elementMatchesTarget(element: HTMLElement, target: QuestionOptionTarget) {
+  const targetElements = targetElementsFor(target);
+  if (targetElements.some((targetElement) => targetElement === element || targetElement.contains(element) || element.contains(targetElement))) {
+    return true;
+  }
+  const elementText = normalizeText(element.textContent || '');
+  const targetText = normalizeText(target.text || '');
+  return Boolean(targetText && elementText && (elementText === targetText || elementText.includes(targetText)));
+}
+
 function expandOptionLikeElements(element: HTMLElement) {
   const descendants = Array.from(element.querySelectorAll([
     '.answerBg',
@@ -734,6 +804,7 @@ async function clickAnswerTarget(target: QuestionOptionTarget) {
 
   const pageAny = window as any;
   for (const element of candidates) {
+    if (isElementSelected(element, target)) return;
     const before = answerStateSignature(element);
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
     await new Promise((resolve) => setTimeout(resolve, 220));
@@ -745,9 +816,10 @@ async function clickAnswerTarget(target: QuestionOptionTarget) {
       element.checked = true;
       dispatchInput(element);
     }
-    if (typeof pageAny.addMultipleChoice === 'function' && (qtype === '1' || qtype === '21')) {
+    const afterClick = answerStateSignature(element);
+    if (typeof pageAny.addMultipleChoice === 'function' && (qtype === '1' || qtype === '21') && afterClick === before) {
       pageAny.addMultipleChoice(actionElement);
-    } else if (typeof pageAny.addChoice === 'function' && (qtype === '0' || qtype === '3')) {
+    } else if (typeof pageAny.addChoice === 'function' && (qtype === '0' || qtype === '3') && afterClick === before) {
       pageAny.addChoice(actionElement);
     }
     await new Promise((resolve) => setTimeout(resolve, 260));
@@ -816,9 +888,7 @@ export async function applyAnswerV2(payload: AnswerApplyPayload) {
       await clickAnswerTarget(target);
     }
     console.log('[StudyPilot] 点击完成，按需同步页面答案字段');
-    if (shouldRewritePageSelection(payload, targets)) {
-      applyAnswerDirectly(payload, targets, false);
-    }
+    applyAnswerDirectly(payload, targets, false);
     if (!ensureAppliedAnswerValue(payload, targets)) {
       console.log('[StudyPilot] 答案字段校验失败');
       return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };

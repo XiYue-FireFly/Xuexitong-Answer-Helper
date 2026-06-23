@@ -34,6 +34,20 @@ type ChapterMediaEntry = ChapterVideoEntry | ChapterAudioEntry;
 
 const chapterLinkElements = new Map<string, HTMLElement>();
 
+interface ChapterCandidate {
+  title: string;
+  url: string;
+  active: boolean;
+  completed?: boolean;
+  element?: HTMLElement;
+}
+
+type ChapterPlatform = 'chaoxing' | 'zhihuishu' | 'icve' | 'icourse163' | 'yuketang' | 'generic';
+
+const ACTIVE_CHAPTER_SELECTOR = '.current_play,.activeNode,.active,.current,.cur,.selected,.is-active,.is-current,.active-file';
+const COMPLETED_CHAPTER_SELECTOR = '.time_icofinish,.isFinish,.finish-icon,.icon-yuanquangou,.jobFinish,.finished,.complete,.completed,label.success,[class*="finish"],[class*="Finish"],[class*="complete"],[class*="Complete"]';
+const CHAPTER_ITEM_SELECTOR = '.resource-box .resources-item,.resources-item,.clearfix.video,.child-main,.chapter-content-second,.source-icon,.el-tree-node,.leaf-item,.catalog_item,.chapterItem,.chapter,.knowledge';
+
 function chapterLearningOptions(): Required<ChapterLearningOptions> {
   const pageAny = window as any;
   return {
@@ -336,7 +350,15 @@ function chapterIdentity(rawValue: string) {
     const id = url.searchParams.get('chapterId') ||
       url.searchParams.get('chapterid') ||
       url.searchParams.get('knowledgeId') ||
-      url.searchParams.get('knowledgeid');
+      url.searchParams.get('knowledgeid') ||
+      url.searchParams.get('leafId') ||
+      url.searchParams.get('leafid') ||
+      url.searchParams.get('unitId') ||
+      url.searchParams.get('unitid') ||
+      url.searchParams.get('coursewareId') ||
+      url.searchParams.get('coursewareid') ||
+      url.searchParams.get('cellId') ||
+      url.searchParams.get('cellid');
     return id ? `chapter:${id}` : comparableChapterUrl(url.toString());
   } catch {
     return comparableChapterUrl(rawValue);
@@ -404,6 +426,217 @@ function chapterUrlFromElement(element: HTMLElement) {
   return '';
 }
 
+function isElementActiveChapter(element: HTMLElement) {
+  const classText = String(element.className || '');
+  if (/(^|\s)(current_play|activeNode|active|current|cur|selected|is-active|is-current|active-file)(\s|$)/i.test(classText)) return true;
+  return Boolean(element.closest(ACTIVE_CHAPTER_SELECTOR));
+}
+
+function isElementCompletedChapter(element: HTMLElement) {
+  if (element.querySelector(COMPLETED_CHAPTER_SELECTOR)) return true;
+  const classText = String(element.className || '');
+  if (/(^|\s)(isFinish|finished|complete|completed|jobFinish)(\s|$)/i.test(classText)) return true;
+  const progressText = cleanText((element.querySelector('.progress-num, .progress, [class*="progress"]') as HTMLElement | null)?.textContent || element.textContent || '');
+  const percent = progressText.match(/(\d{1,3})\s*%/)?.[1];
+  if (percent && Number(percent) >= 100) return true;
+  const ratio = progressText.match(/(\d+)\s*\/\s*(\d+)/);
+  if (ratio && Number(ratio[2]) > 0 && Number(ratio[1]) >= Number(ratio[2])) return true;
+  return false;
+}
+
+function titleFromChapterElement(element: HTMLElement) {
+  const titleNode = element.querySelector('.file-name,.catalogue_title,.chapter-title,.title,.name,.text,.resource-name,.resource-title') as HTMLElement | null;
+  return cleanText(
+    titleNode?.innerText ||
+    titleNode?.textContent ||
+    element.getAttribute('title') ||
+    element.getAttribute('aria-label') ||
+    element.innerText ||
+    element.textContent ||
+    ''
+  ).slice(0, 120);
+}
+
+function generatedChapterNodeUrl(frame: ChapterFrameContext, element: HTMLElement, index: number) {
+  const seed = cleanText(`${titleFromChapterElement(element)} ${element.className || ''}`).slice(0, 80);
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+  return `${(frame.url || window.location.href).split('#')[0]}#studypilot-chapter-${frame.depth}-${index}-${Math.abs(hash)}`;
+}
+
+function detectChapterPlatform(): ChapterPlatform {
+  const host = location.hostname.toLowerCase();
+  const href = location.href.toLowerCase();
+  if (host.includes('zhihuishu.com')) return 'zhihuishu';
+  if (host.includes('icve.com.cn') || host.includes('zjy2.icve.com.cn') || host.includes('zyk.icve.com.cn')) return 'icve';
+  if (host.includes('icourse163.org') || host.includes('icourse163.com') || href.includes('icourse163')) return 'icourse163';
+  if (host.includes('yuketang.cn')) return 'yuketang';
+  if (host.includes('chaoxing.com') || host.includes('xuexi365.com') || host.includes('mooc1') || host.includes('mooc2')) return 'chaoxing';
+  return 'generic';
+}
+
+function registerChapterElement(url: string, element: HTMLElement) {
+  chapterLinkElements.set(url, element);
+  chapterLinkElements.set(comparableChapterUrl(url), element);
+  chapterLinkElements.set(chapterIdentity(url), element);
+}
+
+function collectElementsAsChapterItems(selector: string, marker: RegExp, fallbackPrefix: string): ChapterCandidate[] {
+  const items: ChapterCandidate[] = [];
+  const seen = new WeakSet<HTMLElement>();
+  for (const frame of safeFrameContexts()) {
+    let elements: HTMLElement[] = [];
+    try {
+      elements = Array.from(frame.document.querySelectorAll(selector)) as HTMLElement[];
+    } catch {
+      continue;
+    }
+
+    for (const element of elements) {
+      if (seen.has(element) || !isVisible(element)) continue;
+      seen.add(element);
+      const text = titleFromChapterElement(element) || elementLinkText(element);
+      const haystack = `${text} ${element.className || ''} ${element.id || ''} ${element.getAttribute('href') || ''} ${element.getAttribute('onclick') || ''}`;
+      if (!marker.test(haystack)) continue;
+      const childLink = element.querySelector('a[href],[onclick],[data-url],[data-href]') as HTMLElement | null;
+      const directUrl = chapterUrlFromElement(element) || (childLink ? chapterUrlFromElement(childLink) : '');
+      const url = directUrl || generatedChapterNodeUrl(frame, element, items.length);
+      registerChapterElement(url, element);
+      items.push({
+        title: text || `${fallbackPrefix} ${items.length + 1}`,
+        url,
+        active: isElementActiveChapter(element),
+        completed: isElementCompletedChapter(element),
+        element
+      });
+    }
+  }
+  return uniqueBy(items, (item) => item.url).slice(0, 120);
+}
+
+function collectIcveChapterItems() {
+  return collectElementsAsChapterItems(
+    [
+      '.h_cells a',
+      '.s_point[itemtype]',
+      '.s_point',
+      '.s_pointerct',
+      '.tabsel',
+      '.tabsel.seled',
+      '.cells a',
+      '.directory a',
+      '.courseware-item',
+      '.courseware-list li',
+      '.res-item',
+      '[itemtype]',
+      '[data-cell-id]',
+      '[data-courseware-id]'
+    ].join(','),
+    /(s_point|s_pointerct|h_cells|courseware|directory|cell|itemtype|video|audio|doc|ppt|pdf|resource|learn|study|chapter|finish|complete)/i,
+    'ICVE'
+  );
+}
+
+function collectIcourse163ChapterItems() {
+  return collectElementsAsChapterItems(
+    [
+      '.j-unitslist li',
+      '.j-lesson',
+      '.j-unit',
+      '.unit-name',
+      '.j-up',
+      '.u-learnLesson',
+      '.f-cb',
+      '[data-unitid]',
+      '[data-lessonid]'
+    ].join(','),
+    /(j-unitslist|lesson|unit|u-icon-video|u-icon-doc|u-icon-discuss|u-icon-test|current|learn|video|doc|quiz|test|finish|complete)/i,
+    'iCourse'
+  );
+}
+
+function collectYuketangChapterItems() {
+  return collectElementsAsChapterItems(
+    [
+      '.chapter-list li',
+      '.chapter-list [class*="leaf"]',
+      '.study-content__container [class*="leaf"]',
+      '.study-unit',
+      '.leaf-detail',
+      '.leaf-item',
+      '[class*="chapter"]',
+      '[class*="leaf"]',
+      '[data-leaf-id]'
+    ].join(','),
+    /(chapter|leaf|study|video|homework|exam|quiz|forum|finish|complete|schedule|current|active)/i,
+    'Yuketang'
+  );
+}
+
+function collectZhihuishuChapterItems() {
+  return collectElementsAsChapterItems(
+    [
+      '.clearfix.video',
+      '.resources-item',
+      '.resource-box',
+      '.current_play',
+      '.videoLi',
+      '.catalogue_item',
+      '.learning_catalogue_item',
+      '.file-item',
+      '.tree-node',
+      '.source-icon',
+      '.child-main'
+    ].join(','),
+    /(current_play|resources-item|video|resource|catalogue|file|tree|source|finish|complete|chapter|lesson)/i,
+    'Zhihuishu'
+  );
+}
+
+function collectPlatformChapterItems(platform = detectChapterPlatform()) {
+  if (platform === 'icve') return collectIcveChapterItems();
+  if (platform === 'icourse163') return collectIcourse163ChapterItems();
+  if (platform === 'yuketang') return collectYuketangChapterItems();
+  if (platform === 'zhihuishu') return collectZhihuishuChapterItems();
+  return [];
+}
+
+function collectChaoxingChapterItems(): ChapterCandidate[] {
+  const items: ChapterCandidate[] = [];
+  const seen = new WeakSet<HTMLElement>();
+
+  for (const frame of safeFrameContexts()) {
+    let elements: HTMLElement[] = [];
+    try {
+      elements = Array.from(frame.document.querySelectorAll(CHAPTER_ITEM_SELECTOR)) as HTMLElement[];
+    } catch {
+      continue;
+    }
+
+    for (const element of elements) {
+      if (seen.has(element) || !isVisible(element)) continue;
+      seen.add(element);
+      const marker = `${element.className || ''} ${element.id || ''} ${element.textContent || ''}`;
+      if (!/(current_play|activeNode|resources-item|clearfix|chapter|knowledge|catalog|video|resource|source|child|leaf|task|course|progress|finish)/i.test(marker)) continue;
+
+      const childLink = element.querySelector('a[href],[onclick],[data-url],[data-href]') as HTMLElement | null;
+      const directUrl = chapterUrlFromElement(element) || (childLink ? chapterUrlFromElement(childLink) : '');
+      const url = directUrl || generatedChapterNodeUrl(frame, element, items.length);
+      const item = {
+        title: titleFromChapterElement(element) || `Chapter ${items.length + 1}`,
+        url,
+        active: isElementActiveChapter(element),
+        completed: isElementCompletedChapter(element),
+        element
+      };
+      registerChapterElement(url, element);
+      items.push(item);
+    }
+  }
+
+  return uniqueBy(items, (item) => item.url).slice(0, 120);
+}
+
 function isLikelyChapterAnchor(anchor: HTMLAnchorElement) {
   const text = chapterLinkText(anchor);
   const haystack = `${text} ${anchor.href} ${anchor.className || ''} ${anchor.getAttribute('onclick') || ''}`;
@@ -414,6 +647,8 @@ function isLikelyChapterAnchor(anchor: HTMLAnchorElement) {
 
 function collectChapterLinks() {
   chapterLinkElements.clear();
+  const chaoxingItems = collectChaoxingChapterItems();
+  const platformItems = collectPlatformChapterItems();
   const candidates = safeFrameContexts()
     .flatMap((frame) => {
       try {
@@ -429,10 +664,20 @@ function collectChapterLinks() {
           '[data-knowledgeid]',
           '[data-url]',
           '[data-href]',
+          '[data-leaf-id]',
+          '[data-unitid]',
+          '[data-lessonid]',
+          '[data-cell-id]',
+          '[data-courseware-id]',
           '.chapter',
           '.chapterItem',
           '.catalog_item',
-          '.knowledge'
+          '.knowledge',
+          '.j-unitslist li',
+          '.chapter-list li',
+          '.s_point',
+          '.s_pointerct',
+          '.h_cells a'
         ].join(','))) as HTMLElement[];
       } catch {
         return [];
@@ -440,7 +685,7 @@ function collectChapterLinks() {
     });
   const currentUrl = comparableChapterUrl(window.location.href);
   const currentIdentity = chapterIdentity(window.location.href);
-  const links = uniqueBy(
+  const linksFromAnchors = uniqueBy<ChapterCandidate>(
     candidates
       .filter((element) => isVisible(element) && (element instanceof HTMLAnchorElement ? isLikelyChapterAnchor(element) : true))
       .map((element) => {
@@ -453,25 +698,35 @@ function collectChapterLinks() {
           chapterIdentity(url) === currentIdentity ||
           /(^|\s)(active|current|on|cur|selected)(\s|$)/i.test(String(element.className || '')) ||
           Boolean(element.closest('.active,.current,.on,.cur,.selected'));
-        chapterLinkElements.set(url, element);
-        chapterLinkElements.set(comparableChapterUrl(url), element);
-        chapterLinkElements.set(chapterIdentity(url), element);
+        registerChapterElement(url, element);
         return {
           title: text || url,
           url,
           active
         };
       })
-      .filter((item): item is { title: string; url: string; active: boolean } => Boolean(item)),
+      .filter((item): item is ChapterCandidate => Boolean(item)),
     (item) => item.url
   ).slice(0, 80);
+
+  const links = uniqueBy<ChapterCandidate>([
+    ...chaoxingItems,
+    ...platformItems,
+    ...linksFromAnchors
+  ], (item) => item.url).slice(0, 120);
 
   let activeChapterIndex = links.findIndex((item) => item.active);
   if (activeChapterIndex < 0) {
     activeChapterIndex = links.findIndex((item) => comparableChapterUrl(item.url) === currentUrl || chapterIdentity(item.url) === currentIdentity);
   }
-  const nextChapter = activeChapterIndex >= 0 ? links[activeChapterIndex + 1] : links[0];
-  return { links, activeChapterIndex, nextChapter };
+  const nextChapter = activeChapterIndex >= 0
+    ? (links.slice(activeChapterIndex + 1).find((item) => !item.completed) || links[activeChapterIndex + 1])
+    : links.find((item) => !item.completed) || links[0];
+  return {
+    links: links.map((item) => ({ title: item.title, url: item.url, active: item.active })),
+    activeChapterIndex,
+    nextChapter: nextChapter ? { title: nextChapter.title, url: nextChapter.url, active: nextChapter.active } : undefined
+  };
 }
 
 function collectTaskPoints(): TaskPoint[] {
@@ -481,10 +736,30 @@ function collectTaskPoints(): TaskPoint[] {
     try {
       const doc = frame.document;
 
-      const jobElements = Array.from(doc.querySelectorAll('.jobItem, .job, [id^="job"], .jobTodo, .jobFinish')) as HTMLElement[];
+      const jobElements = Array.from(doc.querySelectorAll([
+        '.jobItem',
+        '.job',
+        '[id^="job"]',
+        '.jobTodo',
+        '.jobFinish',
+        '.clearfix.video',
+        '.resources-item',
+        '.child-main',
+        '.leaf-item',
+        '.chapter-content-second',
+        '.source-icon',
+        '.s_point[itemtype]',
+        '.s_pointerct',
+        '.docBox',
+        '.j-unitslist li',
+        '.u-questionItem',
+        '.chapter-list li',
+        '[class*="leaf"]',
+        '[itemtype]'
+      ].join(','))) as HTMLElement[];
       for (const element of jobElements) {
         const classText = element.className || '';
-        const completed = /finish|done|complete|已完成/i.test(classText);
+        const completed = isElementCompletedChapter(element) || /finish|done|complete|已完成/i.test(classText);
         const title = cleanText(element.getAttribute('title') || element.textContent || '任务点');
 
         let type: TaskPoint['type'] = 'unknown';
@@ -503,7 +778,7 @@ function collectTaskPoints(): TaskPoint[] {
           const iframeDoc = iframe.contentDocument;
           if (!iframeDoc) continue;
 
-          if (iframeDoc.querySelector('.reader, .document-reader, #reader')) {
+          if (iframeDoc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader, .ux-pdf-reader, .ux-h5pdfreader_container')) {
             const title = cleanText(iframe.getAttribute('title') || '文档阅读');
             const completed = Boolean(iframeDoc.querySelector('.finish, .complete, [class*="finish"]'));
             taskPoints.push({ type: 'document', title, completed, iframe });
@@ -527,19 +802,35 @@ function collectTaskPoints(): TaskPoint[] {
   return taskPoints;
 }
 
-function findDocumentReaders(): Array<{ iframe: HTMLIFrameElement; doc: Document; title: string }> {
-  const readers: Array<{ iframe: HTMLIFrameElement; doc: Document; title: string }> = [];
+function findDocumentReaders(): Array<{ iframe?: HTMLIFrameElement; doc: Document; title: string }> {
+  const readers: Array<{ iframe?: HTMLIFrameElement; doc: Document; title: string }> = [];
 
   for (const frame of safeFrameContexts()) {
     try {
+      const frameReader = frame.document.querySelector([
+        '.reader',
+        '.document-reader',
+        '#reader',
+        '.ppt-reader',
+        '.pdf-reader',
+        '.ux-pdf-reader',
+        '.ux-h5pdfreader_container',
+        '.readerPager',
+        '.docBox'
+      ].join(','));
+      const framePages = frame.document.querySelector('.page, .pageItem, [class*="page"], .ux-h5pdfreader_container_footer_pages_total, .ux-h5pdfreader_container_footer_pages_in');
+      if (frameReader || framePages) {
+        readers.push({ doc: frame.document, title: cleanText(frame.document.title || frame.label || 'document reader') });
+      }
+
       const iframes = Array.from(frame.document.querySelectorAll('iframe')) as HTMLIFrameElement[];
       for (const iframe of iframes) {
         try {
           const doc = iframe.contentDocument;
           if (!doc) continue;
 
-          const hasReader = doc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader');
-          const hasPages = doc.querySelector('.page, .pageItem, [class*="page"]');
+          const hasReader = doc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader, .ux-pdf-reader, .ux-h5pdfreader_container');
+          const hasPages = doc.querySelector('.page, .pageItem, [class*="page"], .ux-h5pdfreader_container_footer_pages_total, .ux-h5pdfreader_container_footer_pages_in');
 
           if (hasReader || hasPages) {
             const title = cleanText(iframe.getAttribute('title') || iframe.id || '文档阅读器');
@@ -557,24 +848,24 @@ function findDocumentReaders(): Array<{ iframe: HTMLIFrameElement; doc: Document
   return readers;
 }
 
-async function autoReadDocument(reader: { iframe: HTMLIFrameElement; doc: Document; title: string }) {
+async function autoReadDocument(reader: { iframe?: HTMLIFrameElement; doc: Document; title: string }) {
   const doc = reader.doc;
 
-  const nextButton = doc.querySelector('.next, .nextPage, [class*="next"], [onclick*="next"]') as HTMLElement | null;
+  const nextButton = doc.querySelector('.next, .nextPage, .readerPager, .ux-h5pdfreader_container_footer_pages_next, [class*="next"], [class*="Next"], [onclick*="next"], [aria-label*="next" i], [title*="next" i]') as HTMLElement | null;
   if (nextButton && isVisible(nextButton)) {
     nextButton.click();
     await new Promise(resolve => setTimeout(resolve, 800));
     return { success: true, action: 'next-page' };
   }
 
-  const finishButton = doc.querySelector('.finish, .complete, [class*="finish"], [onclick*="finish"]') as HTMLElement | null;
+  const finishButton = doc.querySelector('.finish, .complete, [class*="finish"], [class*="Finish"], [onclick*="finish"], [onclick*="complete"]') as HTMLElement | null;
   if (finishButton && isVisible(finishButton)) {
     finishButton.click();
     await new Promise(resolve => setTimeout(resolve, 500));
     return { success: true, action: 'finish' };
   }
 
-  const scrollContainer = doc.querySelector('.reader, .document-reader, #reader') as HTMLElement | null;
+  const scrollContainer = doc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader, .ux-pdf-reader, .ux-h5pdfreader_container') as HTMLElement | null;
   if (scrollContainer) {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -582,6 +873,81 @@ async function autoReadDocument(reader: { iframe: HTMLIFrameElement; doc: Docume
   }
 
   return { success: false, action: 'none' };
+}
+
+function isSelectedQuizOption(element: HTMLElement) {
+  if (element.getAttribute('aria-checked') === 'true') return true;
+  if (/(^|\s)(active|selected|checked|is-checked)(\s|$)/i.test(String(element.className || ''))) return true;
+  const input = element.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
+  return Boolean(input?.checked);
+}
+
+function isDisabledElement(element: HTMLElement) {
+  return element.hasAttribute('disabled') ||
+    element.getAttribute('aria-disabled') === 'true' ||
+    /(^|\s)(disabled|is-disabled)(\s|$)/i.test(String(element.className || ''));
+}
+
+async function handleChapterTestDialogs() {
+  const options = chapterLearningOptions();
+  let foundDialog = false;
+  let handled = false;
+
+  for (const frame of safeFrameContexts()) {
+    let dialogs: HTMLElement[] = [];
+    try {
+      dialogs = Array.from(frame.document.querySelectorAll('#playTopic-dialog,.ai-test-question-wrapper,.ai-class-exercise-dialog,.topic-dialog,.el-dialog__wrapper,.u-questionItem,[class*=questionBody],[class*="quiz"],[class*="Question"]')) as HTMLElement[];
+    } catch {
+      continue;
+    }
+
+    for (const dialog of dialogs) {
+      if (!isVisible(dialog)) continue;
+      const dialogText = cleanText(dialog.textContent || '');
+      const looksLikeQuestion = dialog.matches('#playTopic-dialog,.ai-test-question-wrapper,.ai-class-exercise-dialog,.topic-dialog') ||
+        /(topic|question|quiz|test|radio|checkbox|题|问|答)/i.test(dialogText);
+      if (!looksLikeQuestion) continue;
+
+      foundDialog = true;
+      if (!options.autoAnswerQuestions) {
+        sendChapterLearningState('Detected an in-video quiz. Enable auto question handling or answer it manually.');
+        return { found: true, handled: false };
+      }
+
+      const pagers = Array.from(dialog.querySelectorAll('.el-pager .number,.pager .number,[class*="pager"] button')) as HTMLElement[];
+      const pages = pagers.length > 0 ? pagers : [dialog];
+      for (const page of pages) {
+        if (page !== dialog && isVisible(page) && !page.classList.contains('active')) {
+          page.click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        const optionElements = Array.from(dialog.querySelectorAll('ul .topic-item,.topic .radio ul > li,.topic .checkbox ul > li,.el-radio,.el-checkbox,label,.u-answerItem,.u-questionItem li,[class*="option"],[role="radio"],[role="checkbox"]')) as HTMLElement[];
+        const visibleOptions = optionElements.filter((item) => isVisible(item) && !isDisabledElement(item));
+        if (visibleOptions.length > 0 && !visibleOptions.some(isSelectedQuizOption)) {
+          visibleOptions[0].click();
+          handled = true;
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      const actionButtons = Array.from(dialog.querySelectorAll('.submit,.confirm,.btn,.close-btn,.el-button--primary,.j-continue,button')) as HTMLElement[];
+      const button = actionButtons.find((item) => {
+        if (!isVisible(item) || isDisabledElement(item)) return false;
+        const text = cleanText(item.textContent || item.getAttribute('title') || '');
+        return /^(submit|confirm|ok|close|next|continue|done|继续|确定|提交|关闭|完成|下一题)$/i.test(text) ||
+          item.matches('.close-btn,.submit,.confirm,.el-button--primary');
+      });
+      if (button) {
+        button.click();
+        handled = true;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  }
+
+  if (handled) sendChapterLearningState('Handled chapter quiz dialog.');
+  return { found: foundDialog, handled };
 }
 
 function isAllTaskPointsCompleted(): boolean {
@@ -610,6 +976,125 @@ function applyChapterAudioOptions(audio: HTMLAudioElement) {
     return;
   }
   audio.playbackRate = rate;
+}
+
+function handlePlatformContinueButtons() {
+  let clicked = false;
+  for (const frame of safeFrameContexts()) {
+    let buttons: HTMLElement[] = [];
+    try {
+      buttons = Array.from(frame.document.querySelectorAll([
+        '.j-unitctBox .u-btn-default.j-continue',
+        '.j-continue',
+        '.u-btn-default.j-continue',
+        '.el-button--primary',
+        '.next-topic.next-t',
+        '.paging_next',
+        'button'
+      ].join(','))) as HTMLElement[];
+    } catch {
+      continue;
+    }
+
+    const target = buttons.find((button) => {
+      if (!isVisible(button) || isDisabledElement(button)) return false;
+      const text = cleanText(button.textContent || button.getAttribute('title') || button.getAttribute('aria-label') || '');
+      if (button.matches('.j-continue,.next-topic.next-t,.paging_next')) return true;
+      return /^(continue|next|start|resume|ok|confirm|done)$/i.test(text);
+    });
+    if (!target) continue;
+    target.click();
+    clicked = true;
+  }
+  return clicked;
+}
+
+function collectJwPlayers() {
+  const players: any[] = [];
+  const seen = new Set<any>();
+  for (const frame of safeFrameContexts()) {
+    try {
+      const jwplayer = (frame.window as any).jwplayer;
+      if (typeof jwplayer !== 'function') continue;
+      const player = jwplayer();
+      if (player && !seen.has(player)) {
+        seen.add(player);
+        players.push(player);
+      }
+    } catch {
+      // Not a jwplayer page/frame.
+    }
+  }
+  return players;
+}
+
+function applyJwPlayerOptions(player: any) {
+  const options = chapterLearningOptions();
+  const rate = Math.max(0, Math.min(16, Number(options.playbackRate) || 0));
+  try {
+    if (typeof player.setMute === 'function') player.setMute(Boolean(options.muted));
+    if (typeof player.setVolume === 'function') player.setVolume(options.muted ? 0 : 100);
+    if (typeof player.setPlaybackRate === 'function' && rate > 0) player.setPlaybackRate(rate);
+  } catch {
+    // Custom player APIs vary between platforms.
+  }
+}
+
+async function playJwPlayers() {
+  const options = chapterLearningOptions();
+  if (!options.autoPlay || Number(options.playbackRate) <= 0) return 0;
+  let played = 0;
+  for (const player of collectJwPlayers()) {
+    applyJwPlayerOptions(player);
+    try {
+      if (typeof player.play === 'function') {
+        player.play();
+        played += 1;
+      }
+    } catch {
+      // The polling loop retries.
+    }
+  }
+  return played;
+}
+
+function attachJwPlayerWatchers() {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotChapterWatchedJwPlayers) pageAny.__studyPilotChapterWatchedJwPlayers = new WeakSet();
+  const watched = pageAny.__studyPilotChapterWatchedJwPlayers as WeakSet<object>;
+  for (const player of collectJwPlayers()) {
+    if (!player || typeof player !== 'object' || watched.has(player)) continue;
+    watched.add(player);
+    try {
+      if (typeof player.onComplete === 'function') {
+        player.onComplete(() => {
+          if (!pageAny.__studyPilotChapterRunning) return;
+          openNextChapterIfAvailableDeep('jwplayer-complete');
+        });
+      } else if (typeof player.on === 'function') {
+        player.on('complete', () => {
+          if (!pageAny.__studyPilotChapterRunning) return;
+          openNextChapterIfAvailableDeep('jwplayer-complete');
+        });
+      }
+    } catch {
+      // Different platform wrappers expose different event APIs.
+    }
+  }
+}
+
+function resumeMediaIfNeeded(media: ChapterMediaElement) {
+  const pageAny = window as any;
+  const options = chapterLearningOptions();
+  if (!pageAny.__studyPilotChapterRunning || !options.autoPlay || Number(options.playbackRate) <= 0 || isMediaEnded(media)) return;
+  window.setTimeout(() => {
+    if (!pageAny.__studyPilotChapterRunning || !media.paused || isMediaEnded(media)) return;
+    try {
+      void media.play();
+    } catch {
+      // The polling loop retries when a player requires user interaction.
+    }
+  }, 600);
 }
 
 async function playAllMediaElements() {
@@ -645,6 +1130,8 @@ async function playAllMediaElements() {
       }
     }
   }
+
+  await playJwPlayers();
 }
 
 function captureChapterLearningState(message = '已读取当前页面章节状态。') {
@@ -715,6 +1202,7 @@ function attachChapterVideoWatchers() {
     });
     video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
     video.addEventListener('pause', () => {
+      resumeMediaIfNeeded(video);
       if (!video.ended) sendChapterLearningState('视频已暂停。');
     });
   }
@@ -758,6 +1246,7 @@ function attachChapterVideoWatchersDeep() {
     });
     video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
     video.addEventListener('pause', () => {
+      resumeMediaIfNeeded(video);
       if (!video.ended) sendChapterLearningState('视频已暂停。');
     });
   }
@@ -779,9 +1268,11 @@ function attachPrimaryChapterVideoWatchers() {
       if (pageAny.__studyPilotChapterPrimaryVideo === video) sendChapterLearningState('视频正在播放。');
     });
     video.addEventListener('pause', () => {
+      resumeMediaIfNeeded(video);
       if (!video.ended && pageAny.__studyPilotChapterPrimaryVideo === video) sendChapterLearningState('视频已暂停。');
     });
   }
+  attachJwPlayerWatchers();
 }
 
 function openNextChapterIfAvailableDeep(reason: string) {
@@ -814,6 +1305,11 @@ function openNextChapterIfAvailableDeep(reason: string) {
     } catch {
       // Fall back to opening the resolved URL below.
     }
+  }
+  if (nextChapter.url.includes('#studypilot-chapter-')) {
+    pageAny.__studyPilotChapterOpeningNext = 0;
+    sendChapterLearningState(`Next chapter was detected as an in-page node but could not be clicked: ${nextChapter.title}`);
+    return false;
   }
   ipcRenderer.sendToHost('studypilot:chapter-open-next', {
     url: nextChapter.url,
@@ -853,6 +1349,7 @@ async function playPrimaryChapterMedia() {
   rememberPrimaryMedia(primaryVideo, primaryAudio);
   pauseNonPrimaryMedia(primaryVideo, primaryAudio);
   broadcastChapterFrameCommand('apply-options', options);
+  attachJwPlayerWatchers();
 
   if (!options.autoPlay || Number(options.playbackRate) <= 0) {
     return { videoEntries, audioEntries, primaryVideo, primaryAudio, played: 0 };
@@ -885,6 +1382,8 @@ async function playPrimaryChapterMedia() {
     }
   }
 
+  played += await playJwPlayers();
+
   return { videoEntries, audioEntries, primaryVideo, primaryAudio, played };
 }
 
@@ -900,6 +1399,12 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
       const options = chapterLearningOptions();
 
       attachPrimaryChapterVideoWatchers();
+      const dialogState = await handleChapterTestDialogs();
+      if (dialogState.found && !dialogState.handled && !options.autoAnswerQuestions) return;
+      if (handlePlatformContinueButtons()) {
+        sendChapterLearningState('Clicked a platform continue/next button.');
+      }
+
       const videoEntries = collectChapterVideos();
       const audioEntries = collectChapterAudios();
 
@@ -963,6 +1468,9 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
 
 async function checkIfShouldProceedToNext(extractQuestions: ExtractQuestions): Promise<boolean> {
   await new Promise(resolve => setTimeout(resolve, 1000));
+
+  const dialogState = await handleChapterTestDialogs();
+  if (dialogState.found && !dialogState.handled) return false;
 
   const hasQuestions = extractQuestions().length > 0;
   if (hasQuestions) {

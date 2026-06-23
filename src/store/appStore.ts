@@ -1085,6 +1085,28 @@ class GlobalStore {
     return option.match(/^\s*([A-Z])\s*[.\s:：、。)]/i)?.[1]?.toUpperCase() || this.optionLabelFor(index);
   }
 
+  private normalizeAnswerOptionText(text: string) {
+    return String(text || '')
+      .replace(/[\uff01-\uff5e]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+      .replace(/\u3000/g, ' ')
+      .replace(/^\s*(?:answer|answers|\u6b63\u786e\u7b54\u6848|\u53c2\u8003\u7b54\u6848|\u7b54\u6848|\u9009\u9879|\u9009\u62e9)\s*[:\uff1a]?\s*/i, '')
+      .replace(/^\s*[A-H]\s*[.\s:\uff1a\u3001\u3002)]\s*/i, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/[^\u2E80-\u9FFFA-Za-z0-9]+/g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  private answerOptionTextMatches(answer: string, option: string) {
+    const answerBody = this.normalizeAnswerOptionText(answer);
+    const optionBody = this.normalizeAnswerOptionText(option);
+    if (!answerBody || !optionBody) return false;
+    return answerBody === optionBody ||
+      answerBody.includes(optionBody) ||
+      optionBody.includes(answerBody);
+  }
+
   private normalizeManualAnswer(input: ManualQuestionBankInput, questionHash: string): AIAnswerResult {
     const answer = input.answer.trim();
     const labels = new Set<string>();
@@ -1096,9 +1118,11 @@ class GlobalStore {
 
     const matchedOptions = input.options.filter((option, index) => {
       const label = this.optionLabelFromText(option, index);
-      const optionBody = this.normalizeQuestionKey(option.replace(/^\s*[A-H]\s*[.\s:：、。)]*/i, ''));
-      const answerBody = this.normalizeQuestionKey(answer);
-      return labels.has(label) || (optionBody.length > 0 && answerBody.includes(optionBody));
+      return labels.has(label) || this.answerOptionTextMatches(answer, option);
+    });
+    matchedOptions.forEach((option) => {
+      const optionIndex = input.options.indexOf(option);
+      labels.add(this.optionLabelFromText(option, optionIndex >= 0 ? optionIndex : 0));
     });
 
     return {
