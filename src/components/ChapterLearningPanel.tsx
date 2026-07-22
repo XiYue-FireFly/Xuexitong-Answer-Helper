@@ -26,7 +26,11 @@ export function ChapterLearningPanel() {
     muted: nextSettings.chapterVideoMuted,
     playbackRate: nextSettings.chapterVideoSpeed,
     autoReadDocument: nextSettings.chapterAutoReadDocument,
-    autoAnswerQuestions: nextSettings.chapterAutoAnswerQuestions
+    autoAnswerQuestions: nextSettings.chapterAutoAnswerQuestions,
+    restudy: nextSettings.chapterRestudy,
+    unlockMode: nextSettings.chapterUnlockMode,
+    faceRecognition: nextSettings.chapterFaceRecognition,
+    rateHack: nextSettings.chapterRateHack
   });
 
   const sendAction = (action: ChapterAction, nextSettings = settings) => {
@@ -119,7 +123,27 @@ export function ChapterLearningPanel() {
         </label>
       </div>
 
-      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>学习模式</h5>
+        <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+          <span>复习模式（已完成视频继续学习）</span>
+          <input type="checkbox" checked={settings.chapterRestudy} onChange={(event) => updateChapterSettings({ chapterRestudy: event.target.checked })} style={{ width: 18, height: 18 }} />
+        </label>
+        <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+          <span>闯关模式自动解锁章节</span>
+          <input type="checkbox" checked={settings.chapterUnlockMode} onChange={(event) => updateChapterSettings({ chapterUnlockMode: event.target.checked })} style={{ width: 18, height: 18 }} />
+        </label>
+        <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+          <span>人脸识别检测暂停</span>
+          <input type="checkbox" checked={settings.chapterFaceRecognition} onChange={(event) => updateChapterSettings({ chapterFaceRecognition: event.target.checked })} style={{ width: 18, height: 18 }} />
+        </label>
+        <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+          <span>倍速防清进度（绕过拖拽检测）</span>
+          <input type="checkbox" checked={settings.chapterRateHack} onChange={(event) => updateChapterSettings({ chapterRateHack: event.target.checked })} style={{ width: 18, height: 18 }} />
+        </label>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前章节状态</h5>
           <span className={`badge ${chapterLearning?.running ? 'badge-success' : 'badge-primary'}`}>

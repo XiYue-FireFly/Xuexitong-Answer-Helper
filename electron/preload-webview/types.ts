@@ -52,6 +52,10 @@ export interface ChapterLearningOptions {
   playbackRate?: number;
   autoReadDocument?: boolean;
   autoAnswerQuestions?: boolean;
+  restudy?: boolean;
+  unlockMode?: boolean;
+  faceRecognition?: boolean;
+  rateHack?: boolean;
 }
 
 export interface ChapterLearningCommand {

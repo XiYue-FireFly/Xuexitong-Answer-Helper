@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 export type AutomationAction = 'click' | 'fill' | 'select' | 'wait';
 export type AutomationStatus = 'idle' | 'scanning' | 'planning' | 'awaiting_approval' | 'executing' | 'extracting_question' | 'calling_ai' | 'learning' | 'done' | 'error';
@@ -157,6 +157,10 @@ export interface AppSettings {
   chapterVideoSpeed: number;
   chapterAutoReadDocument: boolean;
   chapterAutoAnswerQuestions: boolean;
+  chapterRestudy: boolean;
+  chapterUnlockMode: boolean;
+  chapterFaceRecognition: boolean;
+  chapterRateHack: boolean;
   mockModeUrl: string;
   theme: 'dark' | 'light';
   providers: AIProviderConfig[];
@@ -647,8 +651,12 @@ const defaultSettings: AppSettings = {
   chapterAutoPlay: true,
   chapterVideoMuted: false,
   chapterVideoSpeed: 1,
-  chapterAutoReadDocument: true,
-  chapterAutoAnswerQuestions: false,
+    chapterAutoReadDocument: true,
+    chapterAutoAnswerQuestions: false,
+    chapterRestudy: false,
+    chapterUnlockMode: true,
+    chapterFaceRecognition: true,
+    chapterRateHack: true,
   mockModeUrl: 'https://study-demo.studypilot.local/automation',
   theme: 'dark',
   providers: defaultProviders,
@@ -682,13 +690,13 @@ function normalizeProviders(inputProviders?: AIProviderConfig[]) {
     if (!isCustomProvider && preset && !next.model) {
       next.model = preset.defaultModel;
     }
-    if (next.id === 'xiaomi' && (!next.apiKey || next.baseUrl === 'https://api.mixin.chat/v1')) {
+    if (next.id === 'xiaomi' && next.baseUrl === 'https://api.mixin.chat/v1') {
       next.name = defaults.name;
       next.baseUrl = defaults.baseUrl;
       next.model = next.model === 'xiaomi-llm' ? defaults.model : next.model;
       next.authHeader = defaults.authHeader;
     }
-    if (next.id === 'deepseek' && (!next.apiKey || next.baseUrl === 'https://api.deepseek.com/v1')) {
+    if (next.id === 'deepseek' && next.baseUrl === 'https://api.deepseek.com/v1') {
       next.baseUrl = defaults.baseUrl;
       next.model = ['deepseek-chat', 'deepseek-reasoner'].includes(next.model) ? defaults.model : next.model;
     }
@@ -716,6 +724,7 @@ function normalizeSettings(input: Partial<AppSettings> | null): AppSettings {
 
 const QUESTION_BANK_FUZZY_THRESHOLD = 0.8;
 const QUESTION_BANK_FUZZY_MIN_KEY_LENGTH = 12;
+const QUESTION_BANK_FUZZY_MIN_LENGTH_BALANCE = 0.85;
 
 class GlobalStore {
   private listeners = new Set<() => void>();
@@ -899,7 +908,11 @@ class GlobalStore {
         capturedAt: item.updatedAt || Date.now()
       });
       if (!key) continue;
-      const normalizedItem = { ...item, questionKey: key, options: Array.isArray(item.options) ? item.options : [] };
+      const normalizedItem = {
+        ...item,
+        options: Array.isArray(item.options) ? item.options : [],
+        questionKey: item.questionKey || key
+      };
       const existing = byKey.get(key);
       byKey.set(key, existing ? this.preferQuestionBankEntry(existing, normalizedItem) : normalizedItem);
     }
@@ -975,7 +988,8 @@ class GlobalStore {
       }
     }
     const sequenceScore = previous[right.length] / Math.max(left.length, right.length);
-    return Math.max(containmentScore, diceScore * 0.55 + sequenceScore * 0.45) * lengthBalance;
+    const rawScore = Math.max(containmentScore, diceScore * 0.55 + sequenceScore * 0.45);
+    return rawScore * lengthBalance;
   }
 
   private questionBankOptionsCompatible(question: QuestionItem, entry: QuestionBankEntry) {
@@ -983,6 +997,13 @@ class GlobalStore {
     const entryOptionCount = (entry.options || []).filter(Boolean).length;
     if (questionOptionCount === 0 || entryOptionCount === 0) return true;
     return Math.abs(questionOptionCount - entryOptionCount) <= 1;
+  }
+
+  private questionBankOptionsExact(question: QuestionItem, entry: QuestionBankEntry) {
+    const questionOptionCount = (question.options || []).filter(Boolean).length;
+    const entryOptionCount = (entry.options || []).filter(Boolean).length;
+    if (questionOptionCount === 0 || entryOptionCount === 0) return true;
+    return questionOptionCount === entryOptionCount;
   }
 
   private questionBankEntryKey(entry: QuestionBankEntry) {
@@ -1011,7 +1032,7 @@ class GlobalStore {
         (allowLegacyQuestionOnly && entry.questionKey === legacyKey) ||
         entryKey === contentKey ||
         (allowLegacyQuestionOnly && entryLegacyKey === legacyKey);
-      if (matches && this.questionBankOptionsCompatible(question, entry)) {
+      if (matches && this.questionBankOptionsExact(question, entry)) {
         best = best ? this.preferQuestionBankEntry(best, entry) : entry;
         continue;
       }
@@ -1019,7 +1040,7 @@ class GlobalStore {
       const legacyCompatible = Boolean(question.context) &&
         !entry.context &&
         entryLegacyKey === legacyKey &&
-        this.questionBankOptionsCompatible(question, entry);
+        this.questionBankOptionsExact(question, entry);
       if (legacyCompatible) {
         legacyBest = legacyBest ? this.preferQuestionBankEntry(legacyBest, entry) : entry;
       }
@@ -1031,22 +1052,37 @@ class GlobalStore {
     const questionKey = question.context ? this.normalizeQuestionContentKey(question) : this.normalizeQuestionKey(question);
     if (questionKey.length < QUESTION_BANK_FUZZY_MIN_KEY_LENGTH) return null;
 
+    const lengthBalanceOf = (a: string, b: string) => {
+      const shorter = a.length <= b.length ? a : b;
+      const longer = a.length > b.length ? a : b;
+      return longer.length === 0 ? 0 : shorter.length / longer.length;
+    };
+
     let best: { entry: QuestionBankEntry; score: number } | null = null;
     let legacyBest: { entry: QuestionBankEntry; score: number } | null = null;
     for (const entry of this.state.questionBank) {
       if (!this.questionBankOptionsCompatible(question, entry)) continue;
       const entryKey = question.context ? this.questionBankEntryKey(entry) : this.normalizeQuestionKey(entry.question);
       const score = this.textSimilarity(questionKey, entryKey);
-      if (!best || score > best.score) best = { entry, score };
+      const balance = lengthBalanceOf(questionKey, entryKey);
+      if (score >= QUESTION_BANK_FUZZY_THRESHOLD && balance >= QUESTION_BANK_FUZZY_MIN_LENGTH_BALANCE &&
+          (!best || score > best.score)) {
+        best = { entry, score };
+      }
 
       if (question.context && !entry.context) {
-        const legacyScore = this.textSimilarity(this.normalizeQuestionKey(question), this.normalizeQuestionKey(entry.question));
-        if (!legacyBest || legacyScore > legacyBest.score) legacyBest = { entry, score: legacyScore };
+        const questionLegacyKey = this.normalizeQuestionKey(question);
+        const entryLegacyKey = this.normalizeQuestionKey(entry.question);
+        const legacyScore = this.textSimilarity(questionLegacyKey, entryLegacyKey);
+        const legacyBalance = lengthBalanceOf(questionLegacyKey, entryLegacyKey);
+        if (legacyScore >= QUESTION_BANK_FUZZY_THRESHOLD && legacyBalance >= QUESTION_BANK_FUZZY_MIN_LENGTH_BALANCE &&
+            (!legacyBest || legacyScore > legacyBest.score)) {
+          legacyBest = { entry, score: legacyScore };
+        }
       }
     }
 
-    if (best && best.score >= QUESTION_BANK_FUZZY_THRESHOLD) return best;
-    return legacyBest && legacyBest.score >= QUESTION_BANK_FUZZY_THRESHOLD ? legacyBest : null;
+    return best || legacyBest;
   }
 
   findQuestionBankAnswer(question: QuestionItem) {
@@ -1056,6 +1092,7 @@ class GlobalStore {
     if (!entry) return null;
     entry.hits += 1;
     this.saveQuestionBank(this.state.questionBank);
+    this.emit();
     if (fuzzyMatch) {
       const percent = Math.round(fuzzyMatch.score * 100);
       this.addLog('success', `题库模糊命中，相似度 ${percent}%。`);
@@ -1293,8 +1330,10 @@ class GlobalStore {
   }
 
   updateProvider(providerId: string, updates: Partial<AIProviderConfig>) {
-    this.state.settings.providers = this.state.settings.providers.map((provider) =>
-      provider.id === providerId ? { ...provider, ...updates } : provider
+    this.state.settings.providers = normalizeProviders(
+      this.state.settings.providers.map((provider) =>
+        provider.id === providerId ? { ...provider, ...updates } : provider
+      )
     );
     this.saveSettings(this.state.settings);
     this.addLog('info', `AI 服务配置已更新：${providerId}`);
@@ -1440,13 +1479,5 @@ class GlobalStore {
 export const appStore = new GlobalStore();
 
 export function useAppStore() {
-  const [state, setState] = useState(appStore.getState());
-
-  useEffect(() => {
-    return appStore.subscribe(() => {
-      setState({ ...appStore.getState() });
-    });
-  }, []);
-
-  return state;
+  return useSyncExternalStore(appStore.subscribe.bind(appStore), appStore.getState.bind(appStore));
 }

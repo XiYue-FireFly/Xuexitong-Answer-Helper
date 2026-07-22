@@ -618,6 +618,30 @@ export function BrowserPanel() {
       }
     }
 
+    if (event.channel === 'studypilot:chapter-auto-answer') {
+      appStore.addLog('info', '章节学习检测到测试题，正在触发自动答题流程。');
+      appStore.setStatus('extracting_question', '正在抓取章节测试题目。');
+      window.dispatchEvent(new CustomEvent('studypilot:extract-question-request', {
+        detail: {
+          onComplete: (extractResult: any) => {
+            if (!extractResult?.success || !extractResult?.questions?.length) {
+              appStore.addLog('warn', '章节测试未抓到题目，继续学习。');
+              return;
+            }
+            appStore.addLog('success', `章节测试抓到 ${extractResult.questions.length} 道题，开始解析并填入。`);
+            window.dispatchEvent(new CustomEvent('studypilot:automation-action', {
+              detail: { action: 'extract-question' }
+            }));
+            window.setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
+                detail: { action: 'set-options', options: {} }
+              }));
+            }, 1500);
+          }
+        }
+      }));
+    }
+
     if (event.channel === 'studypilot:execute-result') {
       const result = event.args[0];
       if (result?.success) appStore.completePlan(result.message || '已在当前页面完成自动化操作。');

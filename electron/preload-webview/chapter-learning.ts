@@ -56,7 +56,11 @@ function chapterLearningOptions(): Required<ChapterLearningOptions> {
     muted: pageAny.__studyPilotChapterOptions?.muted ?? false,
     playbackRate: pageAny.__studyPilotChapterOptions?.playbackRate ?? 1,
     autoReadDocument: pageAny.__studyPilotChapterOptions?.autoReadDocument ?? true,
-    autoAnswerQuestions: pageAny.__studyPilotChapterOptions?.autoAnswerQuestions ?? false
+    autoAnswerQuestions: pageAny.__studyPilotChapterOptions?.autoAnswerQuestions ?? false,
+    restudy: pageAny.__studyPilotChapterOptions?.restudy ?? false,
+    unlockMode: pageAny.__studyPilotChapterOptions?.unlockMode ?? true,
+    faceRecognition: pageAny.__studyPilotChapterOptions?.faceRecognition ?? true,
+    rateHack: pageAny.__studyPilotChapterOptions?.rateHack ?? true
   };
 }
 
@@ -203,11 +207,18 @@ function sortMediaEntries<T extends ChapterMediaEntry>(entries: T[]) {
 }
 
 function selectPrimaryVideo(entries = collectChapterVideos()) {
+  const options = chapterLearningOptions();
   const previous = (window as any).__studyPilotChapterPrimaryVideo as HTMLVideoElement | undefined;
   const previousEntry = previous ? entries.find((entry) => entry.video === previous) : undefined;
   if (previousEntry && isUsablePrimaryMedia(previousEntry.video)) return previousEntry;
 
   const visibleEntries = entries.filter((entry) => isUsablePrimaryMedia(entry.video));
+  if (options.restudy) {
+    // 复习模式：不跳过已完成的视频
+    return sortMediaEntries(visibleEntries)[0] ||
+      sortMediaEntries(entries.filter((entry) => isUsablePrimaryMedia(entry.video)))[0] ||
+      sortMediaEntries(entries)[0];
+  }
   return sortMediaEntries(visibleEntries.filter((entry) => !isMediaEnded(entry.video)))[0] ||
     sortMediaEntries(visibleEntries)[0] ||
     sortMediaEntries(entries.filter((entry) => !isMediaEnded(entry.video)))[0] ||
@@ -215,11 +226,17 @@ function selectPrimaryVideo(entries = collectChapterVideos()) {
 }
 
 function selectPrimaryAudio(entries = collectChapterAudios()) {
+  const options = chapterLearningOptions();
   const previous = (window as any).__studyPilotChapterPrimaryAudio as HTMLAudioElement | undefined;
   const previousEntry = previous ? entries.find((entry) => entry.audio === previous) : undefined;
   if (previousEntry && isUsablePrimaryMedia(previousEntry.audio)) return previousEntry;
 
   const visibleEntries = entries.filter((entry) => isUsablePrimaryMedia(entry.audio));
+  if (options.restudy) {
+    return sortMediaEntries(visibleEntries)[0] ||
+      sortMediaEntries(entries.filter((entry) => isUsablePrimaryMedia(entry.audio)))[0] ||
+      sortMediaEntries(entries)[0];
+  }
   return sortMediaEntries(visibleEntries.filter((entry) => !isMediaEnded(entry.audio)))[0] ||
     sortMediaEntries(visibleEntries)[0] ||
     sortMediaEntries(entries.filter((entry) => !isMediaEnded(entry.audio)))[0] ||
@@ -1387,6 +1404,250 @@ async function playPrimaryChapterMedia() {
   return { videoEntries, audioEntries, primaryVideo, primaryAudio, played };
 }
 
+// ===== 倍速防清进度：规避超星 seekBarControl 的 drag 检测 =====
+function applyRateHack() {
+  const pageAny = window as any;
+  if (pageAny.__studyPilotRateHackApplied) return;
+  const options = chapterLearningOptions();
+  if (!options.rateHack) return;
+  try {
+    const videojs = pageAny.videojs;
+    const Ext = pageAny.Ext;
+    if (typeof videojs === 'undefined' || typeof Ext === 'undefined') return;
+    pageAny.__studyPilotRateHackApplied = true;
+    const originPlugin = videojs.getPlugin('seekBarControl');
+    if (!originPlugin) return;
+    let dragCount = 0;
+    const plugin = videojs.extend(videojs.getPlugin('plugin'), {
+      constructor: function (videoExt: any, data: any) {
+        const _sendLog = data.sendLog;
+        data.sendLog = (...args: any[]) => {
+          if (args[1] === 'drag') {
+            dragCount++;
+            if (dragCount > 100) {
+              dragCount = 0;
+              const v = document.querySelector('video') as HTMLVideoElement | null;
+              v?.pause();
+            }
+          } else {
+            _sendLog.apply(data, args);
+          }
+        };
+        originPlugin.apply(originPlugin.prototype, [videoExt, data]);
+      }
+    });
+    videojs.registerPlugin('seekBarControl', plugin);
+    Ext.define('ans.VideoJs', {
+      override: 'ans.VideoJs',
+      constructor: function (data: any) {
+        this.addEvents(['seekstart']);
+        this.mixins.observable.constructor.call(this, data);
+        const vjs = videojs(data.videojs, this.params2VideoOpt(data.params), function () {});
+        Ext.fly(data.videojs).on('contextmenu', (f: any) => f.preventDefault());
+        Ext.fly(data.videojs).on('keydown', (f: any) => {
+          if (f.keyCode === 32 || f.keyCode === 37 || f.keyCode === 39 || f.keyCode === 107) f.preventDefault();
+        });
+      }
+    });
+  } catch {
+    // 非 videojs 环境，忽略
+  }
+}
+
+// ===== 人脸识别检测 =====
+function hasFaceRecognition(): boolean {
+  const topWin = (window as any).top || window;
+  try {
+    const faces = topWin.document.querySelectorAll('#fcqrimg');
+    for (const face of faces) {
+      if (face.getAttribute('src')) return true;
+    }
+    const masks = topWin.document.querySelectorAll('.chapterVideoFaceMaskDiv');
+    for (const mask of masks) {
+      if ((mask as HTMLElement).style.display !== 'none') return true;
+    }
+  } catch {
+    // 跨域 top 访问失败，降级检查当前窗口
+    const faces = document.querySelectorAll('#fcqrimg');
+    for (const face of faces) {
+      if (face.getAttribute('src')) return true;
+    }
+  }
+  return false;
+}
+
+async function waitForFaceRecognition(): Promise<void> {
+  if (!hasFaceRecognition()) return;
+  sendChapterLearningState('检测到人脸识别，已暂停自动化，请手动完成识别后继续。');
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (!hasFaceRecognition()) {
+        clearInterval(interval);
+        sendChapterLearningState('人脸识别已完成，继续学习。');
+        resolve();
+      }
+    }, 3000);
+  });
+}
+
+// ===== 视频弹窗测验自动处理 =====
+async function handleVideoQuizDialog(): Promise<boolean> {
+  const pageAny = window as any;
+  // 超星弹窗测验 #playTopic-dialog
+  const dialog = document.querySelector('#playTopic-dialog');
+  if (dialog && isVisible(dialog as HTMLElement)) {
+    try {
+      const items = Array.from(dialog.querySelectorAll('.el-pager .number')) as HTMLElement[];
+      if (items.length) {
+        for (const item of items) {
+          if (!item.classList.contains('active')) {
+            item.click();
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          const options = Array.from(dialog.querySelectorAll('ul .topic-item')) as HTMLElement[];
+          if (options.length) {
+            const random = Math.floor(Math.random() * options.length);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            (dialog.querySelector(`.topic .radio ul > li:nth-child(${random + 1})`) as HTMLElement)?.click();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        (dialog.querySelector('.close-btn, .btn') as HTMLElement)?.click();
+      }
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return true;
+    } catch {
+      // 忽略
+    }
+  }
+  // 超星 videoquiz
+  const submitBtn = document.querySelector('#videoquiz-submit') as HTMLElement | null;
+  if (submitBtn && isVisible(submitBtn)) {
+    try {
+      const labels = Array.from(document.querySelectorAll('.ans-videoquiz-opt label')) as HTMLElement[];
+      if (labels.length) {
+        labels[Math.floor(Math.random() * labels.length)].click();
+        submitBtn.click();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const container = document.querySelector('#video .ans-videoquiz') as HTMLElement | null;
+        container?.remove();
+      }
+      return true;
+    } catch {
+      // 忽略
+    }
+  }
+  return false;
+}
+
+// ===== 闯关模式解锁 =====
+async function tryUnlockChapter(): Promise<boolean> {
+  const pageAny = window as any;
+  if (!pageAny.__studyPilotChapterRunning) return false;
+  try {
+    // 检查是否有未开放章节提示
+    const bodyText = document.body?.innerText || '';
+    if (!/章节未开放|未解锁|闯关/.test(bodyText)) return false;
+    // 尝试调用超星解锁接口
+    const curCourseId = document.querySelector('#curCourseId') as HTMLInputElement | null;
+    const curChapterId = document.querySelector('#curChapterId') as HTMLInputElement | null;
+    const curClazzId = document.querySelector('#curClazzId') as HTMLInputElement | null;
+    const mooc1Domain = pageAny.ServerHost?.mooc1Domain;
+    if (curCourseId && curChapterId && curClazzId && mooc1Domain) {
+      const url = `${mooc1Domain}/job/submitstudy?node=${curChapterId.value}&userid=${pageAny.uid || ''}&clazzid=${curClazzId.value}&courseid=${curCourseId.value}&personid=&view=json`;
+      await fetch(url, { credentials: 'include' }).catch(() => {});
+      sendChapterLearningState('已尝试解锁当前章节。');
+      return true;
+    }
+  } catch {
+    // 忽略
+  }
+  return false;
+}
+
+// ===== 超星特定下一章跳转 =====
+function tryChaoxingNextChapter(): boolean {
+  const pageAny = window as any;
+  try {
+    const topWin = pageAny.top || window;
+    // 方式1: 调用 PCount.next
+    const curCourseId = topWin.document.querySelector('#curCourseId') as HTMLInputElement | null;
+    const curChapterId = topWin.document.querySelector('#curChapterId') as HTMLInputElement | null;
+    const curClazzId = topWin.document.querySelector('#curClazzId') as HTMLInputElement | null;
+    const count = topWin.document.querySelectorAll('#prev_tab .prev_ul li');
+    if (curChapterId && curCourseId && curClazzId && topWin.PCount && typeof topWin.PCount.next === 'function') {
+      topWin.PCount.next(count.length.toString(), curChapterId.value, curCourseId.value, curClazzId.value, '');
+      return true;
+    }
+    // 方式2: 点击下一章节图标
+    const nextIcon = topWin.document.querySelector('.nodeItem.r i') as HTMLElement | null;
+    if (nextIcon) {
+      nextIcon.click();
+      return true;
+    }
+  } catch {
+    // 跨域或非超星环境
+  }
+  return false;
+}
+
+// ===== 增强 PPT/文档自动阅读 =====
+async function enhancedDocumentRead(reader: { iframe?: HTMLIFrameElement; doc: Document; title: string }): Promise<{ success: boolean; action: string }> {
+  const doc = reader.doc;
+  const win = reader.iframe?.contentWindow as any;
+
+  // 超星 PPT swiperNext
+  if (win && typeof win.swiperNext === 'function') {
+    const slides = doc.querySelectorAll('.swiper-container .swiper-slide');
+    if (slides.length > 0) {
+      for (let i = 0; i < slides.length; i++) {
+        win.swiperNext();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      return { success: true, action: 'ppt-next' };
+    }
+  }
+
+  // 超星 finishJob
+  if (win && typeof win.finishJob === 'function') {
+    win.finishJob();
+    return { success: true, action: 'finish-job' };
+  }
+
+  // 超星 readweb.goto
+  if (win && win.readweb && typeof win.readweb.goto === 'function') {
+    win.readweb.goto('epage');
+    return { success: true, action: 'read-goto' };
+  }
+
+  // 通用翻页按钮
+  const nextButton = doc.querySelector('.next, .nextPage, [class*="next"], [onclick*="next"]') as HTMLElement | null;
+  if (nextButton && isVisible(nextButton)) {
+    nextButton.click();
+    await new Promise(resolve => setTimeout(resolve, 800));
+    return { success: true, action: 'next-page' };
+  }
+
+  // 通用完成按钮
+  const finishButton = doc.querySelector('.finish, .complete, [class*="finish"], [onclick*="finish"]') as HTMLElement | null;
+  if (finishButton && isVisible(finishButton)) {
+    finishButton.click();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { success: true, action: 'finish' };
+  }
+
+  // 通用滚动
+  const scrollContainer = doc.querySelector('.reader, .document-reader, #reader') as HTMLElement | null;
+  if (scrollContainer) {
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { success: true, action: 'scroll' };
+  }
+
+  return { success: false, action: 'none' };
+}
+
 function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
   const pageAny = window as any;
   stopChapterLearningLoop();
@@ -1397,6 +1658,20 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
     }
     try {
       const options = chapterLearningOptions();
+
+      // 倍速防清进度
+      if (options.rateHack) applyRateHack();
+
+      // 人脸识别检测
+      if (options.faceRecognition && hasFaceRecognition()) {
+        await waitForFaceRecognition();
+      }
+
+      // 视频弹窗测验处理
+      const quizHandled = await handleVideoQuizDialog();
+      if (quizHandled) {
+        sendChapterLearningState('已自动处理视频弹窗测验。');
+      }
 
       attachPrimaryChapterVideoWatchers();
       const dialogState = await handleChapterTestDialogs();
@@ -1416,7 +1691,7 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
         const readers = findDocumentReaders();
         for (const reader of readers) {
           try {
-            const result = await autoReadDocument(reader);
+            const result = await enhancedDocumentRead(reader);
             if (result.success && result.action !== 'none') {
               sendChapterLearningState(`文档阅读中：${reader.title} - ${result.action}`);
             }
@@ -1438,7 +1713,14 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
       if (currentMediaEnded || allTasksCompleted) {
         const shouldProceed = await checkIfShouldProceedToNext(extractQuestions);
         if (shouldProceed) {
-          openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'current-media-ended');
+          // 闯关模式解锁
+          if (options.unlockMode) {
+            await tryUnlockChapter();
+          }
+          // 优先尝试超星特定跳转，失败则回退到通用点击
+          if (!tryChaoxingNextChapter()) {
+            openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'current-media-ended');
+          }
           return;
         }
       }
@@ -1475,10 +1757,15 @@ async function checkIfShouldProceedToNext(extractQuestions: ExtractQuestions): P
   const hasQuestions = extractQuestions().length > 0;
   if (hasQuestions) {
     const options = chapterLearningOptions();
-    if (!options.autoAnswerQuestions) {
-      sendChapterLearningState('检测到题目，等待手动答题或启用自动答题。');
+    if (options.autoAnswerQuestions) {
+      // 通知宿主触发章节测试自动答题流程（抓题+AI解析+填入）
+      sendChapterLearningState('检测到章节测试题目，正在通知宿主执行自动答题。');
+      ipcRenderer.sendToHost('studypilot:chapter-auto-answer', { url: window.location.href });
+      // 等待宿主处理，暂不跳转（宿主答题完成后会通过页面变化或下次轮询继续）
       return false;
     }
+    sendChapterLearningState('检测到题目，等待手动答题或启用自动答题。');
+    return false;
   }
 
   const readers = findDocumentReaders();
