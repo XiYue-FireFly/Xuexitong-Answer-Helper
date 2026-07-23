@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>方案 A - 深色侧栏工作台</title>
+  <style>
+    :root {
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+      color-scheme: dark;
+      --bg: #0b111c;
+      --panel: #111827;
+      --panel-2: #151f31;
+      --border: rgba(226, 232, 240, 0.12);
+      --text: #eef4ff;
+      --muted: #91a0b7;
+      --blue: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); }
+    .app { height: 100vh; display: grid; grid-template-columns: 238px 1fr; }
+    aside {
+      border-right: 1px solid var(--border);
+      background: linear-gradient(180deg, #0d1625, #0a101a);
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 14px; border-bottom: 1px solid var(--border); }
+    .logo {
+      width: 34px; height: 34px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--blue), #6366f1);
+      display: grid; place-items: center; font-weight: 900; color: #06121f;
+    }
+    .brand strong { display: block; font-size: 15px; }
+    .brand span { color: var(--muted); font-size: 12px; }
+    nav { display: grid; gap: 6px; }
+    .nav-item {
+      display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 9px;
+      padding: 10px 9px; border-radius: 8px; color: var(--muted); font-size: 13px;
+    }
+    .nav-item.active { color: var(--text); background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.24); }
+    .dot { width: 8px; height: 8px; border-radius: 99px; background: currentColor; }
+    .pill { color: #0b111c; background: var(--green); border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 900; }
+    .side-status { margin-top: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.04); }
+    .side-status h3 { margin: 0 0 10px; font-size: 13px; }
+    .meter { height: 8px; border-radius: 99px; background: #0d1420; overflow: hidden; }
+    .meter span { display: block; height: 100%; width: 68%; background: linear-gradient(90deg, var(--green), var(--blue)); }
+    .main { min-width: 0; display: grid; grid-template-rows: 58px 1fr 40px; }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      border-bottom: 1px solid var(--border); padding: 0 20px; background: rgba(11, 17, 28, 0.82);
+    }
+    .search { flex: 1; max-width: 620px; height: 36px; display: flex; align-items: center; gap: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; background: rgba(255,255,255,0.04); }
+    .header-actions { display: flex; gap: 8px; }
+    button {
+      border: 1px solid var(--border); border-radius: 8px; min-height: 34px; padding: 0 12px;
+      background: rgba(255,255,255,0.05); color: var(--text); font-weight: 800;
+    }
+    .primary { border: 0; color: #06121f; background: linear-gradient(135deg, var(--blue), var(--green)); }
+    .content { min-height: 0; overflow: auto; padding: 18px 20px; display: grid; grid-template-columns: minmax(580px, 1.7fr) minmax(360px, 1fr); gap: 16px; }
+    .panel {
+      border: 1px solid var(--border); border-radius: 8px; background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
+    }
+    .panel-head { min-height: 46px; padding: 0 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .panel-title { font-size: 14px; font-weight: 900; }
+    .panel-body { padding: 14px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+    .stat { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--panel); }
+    .stat label { color: var(--muted); font-size: 12px; }
+    .stat strong { display: block; margin-top: 7px; font-size: 24px; }
+    .workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .step { min-height: 96px; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #0f1726; }
+    .step small { color: var(--muted); }
+    .step strong { display: block; margin: 8px 0; font-size: 15px; }
+    .step.active { border-color: rgba(52, 211, 153, 0.44); background: rgba(52, 211, 153, 0.08); }
+    .question-list { display: grid; gap: 9px; }
+    .question {
+      display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: start;
+      border: 1px solid var(--border); border-radius: 8px; padding: 11px; background: #0f1726;
+    }
+    .num { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #06121f; background: var(--blue); font-weight: 900; }
+    .question p { margin: 0; font-size: 13px; line-height: 1.55; }
+    .answer { color: var(--green); font-weight: 900; }
+    .tag { border-radius: 999px; border: 1px solid var(--border); padding: 4px 8px; color: var(--muted); font-size: 12px; }
+    .right { display: grid; gap: 16px; align-content: start; }
+    .provider { display: grid; grid-template-columns: 1fr auto; row-gap: 8px; color: var(--muted); font-size: 13px; }
+    .provider strong { color: var(--text); }
+    .logs { font-family: Consolas, monospace; display: grid; gap: 8px; font-size: 12px; color: #cbd5e1; }
+    .log { display: grid; grid-template-columns: 64px 1fr; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; }
+    footer { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 72px 1fr; }
+      .brand div, .nav-item span, .nav-item .pill, .side-status { display: none; }
+      .content { grid-template-columns: 1fr; }
+      .stats, .workflow { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="brand"><div class="logo">学</div><div><strong>学习通答题助手</strong><span>自动操作网页工作台</span></div></div>
+      <nav>
+        <div class="nav-item active"><i class="dot"></i><span>自动化答题</span><b class="pill">运行</b></div>
+        <div class="nav-item"><i class="dot"></i><span>章节学习</span></div>
+        <div class="nav-item"><i class="dot"></i><span>本地题库</span></div>
+        <div class="nav-item"><i class="dot"></i><span>Token 统计</span></div>
+        <div class="nav-item"><i class="dot"></i><span>错误报告</span></div>
+        <div class="nav-item"><i class="dot"></i><span>设置</span></div>
+      </nav>
+      <section class="side-status">
+        <h3>本次任务</h3>
+        <div class="meter"><span></span></div>
+        <p style="margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.6">已解析 24/36 题，正在填入第 25 题。</p>
+      </section>
+    </aside>
+    <main class="main">
+      <header>
+        <div class="search">https://mooc1.chaoxing.com/mooc-ans/work/dowork...</div>
+        <div class="header-actions"><button>暂停</button><button>保存</button><button class="primary">开始填入</button></div>
+      </header>
+      <section class="content">
+        <div>
+          <div class="stats">
+            <div class="stat"><label>题库命中</label><strong>82%</strong></div>
+            <div class="stat"><label>AI 并发</label><strong>5</strong></div>
+            <div class="stat"><label>Token</label><strong>12.8k</strong></div>
+            <div class="stat"><label>错误</label><strong style="color:var(--amber)">2</strong></div>
+          </div>
+          <section class="panel" style="margin-bottom:16px">
+            <div class="panel-head"><div class="panel-title">自动化流程</div><span class="tag">边搜题边填入</span></div>
+            <div class="panel-body workflow">
+              <div class="step active"><small>01</small><strong>抓取题目</strong><small>阅读题已携带文章上下文</small></div>
+              <div class="step active"><small>02</small><strong>题库匹配</strong><small>精确 + 80% 模糊匹配</small></div>
+              <div class="step"><small>03</small><strong>AI 搜题</strong><small>余额不足会提醒</small></div>
+              <div class="step"><small>04</small><strong>填入答案</strong><small>选择题、判断题、填空题</small></div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">当前题目队列</div><span class="tag">36 题</span></div>
+            <div class="panel-body question-list">
+              <article class="question"><div class="num">25</div><p>“通过批判旧世界来发现新世界” 是（）。<br><span class="answer">命中：B 马克思主义预见未来社会的方法</span></p><span class="tag">单选</span></article>
+              <article class="question"><div class="num">26</div><p>自由王国是指人们摆脱自然和社会关系的奴役，成为自己社会关系主人的状态。<br><span class="answer">命中：正确</span></p><span class="tag">判断</span></article>
+              <article class="question"><div class="num">27</div><p>阅读理解第 3 小题：According to the passage, what can be inferred?<br><span class="answer">正在 AI 解析...</span></p><span class="tag">阅读</span></article>
+            </div>
+          </section>
+        </div>
+        <aside class="right">
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">AI 配置</div><span class="tag">Qwen</span></div>
+            <div class="panel-body provider">
+              <span>模型</span><strong>qwen-plus</strong>
+              <span>请求地址</span><strong>已配置</strong>
+              <span>密钥状态</span><strong style="color:var(--green)">可用</strong>
+              <span>余额提醒</span><strong style="color:var(--amber)">开启</strong>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">Token 消耗</div><span class="tag">今天</span></div>
+            <div class="panel-body">
+              <div class="meter"><span style="width:46%;background:linear-gradient(90deg,var(--blue),var(--amber))"></span></div>
+              <p style="color:var(--muted);font-size:13px;line-height:1.7">输入 8,420，输出 4,388，峰值调用 1,204。</p>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">后台报告</div><span class="tag">实时</span></div>
+            <div class="panel-body logs">
+              <div class="log"><span>20:42:10</span><span>题库模糊命中第 25 题，相似度 96%。</span></div>
+              <div class="log"><span>20:42:12</span><span>已填入判断题：正确。</span></div>
+              <div class="log"><span>20:42:14</span><span>API 返回 429，自动降低等待节奏。</span></div>
+            </div>
+          </section>
+        </aside>
+      </section>
+      <footer><span>状态：自动化执行中</span><span>本地数据仅保存在当前设备</span></footer>
+    </main>
+  </div>
+</body>
+</html>

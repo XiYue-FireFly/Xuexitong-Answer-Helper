@@ -4,6 +4,7 @@ import { answerAliases, compareTwoStrings, judgementValueFromElement, judgementV
 import { reportWebviewError } from './bridge';
 import { cleanText, cssEscape, dispatchInput, isVisible, normalizeText, optionLetter, selectedClassHit, selectorFor, uniqueElements } from './dom-utils';
 import { dispatchUserClick } from './interaction';
+import { callPageHook } from './page-bridge';
 import { extractOptionTargets, nearestClickableOption, optionTargetFromElement, readQuestionTypeHint } from './question-extractor';
 
 function fallbackAnswerTargets(payload: AnswerApplyPayload): QuestionOptionTarget[] {
@@ -68,19 +69,35 @@ function optionTargetByLabel(payload: AnswerApplyPayload, label: string): Questi
   const root = questionRootForPayload(payload);
   const qid = qidForPayload(payload);
   const upper = label.toUpperCase();
-  const selectors = [
+  // 带本题 qid 的选择器允许 document 级回退；不含 qid 的宽泛选择器禁止 document 级回退，
+  // 否则多题页面会命中第一道题的同名选项导致串题错填
+  const pinnedSelectors = [
     qid ? `[qid="${cssEscape(qid)}"][data="${cssEscape(upper)}"]` : '',
     qid ? `.choice${cssEscape(qid)}[data="${cssEscape(upper)}"]` : '',
-    qid ? `[questionid="${cssEscape(qid)}"][data="${cssEscape(upper)}"]` : '',
+    qid ? `[questionid="${cssEscape(qid)}"][data="${cssEscape(upper)}"]` : ''
+  ].filter(Boolean);
+  const broadSelectors = [
     `[data="${cssEscape(upper)}"][qid]`,
     `[data="${cssEscape(upper)}"][questionid]`,
     `[aria-label^="${cssEscape(upper)}"]`,
     `[aria-label*="${cssEscape(upper)}."]`
-  ].filter(Boolean);
+  ];
 
-  for (const selector of selectors) {
+  const qidOfElement = (element: HTMLElement) => {
+    const holder = element.closest('[qid], [questionid]');
+    return cleanText(holder?.getAttribute('qid') || holder?.getAttribute('questionid') || '');
+  };
+
+  for (const selector of pinnedSelectors) {
     const element = (root.querySelector(selector) || document.querySelector(selector)) as HTMLElement | null;
     if (element) return optionTargetFromElement(element, upper.charCodeAt(0) - 65);
+  }
+  for (const selector of broadSelectors) {
+    const element = root.querySelector(selector) as HTMLElement | null;
+    if (!element) continue;
+    // 校验命中元素的 qid 与当前题目一致，避免同页其他题目的选项被误用
+    if (qid && qidOfElement(element) && qidOfElement(element) !== qid) continue;
+    return optionTargetFromElement(element, upper.charCodeAt(0) - 65);
   }
 
   const index = upper.charCodeAt(0) - 65;
@@ -192,11 +209,21 @@ function normalizeChoiceLabels(labels: string[], allowMultiple: boolean) {
 function labelsFromAnswerText(text: string, allowMultiple: boolean) {
   const value = String(text || '').trim();
   const labels: string[] = [];
-  const compact = value.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
+  // “紧凑字母串即答案标签”需要同时满足：
+  // 1. 剥离“答案：”前缀后的原文本即全大写（AI 答“AC”是大写；“decade/facade/be”等英文单词通常小写或首字母大写，排除）；
+  // 2. 多字母仅多选题可用（单选题不可能有“AC”答案）；
+  // 避免英文短答案被拆成一串选项标签乱点
+  const compactRaw = value
+    .replace(/^\s*(?:答案|参考答案|正确答案|选项|选择)\s*[:：]?\s*/i, '')
+    .replace(/\s+/g, '');
+  const compact = /^[A-H]{1,8}$/.test(compactRaw) && (compactRaw.length === 1 || allowMultiple)
+    ? compactRaw
+    : '';
   if (compact) {
     labels.push(...compact.split(''));
   } else {
-    labels.push(...Array.from(value.matchAll(/(?:答案|选项|选择|^|[^A-Za-z])([A-H])(?:[^A-Za-z]|$)/gi))
+    // 零宽断言边界：消费型边界会让“A、C”只提取到 A（分隔符被上一个匹配吃掉）
+    labels.push(...Array.from(value.matchAll(/(?:(?<=答案)|(?<=选项)|(?<=选择)|(?<![A-Za-z]))([A-H])(?![A-Za-z])/gi))
       .map((match) => match[1]));
   }
   return normalizeChoiceLabels(labels, allowMultiple);
@@ -268,7 +295,17 @@ function pickAnswerTargets(payload: AnswerApplyPayload) {
       }))
       .sort((left, right) => right.score - left.score);
     const best = scored[0];
-    if (best && best.score >= 0.42) selected = [best.target];
+    if (best && best.score >= 0.42) {
+      // 多选题按答案片段数选取所有达阈值选项，避免多选退化成单选
+      if (isMultipleChoicePayload(payload) && answerCandidates.length > 1) {
+        const threshold = Math.max(0.42, best.score * 0.6);
+        const picks = scored.filter((item) => item.score >= threshold);
+        const wanted = Math.min(answerCandidates.length, picks.length);
+        selected = picks.slice(0, Math.max(1, wanted)).map((item) => item.target);
+      } else {
+        selected = [best.target];
+      }
+    }
   }
 
   return selected;
@@ -301,17 +338,12 @@ function fillElementValue(element: HTMLElement, value: string) {
   element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
   element.focus();
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    // React 受控组件：只能用原型 native setter + input 事件。
+    // 再写一次 element.value 会走 React 包装过的 setter 更新其 value tracker，
+    // 随后 dispatchEvent(input) 被 React 判定为“值未变化”而不触发 onChange（DOM 显示已填但 state 未同步，提交还原）
     const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set;
-    nativeSetter?.call(element, value);
-    element.value = value;
-    const pageAny = window as any;
-    const editorName = element.getAttribute('name') || element.id || '';
-    try {
-      const editor = editorName && pageAny.UE?.getEditor?.(editorName);
-      if (editor?.setContent) editor.setContent(value);
-    } catch {
-      // Ignore editor sync failures; native field events still fire below.
-    }
+    if (nativeSetter) nativeSetter.call(element, value);
+    else element.value = value;
   } else if (element.isContentEditable) {
     element.textContent = value;
   }
@@ -345,20 +377,29 @@ function completionValuesFromPayload(payload: AnswerApplyPayload) {
     payload.answer,
     ...(payload.matchedOptions || [])
   ].map((item) => cleanCompletionValue(item)).filter(Boolean).join('\n');
-  const explicit = Array.from(raw.matchAll(/(?:第?\s*(\d+)\s*(?:空|题)?|blank\s*(\d+))\s*[:：.、)]\s*([^\n;；|]+)/gi))
-    .map((match) => cleanCompletionValue(match[3] || ''))
+  // 空序号识别必须避开小数：
+  // - “第1空: xxx / 1空 xxx”要求带“空/题”关键字；
+  // - “1: xxx / 1、xxx”使用非点分隔符；
+  // - “1. xxx”要求点号后跟空白（“1.5”小数点后紧跟数字，不匹配）
+  const explicit = Array.from(raw.matchAll(/(?:第?\s*(\d+)\s*(?:空|题)|blank\s*(\d+))\s*[:：.、)]?\s*([^\n;；|]+)|(?:^|[\n;；|]\s*)(\d+)\s*[:：、)]\s*([^\n;；|]+)|(?:^|[\n;；|]\s*)(\d+)\.\s+([^\n;；|]+)/gi))
+    .map((match) => cleanCompletionValue(match[3] || match[5] || match[7] || ''))
     .filter(Boolean);
   if (explicit.length > 0) return explicit;
 
+  // 行首序号剥离同样避开小数：仅“第N空/题”、非点分隔符、或“N. ”（点后空白）才剥离
+  const stripLeadingIndex = (part: string) => cleanCompletionValue(part)
+    .replace(/^第?\d+\s*[空题]\s*[:：.、)]?\s*/, '')
+    .replace(/^\d+\s*[:：、)]\s*/, '')
+    .replace(/^\d+\.\s+/, '');
   const parts = raw
     .split(/(?:\n|;|；|\|)/g)
-    .map((part) => cleanCompletionValue(part).replace(/^第?\d+\s*[空题]?\s*[:：.、)]?\s*/, ''))
+    .map(stripLeadingIndex)
     .filter(Boolean);
   if (parts.length > 1) return parts;
 
   const commaParts = raw
     .split(/[,，、]/g)
-    .map((part) => cleanCompletionValue(part).replace(/^第?\d+\s*[空题]?\s*[:：.、)]?\s*/, ''))
+    .map(stripLeadingIndex)
     .filter(Boolean);
   if (commaParts.length > 1 && commaParts.every((part) => part.length <= 40)) return commaParts;
 
@@ -367,32 +408,18 @@ function completionValuesFromPayload(payload: AnswerApplyPayload) {
 
 function syncCompletionAnswerWithPage(qid: string, values: string[]) {
   if (!qid) return;
-  const pageAny = window as any;
   const value = values.join('|');
-  for (const functionName of ['setBlankAnswer', 'setClozeTextAnswer', 'fillBlank']) {
-    const handler = pageAny[functionName];
-    if (typeof handler !== 'function') continue;
-    try {
-      handler(qid, value);
-    } catch (error) {
+  // 页面钩子（setBlankAnswer/UE/answerContentChange）在隔离世界不可见，
+  // 经页面上下文桥调用；桥不可用或页面无对应函数时仅靠 DOM/隐藏字段兜底
+  void callPageHook({ kind: 'syncCompletion', qid, value }).then((result) => {
+    if (result && !result.ok && result.detail) {
       reportWebviewError('webview:completion-page-sync-failed', {
         level: 'warn',
-        message: `${functionName} 同步填空答案失败，已保留可见输入框内容。`,
-        details: { qid, error: String(error) }
+        message: '页面填空同步钩子执行失败，已保留可见输入框内容。',
+        details: { qid, error: result.detail }
       });
     }
-  }
-  if (typeof pageAny.answerContentChange === 'function') {
-    try {
-      pageAny.answerContentChange();
-    } catch (error) {
-      reportWebviewError('webview:completion-change-callback-failed', {
-        level: 'warn',
-        message: 'answerContentChange 回调失败，已保留可见输入框内容。',
-        details: { qid, error: String(error) }
-      });
-    }
-  }
+  });
 }
 
 function applyCompletionAnswer(payload: AnswerApplyPayload) {
@@ -444,39 +471,38 @@ function applyCompletionAnswer(payload: AnswerApplyPayload) {
 }
 
 function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptionTarget[], clickSelected = true) {
-  console.log('[StudyPilot] applyAnswerDirectly 开始');
-  console.log('[StudyPilot] targets 数量:', targets.length, 'clickSelected:', clickSelected);
-
   const answerText = `${payload.answer || ''} ${(payload.matchedOptions || []).join(' ')}`;
   const judgementValue = isJudgementPayload(payload, targets) ? parseJudgementValueStable(answerText) : null;
-  console.log('[StudyPilot] judgementValue:', judgementValue);
 
   const labels = judgementValue ? [] : (targets.length > 0 ? targets.map((target) => target.label.toUpperCase()) : labelsFromPayload(payload));
   const qid = qidForPayload(payload);
-  console.log('[StudyPilot] qid:', qid, 'labels:', labels);
 
   if (!qid || (!judgementValue && labels.length === 0)) {
-    console.log('[StudyPilot] qid 或 labels 为空，返回 false');
     return false;
   }
 
   const root = questionRootForPayload(payload);
   const isJudgement = Boolean(judgementValue) || root.getAttribute('qtype') === '3' || Boolean(root.querySelector('[qtype="3"]'));
+  // 判断题答案无法解析时不得用选项 labels（如 ['A','B']）兜底，
+  // 否则隐藏答案字段会被写入“AB”并被持久化强制覆写页面值
+  if (isJudgement && !judgementValue) {
+    reportWebviewError('webview:judgement-answer-unresolved', {
+      level: 'warn',
+      message: '判断题答案无法解析为对/错，已跳过页面写入。',
+      details: { qid, answer: payload.answer || '' }
+    });
+    return false;
+  }
   const isMultiple = !isJudgement && (root.getAttribute('qtype') === '1' || Boolean(root.querySelector('[qtype="1"], [qtype="21"]')));
   const pageValues = !isJudgement && targets.length > 0
     ? answerValuesFromTargets(targets, isMultiple)
     : (isMultiple ? labels.slice().sort() : labels);
   const answer = isJudgement && judgementValue ? judgementValue : pageValues.join('');
 
-  console.log('[StudyPilot] isJudgement:', isJudgement, 'isMultiple:', isMultiple, 'answer:', answer);
-
   const hiddenAnswer = document.querySelector(`#answer${cssEscape(qid)}`) as HTMLInputElement | null;
   if (hiddenAnswer) {
-    console.log('[StudyPilot] 找到隐藏输入字段，当前值:', hiddenAnswer.value, '设置为:', answer);
     hiddenAnswer.value = answer;
     dispatchInput(hiddenAnswer);
-  } else {
-    console.log('[StudyPilot] 未找到隐藏输入字段 #answer' + qid);
   }
 
   rememberAppliedAnswer(qid, answer, labels);
@@ -511,67 +537,39 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
   const allOptionElements = uniqueElements([...optionElements, ...optionTargetElements])
     .filter((element) => isSingleOptionElement(element));
 
-  console.log('[StudyPilot] 找到 optionElements 数量:', optionElements.length);
-
   // 判断题特殊处理：优先使用 .answerBg 逻辑
   if (isJudgement) {
-    console.log('[StudyPilot] 判断题特殊处理 - 查找 .answerBg 元素');
     const answerBgElements = Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[];
-    console.log('[StudyPilot] 找到 answerBg 元素数量:', answerBgElements.length);
 
     if (answerBgElements.length > 0) {
       for (const answerBg of answerBgElements) {
         const numOption = answerBg.querySelector('.num_option, .num_option_dx, [data]') as HTMLElement | null;
-        if (!numOption) {
-          console.log('[StudyPilot] answerBg 没有 num_option 或 data 属性，跳过');
-          continue;
-        }
+        if (!numOption) continue;
 
         const bgValue = judgementValueFromElement(answerBg);
-        console.log('[StudyPilot] answerBg 值:', bgValue, '目标答案:', answer);
-
-        if (!bgValue) {
-          console.log('[StudyPilot] 无法解析 answerBg 的值，跳过');
-          continue;
-        }
+        if (!bgValue) continue;
 
         const selected = bgValue === answer;
-        console.log('[StudyPilot] 是否匹配:', selected);
-
         const singleMarker = answerBg.querySelector('.num_option') as HTMLElement | null;
         const multiMarker = answerBg.querySelector('.num_option_dx') as HTMLElement | null;
-        if (singleMarker) {
-          console.log('[StudyPilot] 设置 singleMarker check_answer class:', selected);
-          singleMarker.classList.toggle('check_answer', selected);
-        }
-        if (multiMarker) {
-          console.log('[StudyPilot] 设置 multiMarker check_answer_dx class:', selected);
-          multiMarker.classList.toggle('check_answer_dx', selected);
-        }
+        if (singleMarker) singleMarker.classList.toggle('check_answer', selected);
+        if (multiMarker) multiMarker.classList.toggle('check_answer_dx', selected);
         answerBg.setAttribute('aria-checked', selected ? 'true' : 'false');
 
         if (selected && clickSelected) {
-          console.log('[StudyPilot] 点击匹配的 answerBg 元素');
           answerBg.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
           dispatchUserClick(answerBg);
         }
       }
 
-      const pageAny = window as any;
-      if (typeof pageAny.loadAnswerSheet === 'function') {
-        console.log('[StudyPilot] 调用 loadAnswerSheet');
-        pageAny.loadAnswerSheet(qid, answer);
-      }
-      if (typeof pageAny.answerContentChange === 'function') {
-        console.log('[StudyPilot] 调用 answerContentChange');
-        pageAny.answerContentChange();
-      }
-      console.log('[StudyPilot] 判断题特殊处理完成，返回 true');
+      // 页面数据模型同步钩子（loadAnswerSheet/answerContentChange）在隔离世界不可见，经页面桥调用
+      void callPageHook({ kind: 'syncJudgement', qid, value: answer });
       return Boolean(hiddenAnswer || answerBgElements.length > 0);
     }
   }
 
   // 标准处理逻辑
+  const isRadioGroup = !isMultiple;
   for (const option of allOptionElements) {
     const value = isJudgement ? judgementValueFromElement(option) : (option.getAttribute('data') || '').toUpperCase();
     const selected = isJudgement
@@ -583,10 +581,13 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
       ? option as HTMLInputElement
       : option.querySelector('input[type="radio"], input[type="checkbox"]') as HTMLInputElement | null;
     if (input) {
+      // 仅对选中状态发生变化的 input 派发事件：
+      // 部分平台在 radio change 处理器里直接“选中该项”，对未选中项广播 change 反而会选中错误项
+      const changed = input.checked !== selected;
       input.checked = selected;
-      input.setAttribute('checked', selected ? 'checked' : '');
-      if (!selected) input.removeAttribute('checked');
-      dispatchInput(input);
+      if (selected) input.setAttribute('checked', 'checked');
+      else input.removeAttribute('checked');
+      if (changed && (!isRadioGroup || selected)) dispatchInput(input);
     }
     option.setAttribute('aria-checked', selected ? 'true' : 'false');
     option.setAttribute('aria-pressed', selected ? 'true' : 'false');
@@ -599,9 +600,9 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
     if (selected && clickSelected) dispatchUserClick(option);
   }
 
-  const pageAny = window as any;
-  if (typeof pageAny.loadAnswerSheet === 'function') pageAny.loadAnswerSheet(qid, answer);
-  if (typeof pageAny.answerContentChange === 'function') pageAny.answerContentChange();
+  // 页面数据模型同步钩子经页面桥调用（隔离世界直接访问恒为 undefined）
+  if (isJudgement) void callPageHook({ kind: 'syncJudgement', qid, value: answer });
+  else void callPageHook({ kind: 'syncChoice', qid, values: labels });
   return Boolean(hiddenAnswer || allOptionElements.length > 0);
 }
 
@@ -848,33 +849,20 @@ async function applyAnswer(payload: AnswerApplyPayload) {
 }
 
 export async function applyAnswerV2(payload: AnswerApplyPayload) {
-  console.log('[StudyPilot] applyAnswerV2 开始处理答案');
-  console.log('[StudyPilot] payload:', JSON.stringify(payload, null, 2));
-
   if (isFillQuestion(payload)) {
-    console.log('[StudyPilot] 检测到填空题');
     return applyCompletionAnswer(payload);
   }
 
   const targets = pickAnswerTargets(payload);
-  console.log('[StudyPilot] 选择的目标数量:', targets.length);
-  console.log('[StudyPilot] 目标详情:', targets.map(t => ({ label: t.label, text: t.text, value: t.value })));
-
-  const isJudgement = isJudgementPayload(payload, targets);
-  console.log('[StudyPilot] 是否为判断题:', isJudgement);
 
   if (targets.length === 0) {
-    console.log('[StudyPilot] 没有找到目标，尝试直接应用答案');
     if (applyAnswerDirectly(payload, [])) {
       if (!ensureAppliedAnswerValue(payload, [])) {
-        console.log('[StudyPilot] 答案字段校验失败');
         return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
       }
-      console.log('[StudyPilot] 通过页面答案字段成功填入');
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
     const candidates = fallbackAnswerTargets(payload).slice(0, 8);
-    console.log('[StudyPilot] 备用候选项:', candidates.map(c => ({ label: c.label, text: c.text })));
     return {
       success: false,
       error: `未能匹配答案选项。答案：${payload.answer || '空'}；选项：${candidates.map((item) => `${item.label}.${item.text}`).join(' | ') || '未抓到'}；qid：${qidForPayload(payload) || '无'}`
@@ -882,18 +870,13 @@ export async function applyAnswerV2(payload: AnswerApplyPayload) {
   }
 
   try {
-    console.log('[StudyPilot] 开始点击目标选项');
     for (const target of targets) {
-      console.log('[StudyPilot] 点击目标:', target.label, target.text);
       await clickAnswerTarget(target);
     }
-    console.log('[StudyPilot] 点击完成，按需同步页面答案字段');
     applyAnswerDirectly(payload, targets, false);
     if (!ensureAppliedAnswerValue(payload, targets)) {
-      console.log('[StudyPilot] 答案字段校验失败');
       return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
     }
-    console.log('[StudyPilot] 成功应用答案');
     return {
       success: true,
       message: `已命中 ${targets.map((target) => target.label).join('、')} 选项。`,
@@ -901,16 +884,12 @@ export async function applyAnswerV2(payload: AnswerApplyPayload) {
       options: targets.map((target) => target.text)
     };
   } catch (error: any) {
-    console.log('[StudyPilot] 点击失败，错误:', error.message);
     if (isJudgementPayload(payload, targets) && applyAnswerDirectly(payload, targets, false)) {
       if (!ensureAppliedAnswerValue(payload, targets)) {
-        console.log('[StudyPilot] 答案字段校验失败');
         return { success: false, error: '答案字段校验失败，页面提交值与目标答案不一致。' };
       }
-      console.log('[StudyPilot] 判断题通过 applyAnswerDirectly 成功填入');
       return { success: true, message: `已通过页面答案字段填入 ${labelsFromPayload(payload).join('、')} 选项。` };
     }
-    console.log('[StudyPilot] 最终失败');
     return { success: false, error: error.message };
   }
 }

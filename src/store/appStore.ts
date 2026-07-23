@@ -745,18 +745,40 @@ class GlobalStore {
     history: this.loadHistory(),
     answerHistory: this.loadAnswerHistory(),
     tokenUsage: this.loadTokenUsage(),
+    // 自动化运行状态提升到 store：AIPanel 随 tab 切换卸载重挂载，
+    // 组件内 useState 会丢失但后台 async 循环仍在运行，导致用户可重复启动并行自动化
+    batchRunning: false,
+    liveRunning: false,
+    livePaused: false,
     isElectron: typeof window !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron')
   };
+
+  setAutomationRunning(patch: { batchRunning?: boolean; liveRunning?: boolean; livePaused?: boolean }) {
+    if (typeof patch.batchRunning === 'boolean') this.state.batchRunning = patch.batchRunning;
+    if (typeof patch.liveRunning === 'boolean') this.state.liveRunning = patch.liveRunning;
+    if (typeof patch.livePaused === 'boolean') this.state.livePaused = patch.livePaused;
+    this.emit();
+  }
 
   constructor() {
     this.addLog('info', 'StudyPilot 已初始化。');
   }
 
-  getState() {
+  // useSyncExternalStore 要求 getSnapshot 结果引用稳定：
+  // 每次返回新对象会让 React 判定“store 已变化”→ 失去渲染 bailout、每次渲染重订阅，形成渲染风暴。
+  // 因此快照仅在 emit（状态实际变更）时重建。
+  private cachedSnapshot: (ReturnType<GlobalStore['buildSnapshot']>) | null = null;
+
+  private buildSnapshot() {
     return {
       ...this.state,
       currentQuestion: this.state.questions[this.state.currentQuestionIndex] || null
     };
+  }
+
+  getState() {
+    if (!this.cachedSnapshot) this.cachedSnapshot = this.buildSnapshot();
+    return this.cachedSnapshot;
   }
 
   subscribe(listener: () => void) {
@@ -767,7 +789,15 @@ class GlobalStore {
   }
 
   private emit() {
-    this.listeners.forEach((listener) => listener());
+    this.cachedSnapshot = this.buildSnapshot();
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (error) {
+        // 单个监听器异常不得中断其余监听器
+        console.error('[StudyPilot] store listener error', error);
+      }
+    });
   }
 
   private loadSettings(): AppSettings {
@@ -783,13 +813,31 @@ class GlobalStore {
   }
 
   private saveSettings(settings: AppSettings) {
-    localStorage.setItem('studypilot_settings_v3', JSON.stringify(settings));
+    this.safeSetItem('studypilot_settings_v3', JSON.stringify(settings), '设置');
+  }
+
+  // localStorage 写入可能抛 QuotaExceededError（题库/历史超配额、隐私模式、磁盘满）。
+  // 裸写会让异常级联：emit 中断 → UI 不刷新 → 异常冒泡到 AI 重试逻辑被当成 API 失败重复烧 token。
+  private safeSetItem(key: string, value: string, label: string) {
+    try {
+      localStorage.setItem(key, value);
+      return true;
+    } catch (error: any) {
+      const quota = error?.name === 'QuotaExceededError' || error?.code === 22;
+      this.addLog('warn', quota
+        ? `${label}写入失败：本机存储空间不足，数据仅保留在当前会话。可导出备份后清理历史/题库。`
+        : `${label}写入失败：${error?.message || '未知错误'}，数据仅保留在当前会话。`);
+      return false;
+    }
   }
 
   private loadHistory(): AutomationPlan[] {
     try {
       const saved = localStorage.getItem('studypilot_automation_history');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
     } catch {
       // 空历史即可。
     }
@@ -797,13 +845,16 @@ class GlobalStore {
   }
 
   private saveHistory(history: AutomationPlan[]) {
-    localStorage.setItem('studypilot_automation_history', JSON.stringify(history));
+    this.safeSetItem('studypilot_automation_history', JSON.stringify(history), '运行记录');
   }
 
   private loadAnswerHistory(): { question: QuestionItem; answer: AIAnswerResult }[] {
     try {
       const saved = localStorage.getItem('studypilot_answer_history');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
     } catch {
       // 空历史即可。
     }
@@ -811,7 +862,7 @@ class GlobalStore {
   }
 
   private saveAnswerHistory(history: { question: QuestionItem; answer: AIAnswerResult }[]) {
-    localStorage.setItem('studypilot_answer_history', JSON.stringify(history));
+    this.safeSetItem('studypilot_answer_history', JSON.stringify(history), '答案历史');
   }
 
   private loadTokenUsage(): TokenUsageRecord[] {
@@ -852,7 +903,7 @@ class GlobalStore {
   }
 
   private saveTokenUsage(records: TokenUsageRecord[]) {
-    localStorage.setItem('studypilot_token_usage_v1', JSON.stringify(records));
+    this.safeSetItem('studypilot_token_usage_v1', JSON.stringify(records), 'Token 统计');
   }
 
   private loadQuestionBank(): QuestionBankEntry[] {
@@ -866,7 +917,7 @@ class GlobalStore {
   }
 
   private saveQuestionBank(bank: QuestionBankEntry[]) {
-    localStorage.setItem('studypilot_question_bank_v1', JSON.stringify(bank));
+    this.safeSetItem('studypilot_question_bank_v1', JSON.stringify(bank), '本地题库');
   }
 
   exportQuestionBank() {
@@ -882,6 +933,9 @@ class GlobalStore {
     if (/本地手动题库/.test(provider)) return 4;
     if (/本地导入题库/.test(provider)) return 3;
     if (/本地题库/.test(provider)) return 2;
+    // 演示答案（无 API Key 时生成的占位答案）优先级最低：
+    // 不得覆盖任何真实来源的答案，也不得随导出/上传外泄污染共享题库
+    if (/本地演示/.test(provider)) return 0;
     return 1;
   }
 
@@ -896,7 +950,8 @@ class GlobalStore {
   private dedupeQuestionBank(bank: QuestionBankEntry[]) {
     const byKey = new Map<string, QuestionBankEntry>();
     for (const item of Array.isArray(bank) ? bank : []) {
-      if (!item?.question) continue;
+      // 跳过缺答案的损坏条目，防止渲染层 entry.answer.answer 访问抛错白屏
+      if (!item?.question || !item.answer?.answer) continue;
       const key = this.normalizeQuestionContentKey({
         id: item.id || 'bank',
         hash: item.answer?.questionHash || '',
@@ -930,6 +985,9 @@ class GlobalStore {
   normalizeQuestionKey(question: QuestionItem | string) {
     const text = typeof question === 'string' ? question : question.question;
     return this.stripQuestionNoise(text)
+      // 全角字母/数字转半角：页面题干常见全角字符（Ａ、１２３），不转换会与半角版本生成不同 key 导致题库漏命中
+      .replace(/[\uff01-\uff5e]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+      .replace(/\u3000/g, ' ')
       .replace(/\s+/g, '')
       .replace(/[，。,.、；;：:？！?!"'“”‘’【】\[\]（）()]/g, '')
       .toLowerCase()
@@ -938,9 +996,10 @@ class GlobalStore {
 
   normalizeQuestionContentKey(question: QuestionItem) {
     const questionKey = this.normalizeQuestionKey(question);
-    const contextKey = question.context ? this.normalizeQuestionKey(question.context).slice(0, 800) : '';
+    const contextKey = question.context ? this.normalizeQuestionKey(question.context) : '';
     const optionKey = (question.options || [])
-      .map((option) => this.normalizeQuestionKey(String(option).replace(/^\s*[A-H]\s*[.\s:：、。)]*/i, '')))
+      // 选项前缀剥离要求标点分隔符，避免吃掉以 A-H 字母开头的正常选项文本（“Apple”→“pple”）
+      .map((option) => this.normalizeQuestionKey(String(option).replace(/^\s*[A-H]\s*[.:：、。)]\s*/i, '')))
       .filter(Boolean)
       .sort()
       .join('|');
@@ -1003,10 +1062,77 @@ class GlobalStore {
     const questionOptionCount = (question.options || []).filter(Boolean).length;
     const entryOptionCount = (entry.options || []).filter(Boolean).length;
     if (questionOptionCount === 0 || entryOptionCount === 0) return true;
-    return questionOptionCount === entryOptionCount;
+    if (questionOptionCount !== entryOptionCount) return false;
+    // 数量相同还必须内容相似：同一题干在不同课程复用但选项不同的场景，
+    // 仅凭题干+数量命中会把错误答案静默填入页面
+    return this.questionBankOptionsContentSimilar(question, entry);
   }
 
+  // 选项集合内容相似度：归一化后逐项最佳匹配，平均相似度 ≥ 0.6 视为同一组选项
+  private questionBankOptionsContentSimilar(question: QuestionItem, entry: QuestionBankEntry) {
+    const questionOptions = (question.options || [])
+      .map((option) => this.normalizeAnswerOptionText(String(option)))
+      .filter(Boolean);
+    const entryOptions = (entry.options || [])
+      .map((option) => this.normalizeAnswerOptionText(String(option)))
+      .filter(Boolean);
+    if (questionOptions.length === 0 || entryOptions.length === 0) return true;
+
+    const scores = questionOptions.map((questionOption) => {
+      let best = 0;
+      for (const entryOption of entryOptions) {
+        if (!entryOption) continue;
+        if (questionOption === entryOption) {
+          best = 1;
+          break;
+        }
+        const shorter = questionOption.length <= entryOption.length ? questionOption : entryOption;
+        const longer = questionOption.length > entryOption.length ? questionOption : entryOption;
+        if (longer.includes(shorter) && shorter.length >= 2) {
+          best = Math.max(best, shorter.length / longer.length);
+          continue;
+        }
+        if (shorter.length >= 2) best = Math.max(best, this.bigramDice(questionOption, entryOption));
+      }
+      return best;
+    });
+    const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    return average >= 0.6;
+  }
+
+  private bigramDice(left: string, right: string) {
+    if (left === right) return 1;
+    if (left.length < 2 || right.length < 2) return 0;
+    const grams = new Map<string, number>();
+    for (let index = 0; index < left.length - 1; index += 1) {
+      const gram = left.slice(index, index + 2);
+      grams.set(gram, (grams.get(gram) || 0) + 1);
+    }
+    let intersection = 0;
+    for (let index = 0; index < right.length - 1; index += 1) {
+      const gram = right.slice(index, index + 2);
+      const count = grams.get(gram) || 0;
+      if (count > 0) {
+        grams.set(gram, count - 1);
+        intersection += 1;
+      }
+    }
+    return (2 * intersection) / (left.length + right.length - 2);
+  }
+
+  // 题库条目 key 计算包含多轮正则归一化，查找时对每条 entry 现场重算是渲染路径的主要开销。
+  // 条目对象在命中计数/更新时会被整体替换，WeakMap 以对象身份为键天然失效，无需手动清理。
+  private questionBankEntryKeyCache = new WeakMap<QuestionBankEntry, string>();
+
   private questionBankEntryKey(entry: QuestionBankEntry) {
+    const cached = this.questionBankEntryKeyCache.get(entry);
+    if (cached !== undefined) return cached;
+    const key = this.computeQuestionBankEntryKey(entry);
+    this.questionBankEntryKeyCache.set(entry, key);
+    return key;
+  }
+
+  private computeQuestionBankEntryKey(entry: QuestionBankEntry) {
     return this.normalizeQuestionContentKey({
       id: entry.id || 'bank',
       hash: entry.answer?.questionHash || '',
@@ -1062,6 +1188,8 @@ class GlobalStore {
     let legacyBest: { entry: QuestionBankEntry; score: number } | null = null;
     for (const entry of this.state.questionBank) {
       if (!this.questionBankOptionsCompatible(question, entry)) continue;
+      // 题干相似但选项集合明显不同的题目不得命中（同题干多课程复用场景）
+      if (!this.questionBankOptionsContentSimilar(question, entry)) continue;
       const entryKey = question.context ? this.questionBankEntryKey(entry) : this.normalizeQuestionKey(entry.question);
       const score = this.textSimilarity(questionKey, entryKey);
       const balance = lengthBalanceOf(questionKey, entryKey);
@@ -1139,18 +1267,25 @@ class GlobalStore {
     const answerBody = this.normalizeAnswerOptionText(answer);
     const optionBody = this.normalizeAnswerOptionText(option);
     if (!answerBody || !optionBody) return false;
-    return answerBody === optionBody ||
-      answerBody.includes(optionBody) ||
-      optionBody.includes(answerBody);
+    if (answerBody === optionBody) return true;
+    // 子串匹配要求答案侧至少 2 个字符：
+    // 单字母答案（如剥前缀后剩下的“c”）会对任何含该字母的选项误命中
+    if (answerBody.length < 2) return false;
+    return optionBody.includes(answerBody);
   }
 
   private normalizeManualAnswer(input: ManualQuestionBankInput, questionHash: string): AIAnswerResult {
     const answer = input.answer.trim();
     const labels = new Set<string>();
-    Array.from(answer.matchAll(/(?:^|[^A-Za-z])([A-H])(?:[^A-Za-z]|$)/gi))
+    // 零宽断言边界：消费型边界会让“A、C”只提取到 A（分隔符被上一个匹配吃掉导致 C 丢失）
+    Array.from(answer.matchAll(/(?<![A-Za-z])([A-H])(?![A-Za-z])/gi))
       .map((match) => match[1].toUpperCase())
       .forEach((label) => labels.add(label));
-    const compactLabels = answer.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
+    // 紧凑匹配前先剥离“答案：”等前缀，否则“答案：ABD”无法命中紧凑分支且字母互相粘连也无法被边界正则提取
+    const compactSource = answer
+      .replace(/^\s*(?:答案|参考答案|正确答案|选项|选择)\s*[:：]?\s*/i, '')
+      .replace(/\s+/g, '');
+    const compactLabels = compactSource.match(/^[A-H]{1,8}$/i)?.[0] || '';
     compactLabels.split('').forEach((label) => labels.add(label.toUpperCase()));
 
     const matchedOptions = input.options.filter((option, index) => {
@@ -1269,17 +1404,22 @@ class GlobalStore {
         id: existing.id,
         questionKey: key,
         question: question.question,
-        options: question.options,
+        options: [...question.options],
         context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),
         hits: existing.hits
       };
       const preferred = this.preferQuestionBankEntry(existing, incomingEntry);
-      existing.questionKey = key;
+      // 仅在采纳新条目时才更新 questionKey：保留旧条目却改写其 key 会让 key 与内容脱钩，
+      // 后续精确匹配可能错配到其他题目
       if (preferred === incomingEntry) {
+        // 条目内容变更前先失效 key 缓存（WeakMap 以对象身份为键，原地修改不会自动失效）
+        this.questionBankEntryKeyCache.delete(existing);
+        existing.questionKey = key;
         existing.question = question.question;
-        existing.options = question.options;
+        // 拷贝 options，避免与 questions 状态共享可变引用
+        existing.options = [...question.options];
         existing.context = question.context;
         existing.answer = normalizedAnswer;
         existing.updatedAt = incomingEntry.updatedAt;
@@ -1289,7 +1429,7 @@ class GlobalStore {
         id: Math.random().toString(36).slice(2),
         questionKey: key,
         question: question.question,
-        options: question.options,
+        options: [...question.options],
         context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),
@@ -1370,7 +1510,8 @@ class GlobalStore {
     if (!this.state.currentPlan) return;
     const completed = { ...this.state.currentPlan, executedAt: Date.now(), result };
     this.state.currentPlan = completed;
-    this.state.history = [completed, ...this.state.history].slice(0, 50);
+    // 幂等：同一 plan 重复 complete 时在 history 中去重，避免同 id 记录导致 React duplicate key
+    this.state.history = [completed, ...this.state.history.filter((item) => item.id !== completed.id)].slice(0, 50);
     this.saveHistory(this.state.history);
     this.setStatus('done', result);
     this.emit();
@@ -1401,14 +1542,17 @@ class GlobalStore {
   }
 
   setCurrentAnswer(answer: AIAnswerResult | null) {
-    this.state.currentAnswer = answer;
     const question = this.state.questions[this.state.currentQuestionIndex];
-    if (answer && question) {
-      this.state.answerMap = { ...this.state.answerMap, [answer.questionHash]: answer };
-      const entry = { question, answer };
+    // answerMap key 口径统一为 question.hash：上游若传入不一致的 questionHash，
+    // 答案会写入错误 key 导致“已解析”状态丢失并重复请求
+    const normalizedAnswer = answer && question ? { ...answer, questionHash: question.hash } : answer;
+    this.state.currentAnswer = normalizedAnswer;
+    if (normalizedAnswer && question) {
+      this.state.answerMap = { ...this.state.answerMap, [question.hash]: normalizedAnswer };
+      const entry = { question, answer: normalizedAnswer };
       this.state.answerHistory = [entry, ...this.state.answerHistory.filter((item) => item.question.hash !== entry.question.hash)].slice(0, 120);
       this.saveAnswerHistory(this.state.answerHistory);
-      this.addLog('success', `AI 已返回第 ${question.index || this.state.currentQuestionIndex + 1} 题参考答案，置信度 ${(answer.confidence * 100).toFixed(0)}%。`);
+      this.addLog('success', `AI 已返回第 ${question.index || this.state.currentQuestionIndex + 1} 题参考答案，置信度 ${(normalizedAnswer.confidence * 100).toFixed(0)}%。`);
     }
     this.emit();
   }
@@ -1444,6 +1588,8 @@ class GlobalStore {
   clearAnswerHistory() {
     this.state.answerHistory = [];
     this.state.answerMap = {};
+    // 同步清空当前答案：否则题目行显示“未解析”但答案面板仍展示旧答案且可继续填入，UI 自相矛盾
+    this.state.currentAnswer = null;
     this.saveAnswerHistory([]);
     this.addLog('info', '答案历史已清空。');
     this.emit();
@@ -1478,6 +1624,10 @@ class GlobalStore {
 
 export const appStore = new GlobalStore();
 
+// 模块顶层绑定一次，保证 useSyncExternalStore 的 subscribe/getSnapshot 引用跨渲染稳定
+const subscribeToAppStore = appStore.subscribe.bind(appStore);
+const getAppStoreSnapshot = appStore.getState.bind(appStore);
+
 export function useAppStore() {
-  return useSyncExternalStore(appStore.subscribe.bind(appStore), appStore.getState.bind(appStore));
+  return useSyncExternalStore(subscribeToAppStore, getAppStoreSnapshot);
 }

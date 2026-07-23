@@ -386,6 +386,7 @@ export function BrowserPanel() {
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
   const extractQuestionResolverRef = useRef<((result: any) => void) | null>(null);
   const examNextResolverRef = useRef<((result: any) => void) | null>(null);
+  const pendingScanRef = useRef<number | null>(null);
   const recentOpenRef = useRef<Record<string, number>>({});
   const tabsRef = useRef(tabs);
 
@@ -534,6 +535,7 @@ export function BrowserPanel() {
 
     if (event.channel === 'studypilot:snapshot-result') {
       const result = event.args[0];
+      pendingScanRef.current = null;
       if (result?.success) {
         appStore.setSnapshot(result.data);
         appStore.setStatus('planning', '页面扫描完成。下一步可以生成自动化计划。');
@@ -547,7 +549,13 @@ export function BrowserPanel() {
       extractQuestionResolverRef.current?.(result);
       extractQuestionResolverRef.current = null;
       if (result?.success) {
-        const questions = Array.isArray(result.questions) && result.questions.length > 0 ? result.questions : [result.data];
+        // result.data 为空时会得到 [undefined]，setQuestions 内 undefined.hash 直接抛 TypeError
+        const questions = (Array.isArray(result.questions) && result.questions.length > 0 ? result.questions : [result.data])
+          .filter(Boolean);
+        if (questions.length === 0) {
+          appStore.setStatus('error', '题目抓取失败：页面未返回有效题目。');
+          return;
+        }
         appStore.setQuestions(questions);
         appStore.setStatus('done', `题目抓取完成，共 ${questions.length} 题。`);
       } else {
@@ -747,8 +755,14 @@ export function BrowserPanel() {
   }, [activeSource, canUseRealWebview, getActiveWebview]);
 
   useEffect(() => {
-    const handleApplyAnswers = async (event: Event) => {
+    // 填入请求串行化：applyAnswerResolverRef 只有单槽位，两路事件源（“开始填入”/“自动化填入”）
+    // 并发时会互相覆盖 resolver，导致先到请求只能等 8s 超时或串答
+    let applyQueue: Promise<void> = Promise.resolve();
+    const handleApplyAnswers = (event: Event) => {
       const detail = (event as CustomEvent).detail;
+      applyQueue = applyQueue.then(() => processApplyAnswers(detail)).catch(() => undefined);
+    };
+    const processApplyAnswers = async (detail: any) => {
       const items = detail?.items || [];
       const onComplete = typeof detail?.onComplete === 'function' ? detail.onComplete : null;
       const webview = getActiveWebview();
@@ -998,7 +1012,19 @@ export function BrowserPanel() {
     setMockSubmitted(false);
     if (activeSource === 'webview') {
       const webview = getActiveWebview();
-      if (webview) safeWebviewRun(() => webview.send?.('studypilot:snapshot'), '发送页面扫描请求失败');
+      if (webview) {
+        // 超时兜底：webview preload 异常不回包时状态会永久停在“扫描中”
+        const scanToken = Date.now();
+        pendingScanRef.current = scanToken;
+        window.setTimeout(() => {
+          if (pendingScanRef.current !== scanToken) return;
+          pendingScanRef.current = null;
+          if (appStore.getState().status === 'scanning') {
+            appStore.setStatus('error', '页面扫描超时：未收到 WebView 响应，请刷新页面后重试。');
+          }
+        }, 10000);
+        safeWebviewRun(() => webview.send?.('studypilot:snapshot'), '发送页面扫描请求失败');
+      }
       return;
     }
     appStore.setSnapshot({ url: currentBrowserUrl, title: '授权学习页面演示', controls: mockControls, capturedAt: Date.now() });

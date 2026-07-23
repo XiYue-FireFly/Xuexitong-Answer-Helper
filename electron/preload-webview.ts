@@ -99,8 +99,12 @@ ipcRenderer.on('studypilot:execute-plan', async (_, plan: AutomationPlan) => {
 });
 
 ipcRenderer.on('studypilot:apply-answer', async (_, payload: AnswerApplyPayload) => {
-  const result = await applyAnswerV2(payload);
-  ipcRenderer.sendToHost('studypilot:apply-answer-result', result);
+  try {
+    const result = await applyAnswerV2(payload);
+    ipcRenderer.sendToHost('studypilot:apply-answer-result', result);
+  } catch (error: any) {
+    ipcRenderer.sendToHost('studypilot:apply-answer-result', { success: false, error: error?.message || 'unknown' });
+  }
 });
 
 ipcRenderer.on('studypilot:exam-next-question', async () => {

@@ -2,6 +2,7 @@ import { ipcRenderer } from 'electron';
 import type { ChapterLearningCommand, ChapterLearningOptions, TaskPoint } from './types';
 import { reportWebviewError } from './bridge';
 import { cleanText, isVisible, uniqueBy } from './dom-utils';
+import { callPageHook } from './page-bridge';
 
 type ExtractQuestions = () => unknown[];
 
@@ -865,33 +866,6 @@ function findDocumentReaders(): Array<{ iframe?: HTMLIFrameElement; doc: Documen
   return readers;
 }
 
-async function autoReadDocument(reader: { iframe?: HTMLIFrameElement; doc: Document; title: string }) {
-  const doc = reader.doc;
-
-  const nextButton = doc.querySelector('.next, .nextPage, .readerPager, .ux-h5pdfreader_container_footer_pages_next, [class*="next"], [class*="Next"], [onclick*="next"], [aria-label*="next" i], [title*="next" i]') as HTMLElement | null;
-  if (nextButton && isVisible(nextButton)) {
-    nextButton.click();
-    await new Promise(resolve => setTimeout(resolve, 800));
-    return { success: true, action: 'next-page' };
-  }
-
-  const finishButton = doc.querySelector('.finish, .complete, [class*="finish"], [class*="Finish"], [onclick*="finish"], [onclick*="complete"]') as HTMLElement | null;
-  if (finishButton && isVisible(finishButton)) {
-    finishButton.click();
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return { success: true, action: 'finish' };
-  }
-
-  const scrollContainer = doc.querySelector('.reader, .document-reader, #reader, .ppt-reader, .pdf-reader, .ux-pdf-reader, .ux-h5pdfreader_container') as HTMLElement | null;
-  if (scrollContainer) {
-    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return { success: true, action: 'scroll' };
-  }
-
-  return { success: false, action: 'none' };
-}
-
 function isSelectedQuizOption(element: HTMLElement) {
   if (element.getAttribute('aria-checked') === 'true') return true;
   if (/(^|\s)(active|selected|checked|is-checked)(\s|$)/i.test(String(element.className || ''))) return true;
@@ -1026,80 +1000,6 @@ function handlePlatformContinueButtons() {
   return clicked;
 }
 
-function collectJwPlayers() {
-  const players: any[] = [];
-  const seen = new Set<any>();
-  for (const frame of safeFrameContexts()) {
-    try {
-      const jwplayer = (frame.window as any).jwplayer;
-      if (typeof jwplayer !== 'function') continue;
-      const player = jwplayer();
-      if (player && !seen.has(player)) {
-        seen.add(player);
-        players.push(player);
-      }
-    } catch {
-      // Not a jwplayer page/frame.
-    }
-  }
-  return players;
-}
-
-function applyJwPlayerOptions(player: any) {
-  const options = chapterLearningOptions();
-  const rate = Math.max(0, Math.min(16, Number(options.playbackRate) || 0));
-  try {
-    if (typeof player.setMute === 'function') player.setMute(Boolean(options.muted));
-    if (typeof player.setVolume === 'function') player.setVolume(options.muted ? 0 : 100);
-    if (typeof player.setPlaybackRate === 'function' && rate > 0) player.setPlaybackRate(rate);
-  } catch {
-    // Custom player APIs vary between platforms.
-  }
-}
-
-async function playJwPlayers() {
-  const options = chapterLearningOptions();
-  if (!options.autoPlay || Number(options.playbackRate) <= 0) return 0;
-  let played = 0;
-  for (const player of collectJwPlayers()) {
-    applyJwPlayerOptions(player);
-    try {
-      if (typeof player.play === 'function') {
-        player.play();
-        played += 1;
-      }
-    } catch {
-      // The polling loop retries.
-    }
-  }
-  return played;
-}
-
-function attachJwPlayerWatchers() {
-  const pageAny = window as any;
-  if (!pageAny.__studyPilotChapterWatchedJwPlayers) pageAny.__studyPilotChapterWatchedJwPlayers = new WeakSet();
-  const watched = pageAny.__studyPilotChapterWatchedJwPlayers as WeakSet<object>;
-  for (const player of collectJwPlayers()) {
-    if (!player || typeof player !== 'object' || watched.has(player)) continue;
-    watched.add(player);
-    try {
-      if (typeof player.onComplete === 'function') {
-        player.onComplete(() => {
-          if (!pageAny.__studyPilotChapterRunning) return;
-          openNextChapterIfAvailableDeep('jwplayer-complete');
-        });
-      } else if (typeof player.on === 'function') {
-        player.on('complete', () => {
-          if (!pageAny.__studyPilotChapterRunning) return;
-          openNextChapterIfAvailableDeep('jwplayer-complete');
-        });
-      }
-    } catch {
-      // Different platform wrappers expose different event APIs.
-    }
-  }
-}
-
 function resumeMediaIfNeeded(media: ChapterMediaElement) {
   const pageAny = window as any;
   const options = chapterLearningOptions();
@@ -1112,43 +1012,6 @@ function resumeMediaIfNeeded(media: ChapterMediaElement) {
       // The polling loop retries when a player requires user interaction.
     }
   }, 600);
-}
-
-async function playAllMediaElements() {
-  const options = chapterLearningOptions();
-  if (!options.autoPlay || Number(options.playbackRate) <= 0) return;
-
-  const videoEntries = collectChapterVideos();
-  const audioEntries = collectChapterAudios();
-  const primaryVideo = selectPrimaryVideo(videoEntries);
-  const primaryAudio = primaryVideo ? undefined : selectPrimaryAudio(audioEntries);
-  rememberPrimaryMedia(primaryVideo, primaryAudio);
-  pauseNonPrimaryMedia(primaryVideo, primaryAudio);
-
-  if (primaryVideo) {
-    applyChapterVideoOptions(primaryVideo.video);
-    if (!isMediaEnded(primaryVideo.video) && primaryVideo.video.paused) {
-      try {
-        await primaryVideo.video.play();
-      } catch {
-        // Requires user interaction
-      }
-    }
-    return;
-  }
-
-  if (primaryAudio) {
-    applyChapterAudioOptions(primaryAudio.audio);
-    if (!isMediaEnded(primaryAudio.audio) && primaryAudio.audio.paused) {
-      try {
-        await primaryAudio.audio.play();
-      } catch {
-        // Requires user interaction
-      }
-    }
-  }
-
-  await playJwPlayers();
 }
 
 function captureChapterLearningState(message = '已读取当前页面章节状态。') {
@@ -1188,87 +1051,6 @@ function sendChapterLearningState(message?: string) {
   ipcRenderer.sendToHost('studypilot:chapter-learning-result', captureChapterLearningState(message));
 }
 
-function openNextChapterIfAvailable(reason: string) {
-  const options = chapterLearningOptions();
-  if (!options.autoNext || !(window as any).__studyPilotChapterRunning) return false;
-  const { nextChapter } = collectChapterLinks();
-  if (!nextChapter?.url) {
-    sendChapterLearningState('当前视频已自然播放结束，但未识别到下一章节。');
-    return false;
-  }
-  ipcRenderer.sendToHost('studypilot:chapter-open-next', {
-    url: nextChapter.url,
-    title: nextChapter.title,
-    reason,
-    options
-  });
-  sendChapterLearningState(`当前视频已自然结束，正在打开下一章节：${nextChapter.title}`);
-  return true;
-}
-
-function attachChapterVideoWatchers() {
-  const pageAny = window as any;
-  if (!pageAny.__studyPilotChapterWatchedVideos) pageAny.__studyPilotChapterWatchedVideos = new WeakSet();
-  const watched = pageAny.__studyPilotChapterWatchedVideos as WeakSet<HTMLVideoElement>;
-  for (const video of Array.from(document.querySelectorAll('video')) as HTMLVideoElement[]) {
-    if (watched.has(video)) continue;
-    watched.add(video);
-    video.addEventListener('ended', () => {
-      if (!pageAny.__studyPilotChapterRunning) return;
-      openNextChapterIfAvailable('video-ended');
-    });
-    video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
-    video.addEventListener('pause', () => {
-      resumeMediaIfNeeded(video);
-      if (!video.ended) sendChapterLearningState('视频已暂停。');
-    });
-  }
-}
-
-async function playChapterVideos() {
-  const options = chapterLearningOptions();
-  const videos = Array.from(document.querySelectorAll('video')) as HTMLVideoElement[];
-  if (videos.length === 0) {
-    sendChapterLearningState('当前页面未识别到 video 元素。');
-    return;
-  }
-  attachChapterVideoWatchers();
-  for (const video of videos) {
-    applyChapterVideoOptions(video);
-    if (options.autoPlay && Number(options.playbackRate) > 0) {
-      try {
-        await video.play();
-      } catch (error: any) {
-        reportWebviewError('webview:chapter-video-play', {
-          level: 'warn',
-          message: `视频播放需要页面允许或用户手动点击：${error?.message || 'unknown'}`,
-          details: { options }
-        });
-      }
-    }
-  }
-  sendChapterLearningState(`已处理 ${videos.length} 个视频。`);
-}
-
-function attachChapterVideoWatchersDeep() {
-  const pageAny = window as any;
-  if (!pageAny.__studyPilotChapterWatchedVideos) pageAny.__studyPilotChapterWatchedVideos = new WeakSet();
-  const watched = pageAny.__studyPilotChapterWatchedVideos as WeakSet<HTMLVideoElement>;
-  for (const { video } of collectChapterVideos()) {
-    if (watched.has(video)) continue;
-    watched.add(video);
-    video.addEventListener('ended', () => {
-      if (!pageAny.__studyPilotChapterRunning) return;
-      openNextChapterIfAvailableDeep('video-ended');
-    });
-    video.addEventListener('play', () => sendChapterLearningState('视频正在播放。'));
-    video.addEventListener('pause', () => {
-      resumeMediaIfNeeded(video);
-      if (!video.ended) sendChapterLearningState('视频已暂停。');
-    });
-  }
-}
-
 function attachPrimaryChapterVideoWatchers() {
   const pageAny = window as any;
   if (!pageAny.__studyPilotChapterWatchedPrimaryVideos) pageAny.__studyPilotChapterWatchedPrimaryVideos = new WeakSet();
@@ -1289,7 +1071,6 @@ function attachPrimaryChapterVideoWatchers() {
       if (!video.ended && pageAny.__studyPilotChapterPrimaryVideo === video) sendChapterLearningState('视频已暂停。');
     });
   }
-  attachJwPlayerWatchers();
 }
 
 function openNextChapterIfAvailableDeep(reason: string) {
@@ -1338,22 +1119,13 @@ function openNextChapterIfAvailableDeep(reason: string) {
   return true;
 }
 
-async function playChapterVideosDeep() {
-  const state = await playPrimaryChapterMedia();
-  const endedCount = state.videoEntries.filter((entry) => isMediaEnded(entry.video)).length;
-  if (state.videoEntries.length === 0) {
-    sendChapterLearningState('\u5f53\u524d\u9875\u9762\u6682\u672a\u8bc6\u522b\u5230\u53ef\u63a7\u5236\u7684\u89c6\u9891\uff0c\u6b63\u5728\u7b49\u5f85\u9875\u9762\u5185\u5bb9\u52a0\u8f7d\u3002');
-    return;
-  }
-  sendChapterLearningState(`\u5df2\u8bc6\u522b ${state.videoEntries.length} \u4e2a\u89c6\u9891\uff0c\u6b63\u5728\u63a7\u5236\u4e3b\u89c6\u9891 ${state.primaryVideo ? state.primaryVideo.index + 1 : 0}\uff0c\u672c\u8f6e\u64ad\u653e ${state.played} \u4e2a\uff0c\u5df2\u7ed3\u675f ${endedCount} \u4e2a\u3002`);
-}
-
 function stopChapterLearningLoop() {
   const pageAny = window as any;
   if (pageAny.__studyPilotChapterTimer) {
-    window.clearInterval(pageAny.__studyPilotChapterTimer);
+    window.clearTimeout(pageAny.__studyPilotChapterTimer);
     pageAny.__studyPilotChapterTimer = null;
   }
+  pageAny.__studyPilotChapterTickBusy = false;
 }
 
 async function playPrimaryChapterMedia() {
@@ -1366,7 +1138,6 @@ async function playPrimaryChapterMedia() {
   rememberPrimaryMedia(primaryVideo, primaryAudio);
   pauseNonPrimaryMedia(primaryVideo, primaryAudio);
   broadcastChapterFrameCommand('apply-options', options);
-  attachJwPlayerWatchers();
 
   if (!options.autoPlay || Number(options.playbackRate) <= 0) {
     return { videoEntries, audioEntries, primaryVideo, primaryAudio, played: 0 };
@@ -1399,59 +1170,14 @@ async function playPrimaryChapterMedia() {
     }
   }
 
-  played += await playJwPlayers();
-
   return { videoEntries, audioEntries, primaryVideo, primaryAudio, played };
 }
 
-// ===== 倍速防清进度：规避超星 seekBarControl 的 drag 检测 =====
-function applyRateHack() {
-  const pageAny = window as any;
-  if (pageAny.__studyPilotRateHackApplied) return;
+// ===== 倍速防清进度：通过页面桥代理到页面上下文执行 =====
+async function applyRateHack() {
   const options = chapterLearningOptions();
   if (!options.rateHack) return;
-  try {
-    const videojs = pageAny.videojs;
-    const Ext = pageAny.Ext;
-    if (typeof videojs === 'undefined' || typeof Ext === 'undefined') return;
-    pageAny.__studyPilotRateHackApplied = true;
-    const originPlugin = videojs.getPlugin('seekBarControl');
-    if (!originPlugin) return;
-    let dragCount = 0;
-    const plugin = videojs.extend(videojs.getPlugin('plugin'), {
-      constructor: function (videoExt: any, data: any) {
-        const _sendLog = data.sendLog;
-        data.sendLog = (...args: any[]) => {
-          if (args[1] === 'drag') {
-            dragCount++;
-            if (dragCount > 100) {
-              dragCount = 0;
-              const v = document.querySelector('video') as HTMLVideoElement | null;
-              v?.pause();
-            }
-          } else {
-            _sendLog.apply(data, args);
-          }
-        };
-        originPlugin.apply(originPlugin.prototype, [videoExt, data]);
-      }
-    });
-    videojs.registerPlugin('seekBarControl', plugin);
-    Ext.define('ans.VideoJs', {
-      override: 'ans.VideoJs',
-      constructor: function (data: any) {
-        this.addEvents(['seekstart']);
-        this.mixins.observable.constructor.call(this, data);
-        const vjs = videojs(data.videojs, this.params2VideoOpt(data.params), function () {});
-        Ext.fly(data.videojs).on('contextmenu', (f: any) => f.preventDefault());
-        Ext.fly(data.videojs).on('keydown', (f: any) => {
-          if (f.keyCode === 32 || f.keyCode === 37 || f.keyCode === 39 || f.keyCode === 107) f.preventDefault();
-        });
-      }
-    });
-  } catch {
-    // 非 videojs 环境，忽略
-  }
+  await callPageHook({ kind: 'applyRateHack', playbackRate: options.playbackRate }, 1500);
 }
 
 // ===== 人脸识别检测 =====
@@ -1476,18 +1202,30 @@ function hasFaceRecognition(): boolean {
   return false;
 }
 
+// 人脸识别等待必须单例化：setInterval 重叠的 tick 每个都会新建一个 3s 轮询 interval 且永不清理，
+// 人脸弹窗期间定时器无限堆积；停止学习时也必须能取消等待
 async function waitForFaceRecognition(): Promise<void> {
+  const pageAny = window as any;
   if (!hasFaceRecognition()) return;
+  if (pageAny.__studyPilotFaceWait) {
+    await pageAny.__studyPilotFaceWait;
+    return;
+  }
   sendChapterLearningState('检测到人脸识别，已暂停自动化，请手动完成识别后继续。');
-  return new Promise((resolve) => {
+  pageAny.__studyPilotFaceWait = new Promise<void>((resolve) => {
     const interval = setInterval(() => {
-      if (!hasFaceRecognition()) {
+      // 停止学习时立即结束等待，避免定时器残留
+      if (!pageAny.__studyPilotChapterRunning || !hasFaceRecognition()) {
         clearInterval(interval);
-        sendChapterLearningState('人脸识别已完成，继续学习。');
+        pageAny.__studyPilotFaceWait = null;
+        if (pageAny.__studyPilotChapterRunning) {
+          sendChapterLearningState('人脸识别已完成，继续学习。');
+        }
         resolve();
       }
     }, 3000);
   });
+  await pageAny.__studyPilotFaceWait;
 }
 
 // ===== 视频弹窗测验自动处理 =====
@@ -1506,9 +1244,11 @@ async function handleVideoQuizDialog(): Promise<boolean> {
           }
           const options = Array.from(dialog.querySelectorAll('ul .topic-item')) as HTMLElement[];
           if (options.length) {
+            // 直接点击列表元素自身：此前索引用列表 A 计算却点击另一 DOM 路径的列表 B，
+            // 数量/顺序不一致时会点错或越界不点任何项
             const random = Math.floor(Math.random() * options.length);
             await new Promise(resolve => setTimeout(resolve, 1000));
-            (dialog.querySelector(`.topic .radio ul > li:nth-child(${random + 1})`) as HTMLElement)?.click();
+            options[random].click();
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
@@ -1567,20 +1307,13 @@ async function tryUnlockChapter(): Promise<boolean> {
 }
 
 // ===== 超星特定下一章跳转 =====
-function tryChaoxingNextChapter(): boolean {
-  const pageAny = window as any;
+async function tryChaoxingNextChapter(): Promise<boolean> {
   try {
-    const topWin = pageAny.top || window;
-    // 方式1: 调用 PCount.next
-    const curCourseId = topWin.document.querySelector('#curCourseId') as HTMLInputElement | null;
-    const curChapterId = topWin.document.querySelector('#curChapterId') as HTMLInputElement | null;
-    const curClazzId = topWin.document.querySelector('#curClazzId') as HTMLInputElement | null;
-    const count = topWin.document.querySelectorAll('#prev_tab .prev_ul li');
-    if (curChapterId && curCourseId && curClazzId && topWin.PCount && typeof topWin.PCount.next === 'function') {
-      topWin.PCount.next(count.length.toString(), curChapterId.value, curCourseId.value, curClazzId.value, '');
-      return true;
-    }
+    // 方式1: 通过页面桥调用 PCount.next
+    const result = await callPageHook({ kind: 'tryNextChapter' }, 1000);
+    if (result?.ok) return true;
     // 方式2: 点击下一章节图标
+    const topWin = (window as any).top || window;
     const nextIcon = topWin.document.querySelector('.nodeItem.r i') as HTMLElement | null;
     if (nextIcon) {
       nextIcon.click();
@@ -1595,29 +1328,28 @@ function tryChaoxingNextChapter(): boolean {
 // ===== 增强 PPT/文档自动阅读 =====
 async function enhancedDocumentRead(reader: { iframe?: HTMLIFrameElement; doc: Document; title: string }): Promise<{ success: boolean; action: string }> {
   const doc = reader.doc;
-  const win = reader.iframe?.contentWindow as any;
 
-  // 超星 PPT swiperNext
-  if (win && typeof win.swiperNext === 'function') {
+  // 超星 PPT swiperNext：通过页面桥代理
+  const pptResult = await callPageHook({ kind: 'pptNext' }, 1000);
+  if (pptResult?.ok) {
     const slides = doc.querySelectorAll('.swiper-container .swiper-slide');
-    if (slides.length > 0) {
-      for (let i = 0; i < slides.length; i++) {
-        win.swiperNext();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      return { success: true, action: 'ppt-next' };
+    const slideCount = slides.length > 0 ? slides.length : 1;
+    for (let i = 1; i < slideCount; i++) {
+      await callPageHook({ kind: 'pptNext' }, 1000);
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    return { success: true, action: 'ppt-next' };
   }
 
-  // 超星 finishJob
-  if (win && typeof win.finishJob === 'function') {
-    win.finishJob();
+  // 超星 finishJob：通过页面桥代理
+  const jobResult = await callPageHook({ kind: 'finishJob' }, 1000);
+  if (jobResult?.ok) {
     return { success: true, action: 'finish-job' };
   }
 
-  // 超星 readweb.goto
-  if (win && win.readweb && typeof win.readweb.goto === 'function') {
-    win.readweb.goto('epage');
+  // 超星 readweb.goto：通过页面桥代理
+  const readResult = await callPageHook({ kind: 'readGoto', target: 'epage' }, 1000);
+  if (readResult?.ok) {
     return { success: true, action: 'read-goto' };
   }
 
@@ -1651,27 +1383,38 @@ async function enhancedDocumentRead(reader: { iframe?: HTMLIFrameElement; doc: D
 function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
   const pageAny = window as any;
   stopChapterLearningLoop();
-  pageAny.__studyPilotChapterTimer = window.setInterval(async () => {
+  // 递归 setTimeout + 重入锁：setInterval 不等待 async 回调（单 tick 可达数十秒），
+  // 多 tick 并发会重复点击/重复 play()/状态洪峰；每个 await 后复查 running 标志保证停止立即生效
+  const tick = async () => {
     if (!pageAny.__studyPilotChapterRunning) {
       stopChapterLearningLoop();
       return;
     }
+    if (pageAny.__studyPilotChapterTickBusy) {
+      pageAny.__studyPilotChapterTimer = window.setTimeout(tick, 500);
+      return;
+    }
+    pageAny.__studyPilotChapterTickBusy = true;
+    // 每个 await 后复查 running：stop 只清定时器，在途 tick 若不复查会继续播放媒体
+    const stillRunning = () => Boolean(pageAny.__studyPilotChapterRunning);
     try {
       const options = chapterLearningOptions();
 
-      // 倍速防清进度
-      if (options.rateHack) applyRateHack();
+      // 倍速防清进度（通过页面桥代理到页面上下文）
+      if (options.rateHack) await applyRateHack();
 
       // 人脸识别检测
       if (options.faceRecognition && hasFaceRecognition()) {
         await waitForFaceRecognition();
       }
+      if (!stillRunning()) return;
 
       // 视频弹窗测验处理
       const quizHandled = await handleVideoQuizDialog();
       if (quizHandled) {
         sendChapterLearningState('已自动处理视频弹窗测验。');
       }
+      if (!stillRunning()) return;
 
       attachPrimaryChapterVideoWatchers();
       const dialogState = await handleChapterTestDialogs();
@@ -1686,10 +1429,12 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
       for (const { video } of videoEntries) applyChapterVideoOptions(video);
       for (const { audio } of audioEntries) applyChapterAudioOptions(audio);
       const primaryState = await playPrimaryChapterMedia();
+      if (!stillRunning()) return;
 
       if (options.autoReadDocument) {
         const readers = findDocumentReaders();
         for (const reader of readers) {
+          if (!stillRunning()) return;
           try {
             const result = await enhancedDocumentRead(reader);
             if (result.success && result.action !== 'none') {
@@ -1710,16 +1455,32 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
 
       const allTasksCompleted = isAllTaskPointsCompleted();
 
-      if (currentMediaEnded || allTasksCompleted) {
+      // 纯图文章节（无媒体/任务点/文档）无法以“媒体结束/任务完成”驱动翻章，
+      // 连续多轮无内容时按超时翻章，避免自动化卡死在当前章
+      if (!currentMediaEnded && !allTasksCompleted && videoEntries.length === 0 && audioEntries.length === 0) {
+        const idleReaders = findDocumentReaders();
+        const idleTasks = collectTaskPoints();
+        if (idleReaders.length === 0 && idleTasks.length === 0) {
+          pageAny.__studyPilotChapterIdleTicks = (pageAny.__studyPilotChapterIdleTicks || 0) + 1;
+        } else {
+          pageAny.__studyPilotChapterIdleTicks = 0;
+        }
+      } else {
+        pageAny.__studyPilotChapterIdleTicks = 0;
+      }
+      const idleTimeout = (pageAny.__studyPilotChapterIdleTicks || 0) >= 4;
+
+      if (currentMediaEnded || allTasksCompleted || idleTimeout) {
         const shouldProceed = await checkIfShouldProceedToNext(extractQuestions);
-        if (shouldProceed) {
+        if (shouldProceed && stillRunning()) {
           // 闯关模式解锁
           if (options.unlockMode) {
             await tryUnlockChapter();
           }
+          if (!stillRunning()) return;
           // 优先尝试超星特定跳转，失败则回退到通用点击
-          if (!tryChaoxingNextChapter()) {
-            openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : 'current-media-ended');
+          if (!(await tryChaoxingNextChapter())) {
+            openNextChapterIfAvailableDeep(allTasksCompleted ? 'all-tasks-completed' : idleTimeout ? 'idle-timeout' : 'current-media-ended');
           }
           return;
         }
@@ -1744,8 +1505,16 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
         level: 'warn',
         message: error?.message || '章节学习轮询失败'
       });
+    } finally {
+      pageAny.__studyPilotChapterTickBusy = false;
+      if (pageAny.__studyPilotChapterRunning) {
+        pageAny.__studyPilotChapterTimer = window.setTimeout(tick, 2500);
+      } else {
+        pageAny.__studyPilotChapterTimer = null;
+      }
     }
-  }, 2500);
+  };
+  pageAny.__studyPilotChapterTimer = window.setTimeout(tick, 2500);
 }
 
 async function checkIfShouldProceedToNext(extractQuestions: ExtractQuestions): Promise<boolean> {
@@ -1756,17 +1525,26 @@ async function checkIfShouldProceedToNext(extractQuestions: ExtractQuestions): P
 
   const hasQuestions = extractQuestions().length > 0;
   if (hasQuestions) {
+    const pageAny = window as any;
     const options = chapterLearningOptions();
     if (options.autoAnswerQuestions) {
-      // 通知宿主触发章节测试自动答题流程（抓题+AI解析+填入）
-      sendChapterLearningState('检测到章节测试题目，正在通知宿主执行自动答题。');
-      ipcRenderer.sendToHost('studypilot:chapter-auto-answer', { url: window.location.href });
+      // 每 2.5s 的 tick 都会走到这里：无去重标志时宿主 resolver 会被反复覆盖，
+      // 旧超时定时器把新 resolver 置空并报“等待题目抓取结果超时”
+      const currentUrl = window.location.href;
+      if (pageAny.__studyPilotAutoAnswerNotifiedUrl !== currentUrl) {
+        pageAny.__studyPilotAutoAnswerNotifiedUrl = currentUrl;
+        // 通知宿主触发章节测试自动答题流程（抓题+AI解析+填入）
+        sendChapterLearningState('检测到章节测试题目，正在通知宿主执行自动答题。');
+        ipcRenderer.sendToHost('studypilot:chapter-auto-answer', { url: currentUrl });
+      }
       // 等待宿主处理，暂不跳转（宿主答题完成后会通过页面变化或下次轮询继续）
       return false;
     }
     sendChapterLearningState('检测到题目，等待手动答题或启用自动答题。');
     return false;
   }
+  // 无题目时清除通知标志，页面切换后可重新触发
+  (window as any).__studyPilotAutoAnswerNotifiedUrl = null;
 
   const readers = findDocumentReaders();
   for (const reader of readers) {

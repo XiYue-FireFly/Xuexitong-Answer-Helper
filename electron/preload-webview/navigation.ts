@@ -824,25 +824,36 @@ export function installBrowserNavigationPatch(syncAnswersBeforeSave: () => void)
         };
       } catch (_) {}
       try {
+        if (window.__studyPilotPageObserver) window.__studyPilotPageObserver.disconnect();
         const seenTexts = new Set();
-        const scanPageMessage = () => {
-          const text = cleanText(document.body && document.body.innerText, 1200);
-          const match = text.match(/[^\\n。；;]*(保存失败|提交失败|保存成功|提交成功|作业提交失败|失败|错误|异常|success|fail|error)[^\\n。；;]*/i);
-          if (!match) return;
-          const message = cleanText(match[0], 500);
-          if (seenTexts.has(message)) return;
-          seenTexts.add(message);
-          reportDiagnostic({
-            source: 'webview:page-visible-message',
-            level: /失败|错误|异常|fail|error/i.test(message) ? 'warn' : 'info',
-            message,
-            details: { href: window.location.href }
-          });
+        var scanTimer = null;
+        const scanPageMessage = function () {
+          if (scanTimer) return;
+          scanTimer = window.setTimeout(function () {
+            scanTimer = null;
+            var text = '';
+            try { text = cleanText(document.body && document.body.innerText, 1200); } catch (e) {}
+            var match = text.match(/[^\\n。；;]*(保存失败|提交失败|保存成功|提交成功|作业提交失败|失败|错误|异常|success|fail|error)[^\\n。；;]*/i);
+            if (!match) return;
+            var message = cleanText(match[0], 500);
+            if (seenTexts.has(message)) return;
+            seenTexts.add(message);
+            reportDiagnostic({
+              source: 'webview:page-visible-message',
+              level: /失败|错误|异常|fail|error/i.test(message) ? 'warn' : 'info',
+              message: message,
+              details: { href: window.location.href }
+            });
+          }, 60);
         };
-        const observer = new MutationObserver(() => window.setTimeout(scanPageMessage, 60));
+        var observer = new MutationObserver(scanPageMessage);
+        window.__studyPilotPageObserver = observer;
         if (document.body) observer.observe(document.body, { childList: true, subtree: true, characterData: true });
         window.setTimeout(scanPageMessage, 400);
       } catch (_) {}
+      window.addEventListener('studypilot:disconnect-observers', function () {
+        if (window.__studyPilotPageObserver) { window.__studyPilotPageObserver.disconnect(); window.__studyPilotPageObserver = null; }
+      });
       const originalOpen = window.open.bind(window);
       window.open = (targetUrl, target, features) => {
         const nextUrl = normalizeUrl(targetUrl);

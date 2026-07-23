@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, Coffee, Copy, Download, ExternalLink, Eye, EyeOff, Heart, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
+import { aiChatStream } from '../utils/aiRequest';
 
 const REWARD_ALIPAY_IMAGE = new URL('../assets/reward-alipay.jpg', import.meta.url).href;
 const REWARD_WECHAT_IMAGE = new URL('../assets/reward-wechat.jpg', import.meta.url).href;
@@ -244,12 +245,15 @@ export function SettingsPanel() {
   ];
 
   useEffect(() => {
+    // 仅在切换服务商时重置表单：依赖 settings.providers 会让任何设置变更
+    // （并发滑块/主题/章节开关都会重建 providers 数组）覆盖用户未保存的 API Key 输入
     const provider = settings.providers.find((item) => item.id === selectedProviderId) || settings.providers[0];
     const preset = selectedProviderId === 'custom' ? undefined : AI_PROVIDER_PRESETS[selectedProviderId];
     setFormData(provider);
     setCustomEndpointInput(Boolean(preset && !valueInOptions(provider.baseUrl, preset.endpoints)));
     setCustomModelInput(Boolean(preset && !valueInOptions(provider.model, preset.models)));
-  }, [selectedProviderId, settings.providers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProviderId]);
 
   useEffect(() => {
     if (!isTestingAI) {
@@ -278,7 +282,9 @@ export function SettingsPanel() {
   const syncSettings = (updates: Partial<typeof settings>) => {
     appStore.updateSettings(updates);
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
-      (window as any).electronAPI.setSettings(appStore.getState().settings);
+      // invoke 失败会产生 unhandledrejection，显式 catch 记录到诊断日志
+      Promise.resolve((window as any).electronAPI.setSettings(appStore.getState().settings))
+        .catch((error: Error) => appStore.addLog('warn', `设置同步到主进程失败：${error.message}`));
     }
   };
 
@@ -346,14 +352,36 @@ export function SettingsPanel() {
     setTestInput('');
     setIsTestingAI(true);
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
     try {
       const startedAt = Date.now();
-      const response = await fetch(`${formData.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
+      // 走主进程代理（打包后 file:// 页面直接 fetch 会被 CORS 拦截），非 Electron 环境内部回退 fetch
+      let answer = '';
+      let tokenUsage: ReturnType<typeof usageFromPayload> = null;
+      let buffer = '';
+      let rawText = '';
+      const consumeLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (!trimmed.startsWith('data:')) return;
+        const dataText = trimmed.slice(5).trim();
+        if (!dataText || dataText === '[DONE]') return;
+        try {
+          const payload = JSON.parse(dataText);
+          tokenUsage = usageFromPayload(payload) || tokenUsage;
+          const delta = extractStreamDelta(payload);
+          if (delta) {
+            answer += delta;
+            setAssistantContent(answer);
+          }
+        } catch {
+          // Some providers send keepalive text; ignore it during SSE parsing.
+        }
+      };
+
+      const response = await aiChatStream({
+        baseUrl: formData.baseUrl,
         headers: buildAIHeaders(formData),
-        body: JSON.stringify({
+        body: {
           model: formData.model,
           messages: [
             { role: 'system', content: '你是 AI 配置连通性测试助手。请用中文简短回答用户，不要输出 Markdown。' },
@@ -361,66 +389,43 @@ export function SettingsPanel() {
           ],
           temperature: 0.2,
           stream: true
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const message = `接口返回 ${response.status}：${errorText.slice(0, 500)}`;
-        const hint = apiFailureHint(message);
-        if (hint) appStore.addLog(isApiBalanceError(message) ? 'error' : 'warn', hint);
-        throw new Error(hint ? `${message}\n${hint}` : message);
-      }
-
-      let answer = '';
-      let tokenUsage: ReturnType<typeof usageFromPayload> = null;
-      const contentType = response.headers.get('content-type') || '';
-      if (response.body && !contentType.includes('application/json')) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let rawText = '';
-        const consumeLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (!trimmed.startsWith('data:')) return;
-          const dataText = trimmed.slice(5).trim();
-          if (!dataText || dataText === '[DONE]') return;
-          try {
-            const payload = JSON.parse(dataText);
-            tokenUsage = usageFromPayload(payload) || tokenUsage;
-            const delta = extractStreamDelta(payload);
-            if (delta) {
-              answer += delta;
-              setAssistantContent(answer);
-            }
-          } catch {
-            // Some providers send keepalive text; ignore it during SSE parsing.
-          }
-        };
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
+        },
+        timeoutMs: 60000,
+        onChunk: (text) => {
           rawText += text;
           buffer += text;
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || '';
           lines.forEach(consumeLine);
+        },
+        onJsonResponse: (text) => {
+          try {
+            const parsed = JSON.parse(text);
+            tokenUsage = usageFromPayload(parsed) || tokenUsage;
+            answer = extractNonStreamAnswer(parsed);
+          } catch {
+            throw new Error('AI 接口未返回可解析的 JSON 内容。');
+          }
         }
-        buffer.split(/\r?\n/).forEach(consumeLine);
+      });
 
-        if (!answer.trim()) {
+      if (!response.ok) {
+        const message = response.error || 'AI 接口请求失败。';
+        const hint = apiFailureHint(message);
+        if (hint) appStore.addLog(isApiBalanceError(message) ? 'error' : 'warn', hint);
+        throw new Error(hint ? `${message}\n${hint}` : message);
+      }
+
+      buffer.split(/\r?\n/).forEach(consumeLine);
+
+      if (!answer.trim() && rawText.trim()) {
+        try {
           const parsed = JSON.parse(rawText);
           tokenUsage = usageFromPayload(parsed) || tokenUsage;
           answer = extractNonStreamAnswer(parsed);
+        } catch {
+          // 流式片段无法按完整 JSON 解析时保持流式答案。
         }
-      } else {
-        const data = await response.json();
-        tokenUsage = usageFromPayload(data);
-        answer = extractNonStreamAnswer(data);
       }
 
       if (tokenUsage) {
@@ -443,7 +448,6 @@ export function SettingsPanel() {
       setAssistantContent(`测试失败：${message}`);
       appStore.addLog('error', `AI 测试失败：${message}`);
     } finally {
-      window.clearTimeout(timeoutId);
       setIsTestingAI(false);
     }
   };

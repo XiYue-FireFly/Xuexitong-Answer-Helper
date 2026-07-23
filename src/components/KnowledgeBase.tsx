@@ -471,16 +471,16 @@ export function KnowledgeBase() {
           <div key={entry.id} className="glass-panel" style={{ padding: 14, borderRadius: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
               <h5 style={{ color: 'var(--text-primary)', fontSize: '0.84rem', lineHeight: 1.45 }}>{entry.question}</h5>
-              <span className="badge badge-success">命中 {entry.hits}</span>
+              <span className="badge badge-success">命中 {entry.hits ?? 0}</span>
             </div>
-            <div style={{ color: '#34d399', fontSize: '0.82rem', fontWeight: 800, marginBottom: 8 }}>{entry.answer.answer}</div>
-            {entry.options.length > 0 && (
+            <div style={{ color: '#34d399', fontSize: '0.82rem', fontWeight: 800, marginBottom: 8 }}>{entry.answer?.answer ?? ''}</div>
+            {(entry.options?.length ?? 0) > 0 && (
               <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
                 {entry.options.slice(0, 4).join(' / ')}
               </div>
             )}
             <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', marginTop: 8 }}>
-              更新：{new Date(entry.updatedAt).toLocaleString()} · 来源：{entry.answer.provider}
+              更新：{Number.isFinite(entry.updatedAt) ? new Date(entry.updatedAt).toLocaleString() : '未知'} · 来源：{entry.answer?.provider ?? '未知'}
             </div>
           </div>
         ))

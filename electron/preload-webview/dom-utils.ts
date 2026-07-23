@@ -76,9 +76,11 @@ export function repairMojibakeText(text: string) {
 
 export function cleanText(text: string) {
   return repairMojibakeText(String(text || ''))
-    .replace(/\u00a0/g, ' ')
+    .replace(/ /g, ' ')
     .replace(/\s+/g, ' ')
-    .replace(/^\s*\d{1,3}\s*[.、．)]\s*/, '')
+    // 行首编号剥离：顿号/括号类分隔符可直接剥离；点号分隔符要求后跟非数字，
+    // 避免把小数“1.5倍速”“3.14”剥成“5倍速”“14”
+    .replace(/^\s*\d{1,3}\s*(?:[、．)]|\.(?!\d))/, '')
     .trim();
 }
 
@@ -90,7 +92,9 @@ export function visibleText(element: Element) {
 
 export function normalizeText(text: string) {
   return cleanText(text)
-    .replace(/^[A-ZＡ-Ｈ][.\s:：、．。)]*/i, '')
+    // 选项前缀剥离必须带标点分隔符（A. / A、 / B) 等），
+    // 否则会把“Apple”“B细胞”这类以 A-H 字母开头的正常文本吃掉首字母
+    .replace(/^[A-HＡ-Ｈ][.、．):：。]\s*/i, '')
     .replace(/[，。,.、；;：:\s"'“”‘’【】\[\]（）()]/g, '')
     .toLowerCase();
 }

@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
+import { aiChatText } from '../utils/aiRequest';
 import {
   AlertTriangle,
   BrainCircuit,
@@ -149,9 +150,10 @@ function normalizeOptionText(text: string) {
 function extractChoiceLabels(answer: string) {
   const value = toHalfWidth(answer);
   const compact = value.replace(/\s+/g, '').match(/^[A-H]{1,8}$/i)?.[0] || '';
+  // 零宽断言边界：消费型边界会让“A、C”只提取到 A（分隔符被上一个匹配吃掉）
   const labels = compact
     ? compact.split('')
-    : Array.from(value.matchAll(/(?:\u7b54\u6848|\u9009\u9879|\u9009\u62e9|^|[^A-Z])([A-H])(?:[^A-Z]|$)/gi)).map((match) => match[1]);
+    : Array.from(value.matchAll(/(?:(?<=答案)|(?<=选项)|(?<=选择)|(?<![A-Za-z]))([A-H])(?![A-Za-z])/gi)).map((match) => match[1]);
   return Array.from(new Set(labels.map((label) => label.toUpperCase())));
 }
 
@@ -265,13 +267,28 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 }
 
 export function AIPanel() {
-  const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank } = useAppStore();
-  const [batchRunning, setBatchRunning] = useState(false);
-  const [liveRunning, setLiveRunning] = useState(false);
-  const [livePaused, setLivePaused] = useState(false);
-  const livePausedRef = useRef(false);
+  const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, batchRunning, liveRunning, livePaused } = useAppStore();
+  // 运行状态存放在 appStore（组件随 tab 切换卸载后仍可从 store 恢复真实状态）；
+  // livePausedRef 仅作 async 循环内的即时读取通道，写入时同步 store
+  const livePausedRef = useRef(livePaused);
+  const setBatchRunning = (value: boolean) => appStore.setAutomationRunning({ batchRunning: value });
+  const setLiveRunning = (value: boolean) => appStore.setAutomationRunning({ liveRunning: value });
+  const setLivePaused = (value: boolean) => {
+    livePausedRef.current = value;
+    appStore.setAutomationRunning({ livePaused: value });
+  };
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
   const aiConcurrency = normalizeApiConcurrency(settings.apiConcurrency);
+  // 题库命中判定包含全库模糊匹配（O(bank×key²)），渲染期逐题现场计算会在状态高频变化时卡死 UI；
+  // 仅在题目列表或题库变化时重算一次
+  const bankHitSet = useMemo(() => {
+    const hits = new Set<string>();
+    questions.forEach((question) => {
+      if (appStore.hasQuestionBankAnswer(question)) hits.add(question.hash);
+    });
+    return hits;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions, questionBank]);
   const updateAiConcurrency = (value: number) => {
     appStore.updateSettings({ apiConcurrency: normalizeApiConcurrency(value) });
   };
@@ -291,13 +308,10 @@ export function AIPanel() {
 
     if (activeProvider.authHeader !== 'none' && !activeProvider.apiKey) {
       await new Promise((resolve) => window.setTimeout(resolve, 180));
-      const answer = demoAnswer(question);
-      appStore.upsertQuestionBank(question, answer);
-      return answer;
+      // 演示答案不入库：避免占位答案覆盖真实 AI 答案、污染导出与云端共享题库
+      return demoAnswer(question);
     }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
     const requestBody: Record<string, any> = {
       model: activeProvider.model,
       messages: [
@@ -310,23 +324,28 @@ export function AIPanel() {
       requestBody.response_format = { type: 'json_object' };
     }
     const startedAt = Date.now();
-    const response = await fetch(`${activeProvider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
+    // 走主进程代理（打包后 file:// 页面直接 fetch 会被 CORS 拦截），非 Electron 环境内部回退 fetch
+    const response = await aiChatText({
+      baseUrl: activeProvider.baseUrl,
       headers: buildAIHeaders(activeProvider),
-      body: JSON.stringify(requestBody),
-      signal: controller.signal
+      body: requestBody,
+      timeoutMs: 30000
     });
-    window.clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      const message = `接口返回 ${response.status}：${errorText}`;
+      const message = response.error || `接口返回 ${response.status}`;
       const hint = apiFailureHint(message);
       if (hint) appStore.addLog(isApiBalanceError(message) ? 'error' : 'warn', hint);
       throw new Error(hint ? `${message}\n${hint}` : message);
     }
 
-    const data = await response.json();
+    const data = (() => {
+      try {
+        return JSON.parse(response.text || '{}');
+      } catch {
+        throw new Error('AI 接口未返回可解析的 JSON 内容。');
+      }
+    })();
     const usage = data.usage || data.token_usage || {};
     const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens ?? 0);
     const completionTokens = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens ?? 0);
@@ -416,7 +435,8 @@ export function AIPanel() {
     try {
       for (let index = 0; index < questions.length; index += 1) {
         const question = questions[index];
-        if (answerMap[question.hash]) continue;
+        // 循环内实时读取 answerMap：批量运行期间题库命中/并行流程新增的答案对渲染时闭包不可见
+        if (appStore.getState().answerMap[question.hash]) continue;
         appStore.setCurrentQuestionIndex(index);
         appStore.setStatus('calling_ai', `正在解析第 ${question.index || index + 1} / ${questions.length} 题，优先查询题库。`);
         const answer = await requestAIWithRetry(question);
@@ -473,9 +493,9 @@ export function AIPanel() {
   };
 
   const toggleLivePause = () => {
-    livePausedRef.current = !livePausedRef.current;
-    setLivePaused(livePausedRef.current);
-    appStore.setStatus(livePausedRef.current ? 'idle' : 'calling_ai', livePausedRef.current ? '已暂停边搜边填。' : '已继续边搜边填。');
+    const next = !livePausedRef.current;
+    setLivePaused(next);
+    appStore.setStatus(next ? 'idle' : 'calling_ai', next ? '已暂停边搜边填。' : '已继续边搜边填。');
   };
 
   const runSequentialExamAutomation = async () => {
@@ -549,12 +569,13 @@ export function AIPanel() {
 
     setLiveRunning(true);
     setLivePaused(false);
-    livePausedRef.current = false;
 
-    const pendingQuestions = questions.filter((question) => !answerMap[question.hash]);
-    const preAnsweredItems = questions
-      .filter((question) => answerMap[question.hash])
-      .map((question) => ({ question, answer: answerMap[question.hash] }));
+    // 从 store 实时取快照，避免使用渲染时闭包里的 answerMap/questions
+    const liveState = appStore.getState();
+    const pendingQuestions = liveState.questions.filter((question) => !liveState.answerMap[question.hash]);
+    const preAnsweredItems = liveState.questions
+      .filter((question) => liveState.answerMap[question.hash])
+      .map((question) => ({ question, answer: liveState.answerMap[question.hash] }));
     let nextIndex = 0;
     let resolvedCount = preAnsweredItems.length;
     let appliedCount = 0;
@@ -586,7 +607,6 @@ export function AIPanel() {
       } finally {
         setLiveRunning(false);
         setLivePaused(false);
-        livePausedRef.current = false;
       }
       return;
     }
@@ -642,7 +662,6 @@ export function AIPanel() {
     } finally {
       setLiveRunning(false);
       setLivePaused(false);
-      livePausedRef.current = false;
     }
   };
 
@@ -816,7 +835,7 @@ export function AIPanel() {
             {questions.map((question, index) => {
               const active = index === currentQuestionIndex;
               const answered = Boolean(answerMap[question.hash]);
-              const bankHit = appStore.hasQuestionBankAnswer(question);
+              const bankHit = bankHitSet.has(question.hash);
               const stateLabel = answered ? '已解析' : bankHit ? '题库' : '未解析';
               const stateColor = answered ? 'var(--success-color)' : bankHit ? 'var(--warning-color)' : 'var(--text-muted)';
               return (

@@ -16,8 +16,13 @@ export function answerAliases(text: string) {
 export function judgementValueFromText(text: string): 'true' | 'false' | null {
   const value = String(text || '').toLowerCase().replace(/\s+/g, '');
   if (!value) return null;
-  if (/(正确|对|是|√|✓|true|yes|right|correct|t\b|1)/i.test(value)) return 'true';
-  if (/(错误|错|否|×|✕|false|no|wrong|incorrect|f\b|0)/i.test(value)) return 'false';
+  // 先检测否定表达，避免“不正确/不对/incorrect”被肯定词子串误判
+  if (/(不正确|不对|不是|错误|错|否|×|✕|false|wrong|incorrect)/i.test(value)) return 'false';
+  if (/(正确|对|是|√|✓|true|yes|right|correct|t\b)/i.test(value)) return 'true';
+  if (/\bf\b/i.test(value)) return 'false';
+  // 数字 1/0 仅当整串即数字时才算判断值，避免“180度”“10”误判
+  if (/^1$/.test(value)) return 'true';
+  if (/^0$/.test(value)) return 'false';
   return null;
 }
 
@@ -33,8 +38,9 @@ export function parseJudgementValue(text: string): 'true' | 'false' | null {
 
   if (trueValues.has(value)) return 'true';
   if (falseValues.has(value)) return 'false';
-  if (/(\u6b63\u786e|\u5bf9|\u662f|true|yes|right|correct)/i.test(value)) return 'true';
-  if (/(\u9519\u8bef|\u9519|\u5426|false|wrong|incorrect)/i.test(value)) return 'false';
+  // 先检测否定表达（“不正确”包含“正”、“incorrect”包含“correct”）
+  if (/(不正确|不对|不是|错误|错|否|false|wrong|incorrect)/i.test(value)) return 'false';
+  if (/(正确|对|是|true|yes|right|correct)/i.test(value)) return 'true';
   return null;
 }
 
@@ -83,6 +89,10 @@ export function parseJudgementValueStable(text: string): 'true' | 'false' | null
   if (/^(true|t|1|yes|y|right|correct|ri)$/.test(value)) return 'true';
   if (/^(false|f|0|no|n|wrong|incorrect|wr|x)$/.test(value)) return 'false';
 
+  // 否定词优先：中文字符扫描前必须先排除“不正确/不对/不是”等否定表达，
+  // 否则“正”字会先于“不”命中导致答案方向反转
+  if (/(不正确|不对|不是|并非|无误|错误)/.test(raw)) return 'false';
+
   for (const char of raw) {
     const code = char.charCodeAt(0);
     if (code === 0x6b63 || code === 0x5bf9 || code === 0x662f || code === 0x221a || code === 0x2713 || code === 0x2714) {
@@ -93,8 +103,9 @@ export function parseJudgementValueStable(text: string): 'true' | 'false' | null
     }
   }
 
-  if (/(true|yes|right|correct)/i.test(raw)) return 'true';
-  if (/(false|wrong|incorrect)/i.test(raw)) return 'false';
+  // 英文否定词优先于肯定词，避免“incorrectly”命中“correct”
+  if (/\b(false|wrong|incorrect|untrue)\w*/i.test(raw)) return 'false';
+  if (/\b(true|yes|right|correct)\b/i.test(raw)) return 'true';
   return null;
 }
 

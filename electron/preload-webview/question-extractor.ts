@@ -270,11 +270,13 @@ export function optionTargetFromElement(element: HTMLElement, index: number): Qu
   const dataLabel = /^[A-Z]$/i.test(dataValue) ? dataValue : '';
   const label = (labelMatch?.[1] || dataLabel || optionLetter(index)).toUpperCase();
   const clickTarget = nearestClickableOption(element) || element;
-  const judgementValue = parseJudgementValueStable(dataValue);
-  const displayText = judgementValue === 'true'
-    ? '\u5bf9'
-    : judgementValue === 'false'
-      ? '\u9519'
+  // 选项文本替换为“对/错”仅在值是显式判断语义（true/false/对/错等）时启用；
+  // 裸数字 1/0 是普通选择题极常见的选项值，直接替换会把选项文本毁掉
+  const explicitJudgementValue = /^\d+$/.test(dataValue) ? null : parseJudgementValueStable(dataValue);
+  const displayText = explicitJudgementValue === 'true'
+    ? '对'
+    : explicitJudgementValue === 'false'
+      ? '错'
       : optionTextCandidate(clickTarget, label);
   return {
     label,

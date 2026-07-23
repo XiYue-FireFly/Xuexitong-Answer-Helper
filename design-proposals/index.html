@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>学习通答题助手 - 前端方案预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+      background: #f6f8fb;
+      color: #172033;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(90deg, rgba(31, 88, 189, 0.05) 1px, transparent 1px),
+        linear-gradient(rgba(31, 88, 189, 0.04) 1px, transparent 1px),
+        #f6f8fb;
+      background-size: 28px 28px;
+    }
+    main {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 42px 0;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 32px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .lead {
+      margin: 0;
+      color: #607086;
+      font-size: 15px;
+      line-height: 1.8;
+      max-width: 760px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 28px;
+    }
+    .card {
+      min-height: 270px;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 18px 44px rgba(24, 38, 65, 0.08);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview {
+      height: 132px;
+      padding: 14px;
+      border-bottom: 1px solid #e6edf6;
+      display: grid;
+      gap: 8px;
+    }
+    .dark { background: #111827; }
+    .light { background: #ffffff; }
+    .glass { background: linear-gradient(135deg, #10202b, #172338 54%, #15251f); }
+    .bars { display: grid; grid-template-columns: 56px 1fr; gap: 8px; height: 100%; }
+    .bar { border-radius: 6px; background: rgba(255,255,255,0.12); }
+    .line { height: 10px; border-radius: 999px; background: #d9e3f1; }
+    .dark .line { background: rgba(255,255,255,0.18); }
+    .glass .line { background: rgba(255,255,255,0.20); }
+    .content { padding: 18px; flex: 1; display: flex; flex-direction: column; }
+    h2 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    p { color: #607086; font-size: 13px; line-height: 1.7; margin: 10px 0 18px; }
+    a {
+      margin-top: auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 8px;
+      color: #fff;
+      background: #2563eb;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      main { width: min(100% - 28px, 720px); padding: 28px 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>学习通答题助手前端方案预览</h1>
+    <p class="lead">下面是 3 个独立 HTML 静态方案，只用于选视觉方向，不会改动当前应用核心逻辑。你可以先打开看整体感觉，选中一个后我再把它落到 React 页面里。</p>
+    <section class="grid" aria-label="设计方案">
+      <article class="card">
+        <div class="preview dark">
+          <div class="bars">
+            <div class="bar"></div>
+            <div>
+              <div class="line" style="width: 62%"></div>
+              <div class="line" style="width: 86%; margin-top: 12px"></div>
+              <div class="line" style="width: 74%; margin-top: 12px"></div>
+            </div>
+          </div>
+        </div>
+        <div class="content">
+          <h2>A. 深色侧栏工作台</h2>
+          <p>更像专业自动化工具，左侧集中导航，右侧用任务队列、题目列表、日志和 Token 统计承载高频操作。</p>
+          <a href="a-sidebar-cards.html">打开方案 A</a>
+        </div>
+      </article>
+      <article class="card">
+        <div class="preview light">
+          <div class="line" style="width: 42%; height: 14px"></div>
+          <div class="line" style="width: 100%; margin-top: 8px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <div class="line" style="height:48px"></div>
+            <div class="line" style="height:48px"></div>
+          </div>
+        </div>
+        <div class="content">
+          <h2>B. 浅色顶部标签</h2>
+          <p>更接近日常浏览器和 SaaS 后台，界面轻、信息清楚，适合降低新用户上手压力。</p>
+          <a href="b-top-tabs.html">打开方案 B</a>
+        </div>
+      </article>
+      <article class="card">
+        <div class="preview glass">
+          <div class="line" style="width: 70%; height: 14px"></div>
+          <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:8px;margin-top:8px">
+            <div class="line" style="height:72px"></div>
+            <div class="line" style="height:72px"></div>
+          </div>
+        </div>
+        <div class="content">
+          <h2>C. 分屏液态玻璃</h2>
+          <p>保留你之前喜欢的现代玻璃质感，但把浏览器、答题控制和诊断信息做成更稳定的分屏。</p>
+          <a href="c-immersive-glass.html">打开方案 C</a>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

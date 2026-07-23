@@ -83,6 +83,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listCloudQuestionBanks: (source: string) => ipcRenderer.invoke('cloud-bank:list', source),
   downloadCloudQuestionBank: (payload: any) => ipcRenderer.invoke('cloud-bank:download', payload),
   uploadCloudQuestionBank: (payload: any) => ipcRenderer.invoke('cloud-bank:upload', payload),
+  aiChat: (payload: { baseUrl: string; headers?: Record<string, string>; body?: Record<string, any>; stream?: boolean; requestId?: string; timeoutMs?: number }) =>
+    ipcRenderer.invoke('ai:chat', payload),
+  onAIChatChunk: (callback: (payload: { requestId: string; chunk: string }) => void) => {
+    const subscription = (_event: any, data: { requestId: string; chunk: string }) => callback(data);
+    ipcRenderer.on('ai:chat-chunk', subscription);
+    return () => ipcRenderer.removeListener('ai:chat-chunk', subscription);
+  },
   
   // System logging
   log: (level: string, message: string) => ipcRenderer.send('system:log', { level, message }),

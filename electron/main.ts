@@ -1,8 +1,9 @@
-import { app, BrowserWindow, Menu, clipboard, ipcMain, Notification, screen, session, shell, webFrameMain } from 'electron';
+import { app, BrowserWindow, Menu, clipboard, ipcMain, Notification, session, shell, webFrameMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
+import { pathToFileURL } from 'url';
 import {
   getErrorLogPath,
   installProcessErrorLogging,
@@ -52,15 +53,31 @@ function readDB() {
     }
   } catch (e) {
     console.error('Failed to read db', e);
+    // JSON 损坏时先备份原文件再按空库处理，避免下次写入把损坏数据永久覆盖丢失
+    try {
+      if (fs.existsSync(DB_FILE)) {
+        fs.copyFileSync(DB_FILE, `${DB_FILE}.bak`);
+      }
+    } catch {
+      // 备份失败不阻断启动。
+    }
   }
   return { settings: null, history: [], knowledgeBase: [] };
 }
 
 function writeDB(data: any) {
+  // 原子写入：先写临时文件再 rename，进程中断不会产生半截 JSON（半截 JSON 会触发 readDB 重置空库）
+  const tempFile = `${DB_FILE}.tmp`;
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempFile, DB_FILE);
   } catch (e) {
     console.error('Failed to write db', e);
+    try {
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch {
+      // 清理失败忽略。
+    }
   }
 }
 
@@ -750,7 +767,7 @@ function createWindow() {
     const http = require('http');
     const req = http.get(devUrl, (res: any) => {
       if (res.statusCode === 200 && mainWindow) {
-        mainWindow.loadURL(devUrl);
+        mainWindow.loadURL(devUrl).catch(() => mainWindow?.loadFile(path.join(__dirname, '../dist/index.html')));
       } else if (mainWindow) {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
       }
@@ -851,7 +868,9 @@ ipcMain.handle('settings:set', (_, settings) => {
 });
 
 ipcMain.handle('settings:get-webview-preload', () => {
-  return path.join(__dirname, 'preload-webview.js');
+  // webview 的 preload 属性要求 file:/asar: 协议 URL；裸 Windows 路径会相对于宿主页面解析，
+  // dev（http 宿主）下被直接拒绝导致整套自动化桥静默失效，prod 仅靠盘符启发式侥幸工作
+  return pathToFileURL(path.join(__dirname, 'preload-webview.js')).toString();
 });
 
 ipcMain.handle('diagnostics:get-error-log-path', () => {
@@ -1068,7 +1087,9 @@ ipcMain.handle('cloud-bank:upload', async (_event, payload) => {
       entries
     }, null, 2);
 
-    const manifestContent = await fetchRepoContent(repo, repo.manifestPath, token).catch(() => null);
+    // 仅在 manifest 不存在（404，fetchRepoContent 返回 null）时按空清单处理；
+    // 网络抖动/5xx/超时等错误必须向上中止上传，否则空清单会覆写共享仓库，清空全部用户的题库索引
+    const manifestContent = await fetchRepoContent(repo, repo.manifestPath, token);
     const manifest = normalizeCloudBankManifest(manifestContent?.content
       ? JSON.parse(Buffer.from(String(manifestContent.content).replace(/\s+/g, ''), 'base64').toString('utf8'))
       : { version: 1, banks: [] });
@@ -1189,6 +1210,99 @@ ipcMain.handle('automation:execute-plan', async (_, payload) => {
   return { success: true, payload };
 });
 
+// IPC Handler: AI Chat Completions（主进程代理）
+// 渲染进程打包后以 file:// 加载（origin 为 null），多数 OpenAI 兼容接口不返回
+// Access-Control-Allow-Origin，直接 fetch 会被 CORS 拦截；主进程 http 请求无 CORS 限制。
+ipcMain.handle('ai:chat', async (event, payload: {
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  body?: Record<string, any>;
+  stream?: boolean;
+  requestId?: string;
+  timeoutMs?: number;
+}) => {
+  const baseUrl = String(payload?.baseUrl || '').trim().replace(/\/$/, '');
+  if (!/^https?:\/\//i.test(baseUrl)) return { success: false, error: 'AI Base URL 非法。' };
+  const url = `${baseUrl}/chat/completions`;
+  const body = JSON.stringify(payload?.body || {});
+  const stream = Boolean(payload?.stream);
+  const requestId = String(payload?.requestId || '');
+  const timeoutMs = Math.max(5000, Math.min(Number(payload?.timeoutMs) || 60000, 120000));
+  const sender = event.sender;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: any) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    try {
+      const parsed = new URL(url);
+      const client = parsed.protocol === 'https:' ? https : http;
+      const request = client.request(parsed, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': String(Buffer.byteLength(body)),
+          'User-Agent': `StudyPilot/${app.getVersion()} (Windows Electron)`,
+          ...(payload?.headers || {})
+        }
+      }, (res) => {
+        const statusCode = res.statusCode || 0;
+        const chunks: Buffer[] = [];
+        if (!stream) {
+          res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            if (statusCode < 200 || statusCode >= 300) {
+              finish({ success: false, statusCode, error: `接口返回 ${statusCode}：${text.slice(0, 800)}` });
+              return;
+            }
+            finish({ success: true, statusCode, text });
+          });
+        } else {
+          if (statusCode < 200 || statusCode >= 300) {
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+              const text = Buffer.concat(chunks).toString('utf8');
+              finish({ success: false, statusCode, error: `接口返回 ${statusCode}：${text.slice(0, 800)}` });
+            });
+            return;
+          }
+          const contentType = String(res.headers['content-type'] || '');
+          // 非 SSE 响应（部分服务商标致 JSON）整体返回，渲染层按 JSON 解析
+          if (!contentType.includes('text/event-stream')) {
+            res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+            res.on('end', () => {
+              finish({ success: true, statusCode, text: Buffer.concat(chunks).toString('utf8'), json: true });
+            });
+            return;
+          }
+          res.on('data', (chunk) => {
+            if (!sender.isDestroyed()) {
+              sender.send('ai:chat-chunk', {
+                requestId,
+                chunk: (Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)).toString('utf8')
+              });
+            }
+          });
+          res.on('end', () => finish({ success: true, statusCode, streamed: true }));
+        }
+        res.on('error', (error) => finish({ success: false, error: `响应读取失败：${error.message}` }));
+      });
+      request.setTimeout(timeoutMs, () => {
+        request.destroy(new Error('AI 接口请求超时。'));
+      });
+      request.on('error', (error) => finish({ success: false, error: error.message || 'AI 接口请求失败。' }));
+      request.write(body);
+      request.end();
+    } catch (error: any) {
+      finish({ success: false, error: error?.message || 'AI 请求发起失败。' });
+    }
+  });
+});
+
 // Helper to perform simple GET requests from native process.
 function fetchText(url: string, redirectCount = 0, extraHeaders: Record<string, string> = {}): Promise<{ statusCode: number; statusMessage: string; headers: http.IncomingHttpHeaders; text: string; finalUrl: string }> {
   return new Promise((resolve, reject) => {
@@ -1202,8 +1316,12 @@ function fetchText(url: string, redirectCount = 0, extraHeaders: Record<string, 
           reject(new Error('接口重定向次数过多。'));
           return;
         }
-        const nextUrl = new URL(location, url).toString();
-        fetchText(nextUrl, redirectCount + 1, extraHeaders).then(resolve).catch(reject);
+        try {
+          const nextUrl = new URL(location, url).toString();
+          fetchText(nextUrl, redirectCount + 1, extraHeaders).then(resolve).catch(reject);
+        } catch {
+          reject(new Error(`Invalid redirect location: ${location}`));
+        }
         return;
       }
 
@@ -1239,27 +1357,6 @@ async function fetchJson(url: string): Promise<any> {
   }
   return safeParseJson(response.text, url);
 }
-
-// IPC Handler: Fetch Font Decryption Table
-ipcMain.handle('browser:fetch-font-table', async () => {
-  const ttflist = [
-    'https://cdn.ocsjs.com/resources/font/table.json',
-    'https://www.forestpolice.org/ttf/2.0/table.json',
-    'https://static.muketool.com/scripts/cx/v2/fonts/cxsecret.json'
-  ];
-  
-  for (const url of ttflist) {
-    try {
-      const data = await fetchJson(url);
-      if (data && typeof data === 'object') {
-        return { success: true, table: data };
-      }
-    } catch (e: any) {
-      console.error(`[StudyPilot Main] Failed to fetch font table from ${url}:`, e.message);
-    }
-  }
-  return { success: false, error: 'All fallback font tables failed to resolve' };
-});
 
 app.whenReady().then(() => {
   pruneOldErrorLogs();
@@ -1507,7 +1604,7 @@ app.whenReady().then(() => {
             writeErrorLog({
               source: 'webview:hidden-incomplete-exam-list-window',
               level: 'info',
-              message: `Keeping intermediate Chaoxing exam-list in hidden child window: ${targetUrl}`,
+              message: `Closing intermediate Chaoxing exam-list child window (intermediate, not final exam URL): ${targetUrl}`,
               url: targetUrl
             });
             try {
@@ -1523,6 +1620,13 @@ app.whenReady().then(() => {
                 url: validatedURL || targetUrl
               });
             });
+            setTimeout(() => {
+              try {
+                if (!childWindow.isDestroyed()) childWindow.close();
+              } catch (error) {
+                writeUnknownError('webview:hidden-exam-list-close', error, undefined, 'warn');
+              }
+            }, 30000);
             return;
           }
           let title = '';

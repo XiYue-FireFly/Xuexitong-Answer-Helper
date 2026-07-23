@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>方案 B - 浅色顶部标签</title>
+  <style>
+    :root {
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --soft: #eef4fb;
+      --border: #d9e3ef;
+      --text: #142033;
+      --muted: #66758a;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #d97706;
+      --rose: #e11d48;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; overflow: hidden; color: var(--text); background: var(--bg); }
+    .app { height: 100vh; display: grid; grid-template-rows: 62px 46px 1fr 38px; }
+    header {
+      display: grid; grid-template-columns: auto minmax(260px, 1fr) auto; align-items: center; gap: 18px;
+      padding: 0 22px; background: rgba(255,255,255,0.92); border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .mark { width: 34px; height: 34px; border-radius: 8px; background: #172033; color: #fff; display: grid; place-items: center; font-weight: 900; }
+    .brand strong { display: block; font-size: 15px; }
+    .brand span { color: var(--muted); font-size: 12px; }
+    .address {
+      height: 38px; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; gap: 10px;
+      padding: 0 12px; background: #f8fafc; color: var(--muted); font-size: 13px;
+    }
+    .actions { display: flex; gap: 8px; }
+    button {
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text);
+      min-height: 36px; padding: 0 13px; font-weight: 800;
+    }
+    .primary { border-color: var(--blue); color: #fff; background: var(--blue); }
+    .tabs {
+      display: flex; align-items: end; gap: 6px; padding: 0 22px; background: #fff; border-bottom: 1px solid var(--border); overflow-x: auto;
+    }
+    .tab {
+      min-width: 106px; height: 44px; display: flex; align-items: center; justify-content: center;
+      border-bottom: 3px solid transparent; color: var(--muted); font-size: 13px; font-weight: 800;
+    }
+    .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .main { min-height: 0; overflow: auto; padding: 18px 22px; }
+    .top-grid { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 16px; margin-bottom: 16px; }
+    .panel { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 14px 34px rgba(30, 45, 74, 0.06); }
+    .panel-head { height: 48px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+    .panel-title { font-weight: 900; font-size: 14px; }
+    .panel-body { padding: 14px; }
+    .notice {
+      border: 1px solid #b9d4ff; background: #edf5ff; border-radius: 8px; padding: 12px 14px; display: flex; justify-content: space-between; gap: 14px;
+    }
+    .notice p { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+    .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+    .quick button { height: 54px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+    .quick small { color: var(--muted); font-weight: 600; margin-top: 4px; }
+    .browser { height: 300px; display: grid; grid-template-rows: 38px 1fr; background: #f8fafc; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+    .browser-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--border); background: #fff; }
+    .browser-dot { width: 9px; height: 9px; border-radius: 99px; background: #cbd5e1; }
+    .course-list { padding: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .course { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 12px; min-height: 96px; }
+    .course strong { display: block; margin-bottom: 8px; font-size: 14px; }
+    .course span { color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .metric { background: var(--soft); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .metric label { color: var(--muted); font-size: 12px; }
+    .metric strong { display: block; margin-top: 8px; font-size: 24px; }
+    .layout { display: grid; grid-template-columns: minmax(620px, 1fr) 360px; gap: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 11px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; }
+    .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 12px; font-weight: 800; }
+    .ok { color: var(--green); background: #e8f8f1; }
+    .warn { color: var(--amber); background: #fff7e6; }
+    .side-stack { display: grid; gap: 16px; align-content: start; }
+    .provider-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding: 10px 0; font-size: 13px; }
+    .provider-row span { color: var(--muted); }
+    footer { display: flex; justify-content: space-between; align-items: center; padding: 0 22px; border-top: 1px solid var(--border); background: #fff; color: var(--muted); font-size: 12px; }
+    @media (max-width: 1120px) {
+      .top-grid, .layout { grid-template-columns: 1fr; }
+      .quick, .status-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand"><div class="mark">学</div><div><strong>学习通答题助手</strong><span>像浏览器一样操作课程页面</span></div></div>
+      <div class="address">https://i.chaoxing.com/base?ws=1</div>
+      <div class="actions"><button>检查更新</button><button class="primary">启动自动化</button></div>
+    </header>
+    <nav class="tabs">
+      <div class="tab active">自动化</div><div class="tab">章节学习</div><div class="tab">本地题库</div><div class="tab">云端题库</div><div class="tab">Token</div><div class="tab">错误报告</div><div class="tab">设置</div>
+    </nav>
+    <main class="main">
+      <section class="top-grid">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">开始前检查</div><span class="badge ok">WebView 已启用</span></div>
+          <div class="panel-body">
+            <div class="notice">
+              <div><strong>登录状态已持久化</strong><p>关闭应用后仍保留扫码登录信息；如果网站主动失效，再重新扫码即可。</p></div>
+              <button>查看公告</button>
+            </div>
+            <div class="quick">
+              <button>获取页面题目<small>抓取题干、选项、文章上下文</small></button>
+              <button>开始解析<small>题库优先，未命中再调 API</small></button>
+              <button>开始填入<small>选择题、判断题、填空题</small></button>
+              <button>暂停任务<small>保留当前进度</small></button>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">运行概览</div><span class="badge warn">第 12 题</span></div>
+          <div class="panel-body status-grid">
+            <div class="metric"><label>题库命中</label><strong>31</strong></div>
+            <div class="metric"><label>AI 查询</label><strong>5</strong></div>
+            <div class="metric"><label>待处理</label><strong>4</strong></div>
+          </div>
+        </div>
+      </section>
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">内置浏览器预览</div><span class="badge">右键标签、跳转、新窗口拦截</span></div>
+          <div class="panel-body">
+            <div class="browser">
+              <div class="browser-bar"><span class="browser-dot"></span><span class="browser-dot"></span><span class="browser-dot"></span><span style="color:var(--muted);font-size:12px">课程空间 / 作业列表 / 考试入口</span></div>
+              <div class="course-list">
+                <article class="course"><strong>马克思主义基本原理</strong><span>章节学习 86% · 作业 1 个 · 考试 1 个</span></article>
+                <article class="course"><strong>大学英语阅读</strong><span>阅读理解、完形填空、七选五自动抓题适配</span></article>
+                <article class="course"><strong>形势与政策</strong><span>本地题库 128 题，可导入导出</span></article>
+                <article class="course"><strong>课程考试</strong><span>一题一题解析，自动点击下一题</span></article>
+              </div>
+            </div>
+          </div>
+        </div>
+        <aside class="side-stack">
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">API 搜题</div><span class="badge ok">默认并发 5</span></div>
+            <div class="panel-body">
+              <div class="provider-row"><span>服务商</span><strong>阿里云百炼</strong></div>
+              <div class="provider-row"><span>模型</span><strong>qwen-plus</strong></div>
+              <div class="provider-row"><span>余额提示</span><strong style="color:var(--green)">开启</strong></div>
+              <div class="provider-row"><span>流式测试</span><strong>可输入自定义内容</strong></div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title">Token 明细</div><span class="badge">可排序</span></div>
+            <div class="panel-body">
+              <table>
+                <thead><tr><th>模型</th><th>输入</th><th>输出</th></tr></thead>
+                <tbody><tr><td>qwen-plus</td><td>8420</td><td>4388</td></tr><tr><td>deepseek-chat</td><td>2310</td><td>1022</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </aside>
+      </section>
+      <section class="panel" style="margin-top:16px">
+        <div class="panel-head"><div class="panel-title">题目解析表</div><span class="badge">精确匹配 + 模糊匹配</span></div>
+        <div class="panel-body">
+          <table>
+            <thead><tr><th>序号</th><th>题型</th><th>题干</th><th>来源</th><th>答案</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td>12</td><td>单选</td><td>共产主义社会的根本特征是（）。</td><td>本地题库</td><td>C</td><td><span class="badge ok">已填入</span></td></tr>
+              <tr><td>13</td><td>判断</td><td>共产主义理想是无法实现的社会理想。</td><td>本地题库</td><td>错</td><td><span class="badge ok">已填入</span></td></tr>
+              <tr><td>14</td><td>填空</td><td>第 1 空：The passage mainly discusses ...</td><td>AI</td><td>social development</td><td><span class="badge warn">等待验证</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <footer><span>状态：空闲，可开始抓题</span><span>v1.2.0 · 本地缓存、题库、密钥均只保存在本机</span></footer>
+  </div>
+</body>
+</html>
