@@ -14,10 +14,13 @@ import { syncAnswersBeforeSave } from './preload-webview/submit-sync';
 import { clickNextExamQuestion } from './preload-webview/exam-flow';
 import { installBrowserNavigationPatch } from './preload-webview/navigation';
 import { applyAnswerV2 } from './preload-webview/answer-applier';
+import { loadFontMap } from './preload-webview/font-decode';
 
 installBridgeErrorHandlers();
 installChapterFrameMessageHandler();
 installBrowserNavigationPatch(syncAnswersBeforeSave);
+// 超星字体反爬映射表预加载：抓题前异步拉取，extractQuestions 调用时同步命中
+void loadFontMap();
 
 async function runStep(step: AutomationStep) {
   if (step.action === 'wait') {

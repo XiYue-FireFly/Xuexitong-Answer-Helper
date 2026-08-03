@@ -1,6 +1,7 @@
 import type { QuestionOptionTarget, QuestionPayload, QuestionType } from './types';
 import { parseJudgementValueStable } from './answer-matcher';
 import { cleanText, cssEscape, hashText, isVisible, normalizeText, optionLabel, optionLetter, optionTextCandidate, removeNoise, selectorFor, uniqueBy, visibleText } from './dom-utils';
+import { decodeFontTextSync } from './font-decode';
 
 type ExtractedQuestion = QuestionPayload & {
   id: string;
@@ -571,7 +572,7 @@ export function extractQuestions() {
   const currentExamRoot = document.querySelector('.singleQuestionDiv') as HTMLElement | null;
   if (currentExamRoot && isVisible(currentExamRoot)) {
     const currentQuestion = questionFromRoot(currentExamRoot, 1);
-    if (currentQuestion) return [currentQuestion];
+    if (currentQuestion) return applyFontDecode([currentQuestion]);
   }
 
   const roots: HTMLElement[] = [];
@@ -597,19 +598,40 @@ export function extractQuestions() {
   removeNoise(bodyClone);
   const bodyText = bodyClone.textContent || '';
 
-  if (domQuestions.length > 0) return uniqueBy(attachReadingContext(domQuestions, bodyText), (question) => question.hash);
+  if (domQuestions.length > 0) return applyFontDecode(uniqueBy(attachReadingContext(domQuestions, bodyText), (question) => question.hash));
 
   const readingQuestions = splitReadingQuestions(bodyClone.textContent || '');
-  if (readingQuestions.length > 0) return uniqueBy(readingQuestions, (question) => question.hash);
+  if (readingQuestions.length > 0) return applyFontDecode(uniqueBy(readingQuestions, (question) => question.hash));
 
   const clozeQuestions = splitClozeOptionQuestions(bodyClone.textContent || '');
-  if (clozeQuestions.length > 0) return uniqueBy(clozeQuestions, (question) => question.hash);
+  if (clozeQuestions.length > 0) return applyFontDecode(uniqueBy(clozeQuestions, (question) => question.hash));
 
   const textQuestions = splitContinuousText(bodyClone.textContent || '')
     .map(questionFromSegment)
     .filter(Boolean) as any[];
-  if (textQuestions.length > 0) return uniqueBy(textQuestions, (question) => question.hash);
+  if (textQuestions.length > 0) return applyFontDecode(uniqueBy(textQuestions, (question) => question.hash));
 
   const fallback = questionFromRoot(document.body, 1);
-  return fallback ? [fallback] : [];
+  return fallback ? applyFontDecode([fallback]) : [];
+}
+
+// 字体反爬：把选项/题干里的 PUA 私用码位还原成真实字符。
+// 映射表在 preload 启动时异步加载；未就绪时原样返回（已加载后命中）。
+function applyFontDecode(questions: ExtractedQuestion[]): ExtractedQuestion[] {
+  for (const question of questions) {
+    if (question.question) question.question = decodeFontTextSync(question.question);
+    if (Array.isArray(question.options)) {
+      question.options = question.options.map((option) => decodeFontTextSync(option));
+    }
+    if (Array.isArray(question.optionTargets)) {
+      question.optionTargets = question.optionTargets.map((target) => ({
+        ...target,
+        text: decodeFontTextSync(target.text)
+      }));
+    }
+    if (question.context) question.context = decodeFontTextSync(question.context);
+    // 文本变化后重新计算 hash，保证题库 key 一致
+    question.hash = hashText(normalizeText(question.question) + '|' + (question.options || []).map(normalizeText).join('|'));
+  }
+  return questions;
 }

@@ -3,6 +3,7 @@ import type { ChapterLearningCommand, ChapterLearningOptions, TaskPoint } from '
 import { reportWebviewError } from './bridge';
 import { cleanText, isVisible, uniqueBy } from './dom-utils';
 import { callPageHook } from './page-bridge';
+import { runChaoxingMainTask, type CxChapterRuntimeParams } from './chaoxing-chapter-api';
 
 type ExtractQuestions = () => unknown[];
 
@@ -1470,7 +1471,10 @@ function startChapterLearningLoop(extractQuestions: ExtractQuestions) {
       }
       const idleTimeout = (pageAny.__studyPilotChapterIdleTicks || 0) >= 4;
 
-      if (currentMediaEnded || allTasksCompleted || idleTimeout) {
+      // API 直连模式下，章节遍历与视频进度上报由 runChaoxingMainTask 负责，
+      // DOM loop 不再自行翻章，避免双重跳转冲突；仅保留弹窗测验/人脸/文档等页面内交互防护
+      const apiModeActive = Boolean(pageAny.__studyPilotChapterApiMode);
+      if (!apiModeActive && (currentMediaEnded || allTasksCompleted || idleTimeout)) {
         const shouldProceed = await checkIfShouldProceedToNext(extractQuestions);
         if (shouldProceed && stillRunning()) {
           // 闯关模式解锁
@@ -1563,6 +1567,99 @@ async function checkIfShouldProceedToNext(extractQuestions: ExtractQuestions): P
   return true;
 }
 
+/** 从页面提取超星章节运行参数（courseid/clazzid/cpi/userid）；拿全才走 API 直连，否则回退 DOM。 */
+function resolveChaoxingRuntimeParams(): CxChapterRuntimeParams | null {
+  const pageAny = window as any;
+  const getUrlParam = (name: string): string | null => {
+    const reg = new RegExp('(^|&)' + name + '=([^&]*)(&|$)');
+    const r = window.location.search.substr(1).match(reg);
+    return r ? unescape(r[2]) : null;
+  };
+  const courseid = pageAny.courseid || pageAny.courseId ||
+    document.querySelector('#curCourseId')?.getAttribute('value') ||
+    getUrlParam('courseid') || getUrlParam('courseId');
+  const clazzid = pageAny.clazzid || pageAny.clazzId ||
+    document.querySelector('#curClazzId')?.getAttribute('value') ||
+    getUrlParam('clazzid') || getUrlParam('clazzId');
+  let cpi = pageAny.cpi ||
+    document.querySelector('#curCpi')?.getAttribute('value') ||
+    getUrlParam('cpi');
+  if (!cpi) {
+    // innerHTML 里可能有多个 cpi=（脚本字符串等），收紧到 URL query 形式避免误匹配
+    const m = /[?&]cpi=([^&"'\s]+)/.exec(document.documentElement.innerHTML || '');
+    if (m) cpi = m[1];
+  }
+  const userid = pageAny.uid || (pageAny.getCookie && pageAny.getCookie('UID')) || (pageAny.getCookie && pageAny.getCookie('_uid')) || '';
+  if (!courseid || !clazzid || !cpi) return null;
+  return { courseid: String(courseid), clazzid: String(clazzid), cpi: String(cpi), userid: String(userid || '') };
+}
+
+function isChaoxingPage(): boolean {
+  return /chaoxing\.com|xuexi365\.com|mooc1|mooc2/.test(location.hostname) || Boolean((window as any).ServerHost);
+}
+
+/**
+ * API 优先的章节学习编排：超星页面且参数齐全时走 runChaoxingMainTask（1:1 时长上报 + 任务点遍历），
+ * 同时仍启动 DOM 轮询 loop 作为兜底（处理视频弹窗测验、人脸识别、文档阅读等页面内交互）。
+ * 章节测试答题通过 onChapterTest 回调通知宿主，宿主处理完返回 true 让翻章继续。
+ */
+async function runChapterLearningApiFirst(extractQuestions: ExtractQuestions) {
+  const pageAny = window as any;
+  const options = chapterLearningOptions();
+  const params = isChaoxingPage() ? resolveChaoxingRuntimeParams() : null;
+
+  if (params) {
+    // API 直连模式：runChaoxingMainTask 内部按章节遍历，自带 sleep/stop 检查
+    pageAny.__studyPilotChapterApiMode = true;
+    try {
+      await runChaoxingMainTask(
+        params,
+        {
+          reviewMode: options.restudy,
+          unlockMode: options.unlockMode,
+          autoVideo: options.autoPlay,
+          autoRead: options.autoReadDocument,
+          autoAnswer: options.autoAnswerQuestions,
+          videoSpeed: options.playbackRate > 0 ? options.playbackRate : 1,
+          interval: 3000
+        },
+        {
+          sleep: (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms)),
+          isRunning: () => Boolean(pageAny.__studyPilotChapterRunning),
+          onLog: (msg, level = 'info') => sendChapterLearningState(msg),
+          onStatus: (msg) => sendChapterLearningState(msg),
+          onVideoProgress: (current, duration) => {
+            (pageAny.__studyPilotChapterVideoProgress = { current, duration });
+          },
+          onChapterTest: async () => {
+            // 通知宿主抓题+AI+填入；用 URL 去重避免每轮重复触发。
+            // 返回 false：API 遍历继续处理当前章节剩余任务，宿主答题完成后页面变化，
+            // 由用户重新触发或 DOM loop 兜底评估，不在此阻塞。
+            const currentUrl = window.location.href;
+            if (pageAny.__studyPilotAutoAnswerNotifiedUrl === currentUrl) return false;
+            pageAny.__studyPilotAutoAnswerNotifiedUrl = currentUrl;
+            sendChapterLearningState('检测到章节测试，正在通知宿主执行自动答题。');
+            ipcRenderer.sendToHost('studypilot:chapter-auto-answer', { url: currentUrl });
+            return false;
+          }
+        }
+      );
+    } catch (error: any) {
+      reportWebviewError('webview:chapter-api-task', {
+        level: 'warn',
+        message: `API 章节任务异常: ${error?.message || 'unknown'}`
+      });
+    } finally {
+      // API 任务结束（完成/异常/停止）后必须释放 apiMode，否则 DOM loop 的翻章逻辑
+      // 会被永久抑制，而 API 任务已不再运行，导致无任何翻章逻辑工作
+      pageAny.__studyPilotChapterApiMode = false;
+    }
+  } else {
+    // 非 API 模式：纯 DOM 轮询（保留原行为，适配其他平台或参数缺失场景）
+    pageAny.__studyPilotChapterApiMode = false;
+  }
+}
+
 export async function handleChapterLearningCommand(command: ChapterLearningCommand, extractQuestions: ExtractQuestions) {
   setChapterLearningOptions(command.options);
   const pageAny = window as any;
@@ -1573,9 +1670,13 @@ export async function handleChapterLearningCommand(command: ChapterLearningComma
   }
   if (command.action === 'start') {
     pageAny.__studyPilotChapterRunning = true;
+    pageAny.__studyPilotAutoAnswerNotifiedUrl = null;
+    // DOM 轮询 loop 始终启动：负责视频弹窗测验、人脸识别、文档阅读等页面内交互防护
     startChapterLearningLoop(extractQuestions);
     attachPrimaryChapterVideoWatchers();
     await playPrimaryChapterMedia();
+    // API 直连章节遍历（超星且参数齐全时生效；非超星/参数缺失时内部回退，不干扰 DOM loop）
+    void runChapterLearningApiFirst(extractQuestions);
     return;
   }
   if (command.action === 'play') {
@@ -1583,6 +1684,7 @@ export async function handleChapterLearningCommand(command: ChapterLearningComma
     startChapterLearningLoop(extractQuestions);
     attachPrimaryChapterVideoWatchers();
     await playPrimaryChapterMedia();
+    void runChapterLearningApiFirst(extractQuestions);
     return;
   }
   if (command.action === 'pause') {

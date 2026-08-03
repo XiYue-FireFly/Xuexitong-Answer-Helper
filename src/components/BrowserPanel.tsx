@@ -629,6 +629,7 @@ export function BrowserPanel() {
     if (event.channel === 'studypilot:chapter-auto-answer') {
       appStore.addLog('info', '章节学习检测到测试题，正在触发自动答题流程。');
       appStore.setStatus('extracting_question', '正在抓取章节测试题目。');
+      // 1. 抓题（复用 extract-question-request，等 webview 返回 question-result）
       window.dispatchEvent(new CustomEvent('studypilot:extract-question-request', {
         detail: {
           onComplete: (extractResult: any) => {
@@ -636,15 +637,25 @@ export function BrowserPanel() {
               appStore.addLog('warn', '章节测试未抓到题目，继续学习。');
               return;
             }
-            appStore.addLog('success', `章节测试抓到 ${extractResult.questions.length} 道题，开始解析并填入。`);
-            window.dispatchEvent(new CustomEvent('studypilot:automation-action', {
-              detail: { action: 'extract-question' }
+            appStore.addLog('success', `章节测试抓到 ${extractResult.questions.length} 道题，开始 AI 解析并填入。`);
+            // 2. 批量 AI 解析 + 填入（AIPanel 监听 answer-all-and-apply）
+            window.dispatchEvent(new CustomEvent('studypilot:answer-all-and-apply', {
+              detail: {
+                onComplete: (applyResult: any) => {
+                  if (applyResult?.success) {
+                    appStore.addLog('success', '章节测试答案已填入，继续章节学习。');
+                  } else {
+                    appStore.addLog('warn', `章节测试答题未完成：${applyResult?.error || '未知'}，仍继续学习。`);
+                  }
+                  // 3. 清除通知标志并轻触 set-options，让 chapter-learning 的 API 遍历/DOM 轮询继续翻章
+                  window.setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
+                      detail: { action: 'set-options', options: {} }
+                    }));
+                  }, 1500);
+                }
+              }
             }));
-            window.setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
-                detail: { action: 'set-options', options: {} }
-              }));
-            }, 1500);
           }
         }
       }));
