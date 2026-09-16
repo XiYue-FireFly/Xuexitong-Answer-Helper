@@ -41,13 +41,4 @@ jobs:
           makeLatest: true
           artifactErrorsFailBuild: true
           artifacts: release/Xuexitong-Answer-Helper-*-win-x64-setup.exe
-          body: |
-            ## 更新内容
-
-            - 重构 WebView 预加载脚本，将浏览器导航、题目抓取、答案填入、保存同步、章节学习和考试流程拆分为独立模块。
-            - 保留原有自动化行为和页面兼容逻辑，降低后续修复抓题、填入、章节和考试问题时的维护风险。
-            - 精简 electron/preload-webview.ts 为入口注册文件，方便定位 IPC 事件和模块边界。
-
-            ## Download
-
-            Windows 用户下载下方 `Xuexitong-Answer-Helper-${{ github.ref_name }}-win-x64-setup.exe` 安装即可。
+          bodyFile: docs/releases/${{ github.ref_name }}.md
