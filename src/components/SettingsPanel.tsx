@@ -1,10 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { ChevronDown, Coffee, Copy, Download, ExternalLink, Eye, EyeOff, Heart, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Copy, Download, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
 import { aiChatStream } from '../utils/aiRequest';
-
-const REWARD_ALIPAY_IMAGE = new URL('../assets/reward-alipay.jpg', import.meta.url).href;
-const REWARD_WECHAT_IMAGE = new URL('../assets/reward-wechat.jpg', import.meta.url).href;
 
 type TestChatMessage = {
   role: 'user' | 'assistant';
@@ -36,6 +33,11 @@ type SelectOption = {
   label: string;
   value: string;
   note?: string;
+};
+
+type DiscoveredModel = {
+  id: string;
+  owner?: string;
 };
 
 type ApiKeyHelpLink = {
@@ -200,12 +202,55 @@ function valueInOptions(value: string, options: { value: string }[]) {
   return options.some((item) => item.value === value);
 }
 
+function modelDiscoveryEndpoint(rawBaseUrl: string) {
+  const parsed = new URL(rawBaseUrl.trim());
+  parsed.hash = '';
+  parsed.search = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '').replace(/\/(?:chat\/completions|models)$/i, '') || '/';
+  parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/models`;
+  return parsed.toString();
+}
+
+function parseDiscoveredModels(payload: any): DiscoveredModel[] {
+  const candidates = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : Array.isArray(payload?.data?.models)
+          ? payload.data.models
+          : [];
+  const seen = new Set<string>();
+  return candidates
+    .map((item: any) => ({
+      id: typeof item === 'string' ? item : String(item?.id || item?.name || item?.model || '').trim(),
+      owner: typeof item === 'object' ? String(item?.owned_by || item?.provider || item?.owner || '').trim() : ''
+    }))
+    .filter((item: DiscoveredModel) => {
+      if (!item.id || item.id.length > 240 || seen.has(item.id.toLowerCase())) return false;
+      seen.add(item.id.toLowerCase());
+      return true;
+    })
+    .sort((left: DiscoveredModel, right: DiscoveredModel) => left.id.localeCompare(right.id, undefined, { sensitivity: 'base' }))
+    .slice(0, 500);
+}
+
+function mergeModelOptions(...groups: SelectOption[][]) {
+  const seen = new Set<string>();
+  return groups.flat().filter((item) => {
+    const key = item.value.toLowerCase();
+    if (!item.value || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function SettingsPanel() {
   const { settings, isElectron } = useAppStore();
   const [selectedProviderId, setSelectedProviderId] = useState(settings.activeProviderId);
   const [showKey, setShowKey] = useState(false);
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false);
-  const [showRewardCodes, setShowRewardCodes] = useState(false);
   const [copiedKeyHelpUrl, setCopiedKeyHelpUrl] = useState('');
   const [isClearingSession, setIsClearingSession] = useState(false);
   const [isTestingAI, setIsTestingAI] = useState(false);
@@ -219,19 +264,34 @@ export function SettingsPanel() {
   const [formData, setFormData] = useState<AIProviderConfig>(selectedProvider);
   const [customEndpointInput, setCustomEndpointInput] = useState(false);
   const [customModelInput, setCustomModelInput] = useState(false);
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([]);
+  const [isDiscoveringModels, setIsDiscoveringModels] = useState(false);
+  const [modelDiscoveryMessage, setModelDiscoveryMessage] = useState('');
+  const [modelDiscoveryFailed, setModelDiscoveryFailed] = useState(false);
+  const modelDiscoveryRequest = useRef(0);
   const isCustomProvider = selectedProviderId === 'custom';
   const selectedPreset = isCustomProvider ? undefined : AI_PROVIDER_PRESETS[selectedProviderId];
   const endpointSelectValue = selectedPreset && !customEndpointInput && valueInOptions(formData.baseUrl, selectedPreset.endpoints) ? formData.baseUrl : '__custom__';
-  const modelSelectValue = selectedPreset && !customModelInput && valueInOptions(formData.model, selectedPreset.models) ? formData.model : '__custom__';
   const providerOptions = settings.providers.map((provider) => ({ label: provider.name, value: provider.id }));
   const endpointOptions = [
     ...(selectedPreset?.endpoints || [{ label: '自定义 Base URL', value: formData.baseUrl }]),
     ...(selectedPreset?.allowCustomEndpoint ? [{ label: '自定义 Base URL', value: '__custom__' }] : [])
   ];
-  const modelOptions = [
-    ...(selectedPreset?.models || [{ label: '自定义模型', value: formData.model }]),
-    ...(selectedPreset?.allowCustomModel ? [{ label: '自定义模型', value: '__custom__' }] : [])
-  ];
+  const discoveredModelOptions = discoveredModels.map((model) => ({
+    label: model.owner ? `${model.id} (${model.owner})` : model.id,
+    value: model.id,
+    note: '已从当前服务拉取'
+  }));
+  const knownModelOptions = mergeModelOptions(discoveredModelOptions, selectedPreset?.models || []);
+  const currentModelOption = formData.model.trim() && !valueInOptions(formData.model, knownModelOptions)
+    ? [{ label: `${formData.model}（当前）`, value: formData.model }]
+    : [];
+  const modelOptions = mergeModelOptions(
+    knownModelOptions,
+    currentModelOption,
+    (isCustomProvider || selectedPreset?.allowCustomModel) ? [{ label: '自定义模型', value: '__custom__' }] : []
+  );
+  const modelSelectValue = !customModelInput && valueInOptions(formData.model, modelOptions) ? formData.model : '__custom__';
   const selectedKeyHelp: ApiKeyHelpLink = API_KEY_HELP_LINKS.find((item) => item.providerId === selectedProviderId) || {
     providerId: selectedProviderId,
     name: formData.name || '当前服务商',
@@ -254,6 +314,13 @@ export function SettingsPanel() {
     setCustomModelInput(Boolean(preset && !valueInOptions(provider.model, preset.models)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProviderId]);
+
+  useEffect(() => {
+    modelDiscoveryRequest.current += 1;
+    setDiscoveredModels([]);
+    setModelDiscoveryMessage('');
+    setModelDiscoveryFailed(false);
+  }, [selectedProviderId, formData.baseUrl, formData.apiKey, formData.authHeader]);
 
   useEffect(() => {
     if (!isTestingAI) {
@@ -321,6 +388,59 @@ export function SettingsPanel() {
       (window as any).electronAPI.setSettings(latestSettings);
     }
     appStore.addLog('success', `AI 服务已保存：${normalizedProvider.name}`);
+  };
+
+  const discoverModels = async () => {
+    if (isDiscoveringModels) return;
+    const baseUrl = formData.baseUrl.trim();
+    const apiKey = formData.apiKey.trim();
+    if (!baseUrl) {
+      setModelDiscoveryFailed(true);
+      setModelDiscoveryMessage('请先填写 Base URL。');
+      return;
+    }
+    if (formData.authHeader !== 'none' && !apiKey) {
+      setModelDiscoveryFailed(true);
+      setModelDiscoveryMessage('该服务需要 API Key，填写后才能拉取可用模型。');
+      return;
+    }
+
+    const requestId = modelDiscoveryRequest.current + 1;
+    modelDiscoveryRequest.current = requestId;
+    setIsDiscoveringModels(true);
+    setModelDiscoveryMessage('正在从服务端拉取模型列表...');
+    setModelDiscoveryFailed(false);
+    try {
+      const api = (window as any).electronAPI;
+      let result: { success?: boolean; models?: DiscoveredModel[]; error?: string };
+      if (api?.discoverAIModels) {
+        result = await api.discoverAIModels({ baseUrl, apiKey, authHeader: formData.authHeader || 'authorization' });
+      } else {
+        const response = await fetch(modelDiscoveryEndpoint(baseUrl), {
+          headers: buildAIHeaders({ ...formData, baseUrl, apiKey })
+        });
+        if (!response.ok) throw new Error(`模型列表接口返回 ${response.status}。`);
+        result = { success: true, models: parseDiscoveredModels(await response.json()) };
+      }
+      if (requestId !== modelDiscoveryRequest.current) return;
+      const models = parseDiscoveredModels(result.models || []);
+      if (!result.success || models.length === 0) {
+        throw new Error(result.error || '模型列表接口未返回可用模型。你仍可手动填写模型名称。');
+      }
+      setDiscoveredModels(models);
+      setCustomModelInput(false);
+      setModelDiscoveryMessage(`已拉取 ${models.length} 个模型，请从列表中选择。`);
+      appStore.addLog('success', `已从 ${formData.name || '当前服务'} 拉取 ${models.length} 个模型。`);
+    } catch (error: any) {
+      if (requestId !== modelDiscoveryRequest.current) return;
+      const message = error?.message || '拉取模型列表失败。';
+      setDiscoveredModels([]);
+      setModelDiscoveryFailed(true);
+      setModelDiscoveryMessage(`${message} 你仍可手动填写模型名称。`);
+      appStore.addLog('warn', `拉取模型列表失败：${message}`);
+    } finally {
+      if (requestId === modelDiscoveryRequest.current) setIsDiscoveringModels(false);
+    }
   };
 
   const testAIChat = async () => {
@@ -592,83 +712,6 @@ export function SettingsPanel() {
         )}
       </div>
 
-      <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <button
-          type="button"
-          onClick={() => setShowRewardCodes((prev) => !prev)}
-          aria-expanded={showRewardCodes}
-          style={{
-            width: '100%',
-            padding: 0,
-            background: 'transparent',
-            color: 'inherit',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 14,
-            textAlign: 'left'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <div style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              display: 'grid',
-              placeItems: 'center',
-              color: 'var(--warning-color)',
-              background: 'rgba(245,158,11,0.12)',
-              border: '1px solid rgba(245,158,11,0.24)',
-              flex: '0 0 auto'
-            }}>
-              <Coffee size={18} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <h5 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: 4 }}>赞赏支持</h5>
-              <div style={{ color: 'var(--text-secondary)', fontSize: '0.74rem', lineHeight: 1.5 }}>
-                如果这个项目对你有帮助，想请作者喝水或者喝杯咖啡，都是可以的~
-              </div>
-            </div>
-          </div>
-          <ChevronDown
-            size={18}
-            style={{
-              color: 'var(--text-muted)',
-              transform: showRewardCodes ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 160ms ease',
-              flex: '0 0 auto'
-            }}
-          />
-        </button>
-
-        <div
-          className={`reward-codes-shell${showRewardCodes ? ' open' : ''}`}
-          aria-hidden={!showRewardCodes}
-        >
-          <div className="reward-codes-grid">
-            {[
-              { label: '支付宝', image: REWARD_ALIPAY_IMAGE, color: '#1677ff' },
-              { label: '微信支付', image: REWARD_WECHAT_IMAGE, color: '#07c160' }
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="reward-code-card"
-                style={{ '--reward-color': item.color } as React.CSSProperties}
-              >
-                <div className="reward-code-title">
-                  <Heart size={14} style={{ color: item.color }} />
-                  {item.label}
-                </div>
-                <img
-                  src={item.image}
-                  alt={`${item.label}赞赏付款码`}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <h5 style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>真实页面能力</h5>
 
@@ -823,8 +866,20 @@ export function SettingsPanel() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label className="field-label">模型</label>
-          {isCustomProvider ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <label className="field-label">模型</label>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={discoverModels}
+              disabled={isDiscoveringModels}
+              style={{ padding: '5px 8px', fontSize: '0.72rem', color: 'var(--primary-color)' }}
+              title="从当前 Base URL 的 /models 接口拉取可用模型"
+            >
+              {isDiscoveringModels ? <Loader2 size={13} style={{ animation: 'spin 0.9s linear infinite' }} /> : <RefreshCw size={13} />} {isDiscoveringModels ? '正在拉取' : '拉取模型'}
+            </button>
+          </div>
+          {isCustomProvider && discoveredModels.length === 0 ? (
             <input
               value={formData.model}
               onChange={(event) => setFormData((prev) => ({ ...prev, model: event.target.value }))}
@@ -855,6 +910,14 @@ export function SettingsPanel() {
               )}
             </>
           )}
+          {modelDiscoveryMessage && (
+            <div style={{ color: modelDiscoveryFailed ? 'var(--warning-color)' : 'var(--success-color)', fontSize: '0.7rem', lineHeight: 1.45 }}>
+              {modelDiscoveryMessage}
+            </div>
+          )}
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', lineHeight: 1.4 }}>
+            拉取会请求当前服务的 <code>/models</code>；不支持该接口时，保留手动填写和预设模型。
+          </div>
           {!isCustomProvider && selectedPreset?.models.find((item) => item.value === formData.model)?.note && (
             <div style={{ color: 'var(--warning-color)', fontSize: '0.7rem', lineHeight: 1.45 }}>
               {selectedPreset.models.find((item) => item.value === formData.model)?.note}

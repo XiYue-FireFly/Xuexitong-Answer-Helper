@@ -63,6 +63,11 @@ export default function App() {
     appStore.addLog('info', `窗口操作已触发：${action}`);
   };
 
+  const openSideTab = (tab: TabId) => {
+    setActiveTab(tab);
+    setSideCollapsed(false);
+  };
+
   const statusColor = status === 'error'
     ? '#ef4444'
     : status === 'done'
@@ -73,20 +78,20 @@ export default function App() {
 
   return (
     <div data-theme={settings.theme} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', color: 'var(--text-primary)', overflow: 'hidden' }}>
-      <header className="app-shell-bar" style={{ height: 40, borderBottom: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', userSelect: 'none' }}>
+      <header className="app-shell-bar app-window-titlebar" style={{ height: 40, borderBottom: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', userSelect: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Brain size={18} style={{ color: 'var(--primary-color)' }} />
           <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.9rem' }}>学习通答题辅助工具</span>
           <span className="badge badge-primary" style={{ fontSize: '0.62rem', padding: '1px 7px' }}>v2</span>
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={() => windowAction('minimize')} title="最小化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+        <div className="window-controls" style={{ display: 'flex', gap: 4 }}>
+          <button className="window-control" onClick={() => windowAction('minimize')} title="最小化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
             <Minimize2 size={12} />
           </button>
-          <button onClick={() => windowAction('maximize')} title="最大化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+          <button className="window-control" onClick={() => windowAction('maximize')} title="最大化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
             <Square size={10} />
           </button>
-          <button onClick={() => windowAction('close')} title="关闭" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+          <button className="window-control" onClick={() => windowAction('close')} title="关闭" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
             <X size={12} />
           </button>
         </div>
@@ -96,60 +101,16 @@ export default function App() {
         <section style={{ flex: 1, minWidth: 0, borderRight: '1px solid var(--border-glass)', background: 'var(--bg-panel)' }}>
           <BrowserPanel />
         </section>
-        <section style={{
-          width: sideCollapsed ? 48 : 'clamp(360px, 30vw, 560px)',
+        <aside className="app-right-drawer" style={{
+          width: sideCollapsed ? 56 : 'clamp(400px, 32vw, 600px)',
           flex: '0 0 auto',
-          minWidth: sideCollapsed ? 48 : 360,
+          minWidth: sideCollapsed ? 56 : 400,
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: 'row',
           background: 'var(--bg-panel)',
           transition: 'width 180ms ease, min-width 180ms ease'
         }}>
-          <div className="app-side-tabs" style={{ display: 'flex', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto', alignItems: 'stretch' }}>
-            <button
-              onClick={() => setSideCollapsed((value) => !value)}
-              title={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
-              style={{
-                flex: '0 0 48px',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--text-secondary)',
-                background: 'transparent',
-                borderRight: '1px solid var(--border-glass)',
-                borderRadius: 0
-              }}
-            >
-              {sideCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-            </button>
-            {!sideCollapsed && tabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  style={{
-                    flex: '0 0 auto',
-                    minWidth: 78,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 6,
-                    padding: '12px 0',
-                    color: active ? 'var(--primary-color)' : 'var(--text-secondary)',
-                    background: active ? 'rgba(99,102,241,0.04)' : 'transparent',
-                    borderBottom: active ? '2px solid var(--primary-color)' : '2px solid transparent',
-                    fontSize: '0.78rem',
-                    fontWeight: active ? 800 : 600
-                  }}
-                >
-                  <Icon size={14} />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-          {!sideCollapsed && <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {!sideCollapsed && <div className="app-right-drawer__content" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <AnnouncementBanner />
             <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div key={activeTab} className="side-panel-page">
@@ -163,7 +124,51 @@ export default function App() {
               </div>
             </div>
           </div>}
-        </section>
+          <nav className="app-side-tabs app-side-tabs--vertical" aria-label="功能面板">
+            <button
+              onClick={() => setSideCollapsed((value) => !value)}
+              title={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
+              aria-label={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
+              style={{
+                width: 56,
+                height: 52,
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--text-secondary)',
+                background: 'transparent',
+                borderBottom: '1px solid var(--border-glass)',
+                borderRadius: 0
+              }}
+            >
+              {sideCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => openSideTab(tab.id)}
+                  title={tab.label}
+                  aria-label={tab.label}
+                  style={{
+                    width: 56,
+                    height: 52,
+                    display: 'grid',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: active ? 'var(--primary-color)' : 'var(--text-secondary)',
+                    background: active ? 'rgba(99,102,241,0.04)' : 'transparent',
+                    borderRight: active ? '3px solid var(--primary-color)' : '3px solid transparent',
+                    borderRadius: 0
+                  }}
+                >
+                  <Icon size={14} />
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
       </main>
 
       <footer className="app-shell-bar" style={{ borderTop: '1px solid var(--border-glass)' }}>

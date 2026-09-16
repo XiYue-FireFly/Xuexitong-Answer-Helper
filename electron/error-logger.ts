@@ -74,7 +74,8 @@ export function writeErrorLog(payload: ErrorLogPayload) {
     };
     fs.appendFileSync(getErrorLogPath(), `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (error) {
-    console.error('[StudyPilot Logger] Failed to write error log:', error);
+    // Logging is used by uncaught-exception handlers, where a broken stdout/stderr
+    // pipe must not trigger another exception while trying to report the first one.
   }
 }
 
@@ -101,18 +102,16 @@ export function pruneOldErrorLogs(maxAgeDays = 14) {
       if (stat.mtimeMs < cutoff) fs.unlinkSync(fullPath);
     }
   } catch (error) {
-    console.error('[StudyPilot Logger] Failed to prune old logs:', error);
+    // Keep startup resilient when the log directory is temporarily unavailable.
   }
 }
 
 export function installProcessErrorLogging() {
   process.on('uncaughtException', (error) => {
     writeUnknownError('main:uncaughtException', error, undefined, 'fatal');
-    console.error('[StudyPilot Main] Uncaught exception:', error);
   });
 
   process.on('unhandledRejection', (reason) => {
     writeUnknownError('main:unhandledRejection', reason, undefined, 'fatal');
-    console.error('[StudyPilot Main] Unhandled rejection:', reason);
   });
 }

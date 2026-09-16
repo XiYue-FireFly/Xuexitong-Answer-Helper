@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Database / Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (settings: any) => ipcRenderer.invoke('settings:set', settings),
+  discoverAIModels: (payload: { baseUrl: string; apiKey?: string; authHeader?: 'authorization' | 'api-key' | 'none' }) => ipcRenderer.invoke('ai:discover-models', payload),
   getWebviewPreloadPath: () => ipcRenderer.invoke('settings:get-webview-preload'),
   getErrorLogPath: () => ipcRenderer.invoke('diagnostics:get-error-log-path'),
   getRecentErrorLogs: (limit?: number) => ipcRenderer.invoke('diagnostics:get-recent-error-logs', limit),

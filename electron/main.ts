@@ -15,6 +15,8 @@ import {
 let mainWindow: BrowserWindow | null = null;
 const DB_FILE = path.join(app.getPath('userData'), 'studypilot_db.json');
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
+let webviewStorageFlushTimer: ReturnType<typeof setTimeout> | undefined;
+let isFinalizingQuit = false;
 const BLOCKED_INTERNAL_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
 const BLOCKED_STAT_KNOWLEDGE_URL = /\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i;
 const INCOMPLETE_EXAM_LIST_PATH = /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i;
@@ -873,6 +875,97 @@ ipcMain.handle('settings:get-webview-preload', () => {
   return pathToFileURL(path.join(__dirname, 'preload-webview.js')).toString();
 });
 
+function modelDiscoveryUrl(rawBaseUrl: unknown) {
+  const baseUrl = String(rawBaseUrl || '').trim();
+  if (!baseUrl) throw new Error('请先填写 Base URL。');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error('Base URL 格式不正确。');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('只支持 http 或 https 的 Base URL。');
+  }
+
+  parsed.hash = '';
+  parsed.search = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '').replace(/\/(?:chat\/completions|models)$/i, '') || '/';
+  parsed.pathname = `${parsed.pathname.replace(/\/$/, '')}/models`;
+  return parsed.toString();
+}
+
+async function flushWebviewStorage(reason: string) {
+  try {
+    await session.fromPartition(WEBVIEW_PARTITION).flushStorageData();
+  } catch (error) {
+    writeUnknownError('session:flush-webview-storage', error, { reason }, 'warn');
+  }
+}
+
+function scheduleWebviewStorageFlush(reason: string) {
+  if (webviewStorageFlushTimer) clearTimeout(webviewStorageFlushTimer);
+  webviewStorageFlushTimer = setTimeout(() => {
+    webviewStorageFlushTimer = undefined;
+    void flushWebviewStorage(reason);
+  }, 800);
+}
+
+function parseModelIds(payload: any) {
+  const candidates = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : Array.isArray(payload?.data?.models)
+          ? payload.data.models
+          : [];
+
+  const seen = new Set<string>();
+  return candidates
+    .map((item: any) => {
+      const id = typeof item === 'string' ? item : String(item?.id || item?.name || item?.model || '').trim();
+      const owner = typeof item === 'object' ? String(item?.owned_by || item?.provider || '').trim() : '';
+      return { id, owner };
+    })
+    .filter((item: { id: string; owner: string }) => {
+      if (!item.id || item.id.length > 240) return false;
+      const key = item.id.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left: { id: string }, right: { id: string }) => left.id.localeCompare(right.id, undefined, { sensitivity: 'base' }))
+    .slice(0, 500);
+}
+
+ipcMain.handle('ai:discover-models', async (_event, payload?: { baseUrl?: string; apiKey?: string; authHeader?: string }) => {
+  try {
+    const url = modelDiscoveryUrl(payload?.baseUrl);
+    const apiKey = String(payload?.apiKey || '').trim();
+    const authHeader = String(payload?.authHeader || 'authorization');
+    const headers: Record<string, string> = {};
+    if (authHeader === 'api-key' && apiKey) headers['api-key'] = apiKey;
+    else if (authHeader !== 'none' && apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const response = await fetchText(url, 0, headers);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      const preview = response.text.replace(/\s+/g, ' ').trim().slice(0, 300) || '空响应';
+      throw new Error(`模型列表接口返回 ${response.statusCode}：${preview}`);
+    }
+    const models = parseModelIds(safeParseJson(response.text, url));
+    if (models.length === 0) {
+      throw new Error('模型列表接口未返回可用模型。');
+    }
+    return { success: true, endpoint: response.finalUrl, models };
+  } catch (error: any) {
+    writeUnknownError('ai:discover-models', error, { baseUrl: String(payload?.baseUrl || '').slice(0, 300) }, 'warn');
+    return { success: false, error: error?.message || '拉取模型列表失败。', models: [] };
+  }
+});
+
 ipcMain.handle('diagnostics:get-error-log-path', () => {
   return getErrorLogPath();
 });
@@ -1318,7 +1411,13 @@ function fetchText(url: string, redirectCount = 0, extraHeaders: Record<string, 
         }
         try {
           const nextUrl = new URL(location, url).toString();
-          fetchText(nextUrl, redirectCount + 1, extraHeaders).then(resolve).catch(reject);
+          const nextHeaders = { ...extraHeaders };
+          if (new URL(nextUrl).origin !== new URL(url).origin) {
+            delete nextHeaders.Authorization;
+            delete nextHeaders.authorization;
+            delete nextHeaders['api-key'];
+          }
+          fetchText(nextUrl, redirectCount + 1, nextHeaders).then(resolve).catch(reject);
         } catch {
           reject(new Error(`Invalid redirect location: ${location}`));
         }
@@ -1474,6 +1573,8 @@ app.whenReady().then(() => {
 
       contents.on('did-finish-load', () => {
         void injectAllFrameClickBridges(contents, 'did-finish-load');
+        // Login cookies and IndexedDB are often updated just after navigation settles.
+        scheduleWebviewStorageFlush('webview:did-finish-load');
       });
 
       const openInternalTab = (targetUrl: string, title?: string) => {
@@ -1702,4 +1803,15 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', (event) => {
+  if (isFinalizingQuit) return;
+  event.preventDefault();
+  isFinalizingQuit = true;
+  if (webviewStorageFlushTimer) {
+    clearTimeout(webviewStorageFlushTimer);
+    webviewStorageFlushTimer = undefined;
+  }
+  void flushWebviewStorage('app:before-quit').finally(() => app.exit(0));
 });
