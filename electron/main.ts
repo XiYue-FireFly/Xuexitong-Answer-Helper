@@ -16,7 +16,9 @@ let mainWindow: BrowserWindow | null = null;
 const DB_FILE = path.join(app.getPath('userData'), 'studypilot_db.json');
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
 let webviewStorageFlushTimer: ReturnType<typeof setTimeout> | undefined;
+let webviewSessionCookieTimer: ReturnType<typeof setTimeout> | undefined;
 let isFinalizingQuit = false;
+const WEBVIEW_SESSION_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const BLOCKED_INTERNAL_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
 const BLOCKED_STAT_KNOWLEDGE_URL = /\/\/stat\d*-ans\.chaoxing\.com\/study-knowledge\/ans/i;
 const INCOMPLETE_EXAM_LIST_PATH = /\/exam-ans\/mooc2\/exam\/exam-list\/?$/i;
@@ -749,6 +751,10 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      // The main preload is compiled as CommonJS and imports Electron's IPC API.
+      // It must run outside Electron's sandbox; page scripts remain isolated and
+      // can only access the narrow contextBridge API exposed by preload.ts.
+      sandbox: false,
       webviewTag: true // Crucial for embedding the learning webpage in left pane
     },
     icon: path.join(__dirname, '../public/icon.png')
@@ -856,6 +862,17 @@ ipcMain.on('window:close', () => {
   mainWindow?.close();
 });
 
+ipcMain.handle('window:set-titlebar-theme', (_event, theme?: string) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false };
+  const isLight = theme === 'light';
+  mainWindow.setTitleBarOverlay({
+    color: isLight ? '#ffffff' : '#080711',
+    symbolColor: isLight ? '#0f172a' : '#f8fafc',
+    height: 40
+  });
+  return { success: true };
+});
+
 // IPC Handler: Settings
 ipcMain.handle('settings:get', () => {
   const db = readDB();
@@ -898,7 +915,12 @@ function modelDiscoveryUrl(rawBaseUrl: unknown) {
 
 async function flushWebviewStorage(reason: string) {
   try {
-    await session.fromPartition(WEBVIEW_PARTITION).flushStorageData();
+    const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+    // Login services rely on both the cookie database and web storage.
+    await Promise.all([
+      webviewSession.cookies.flushStore(),
+      webviewSession.flushStorageData()
+    ]);
   } catch (error) {
     writeUnknownError('session:flush-webview-storage', error, { reason }, 'warn');
   }
@@ -910,6 +932,54 @@ function scheduleWebviewStorageFlush(reason: string) {
     webviewStorageFlushTimer = undefined;
     void flushWebviewStorage(reason);
   }, 800);
+}
+
+function cookieUrl(cookie: any) {
+  const host = String(cookie?.domain || '').replace(/^\./, '');
+  if (!host) return '';
+  const protocol = cookie.secure ? 'https:' : 'http:';
+  const pathName = String(cookie.path || '/').startsWith('/') ? String(cookie.path || '/') : `/${cookie.path}`;
+  return `${protocol}//${host}${pathName}`;
+}
+
+async function persistWebviewSessionCookies(reason: string) {
+  try {
+    const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
+    const sessionCookies = (await webviewSession.cookies.get({}))
+      .filter((cookie: any) => cookie?.session && cookie?.name && cookie?.value && cookieUrl(cookie));
+    if (sessionCookies.length === 0) return;
+
+    const expirationDate = Math.floor(Date.now() / 1000) + WEBVIEW_SESSION_COOKIE_TTL_SECONDS;
+    await Promise.all(sessionCookies.map(async (cookie: any) => {
+      const details: any = {
+        url: cookieUrl(cookie),
+        name: cookie.name,
+        value: cookie.value,
+        path: cookie.path || '/',
+        secure: Boolean(cookie.secure),
+        httpOnly: Boolean(cookie.httpOnly),
+        sameSite: cookie.sameSite,
+        expirationDate
+      };
+      if (!cookie.hostOnly && cookie.domain) details.domain = cookie.domain;
+      try {
+        await webviewSession.cookies.set(details);
+      } catch (error) {
+        writeUnknownError('session:persist-webview-cookie', error, { reason }, 'warn');
+      }
+    }));
+    await webviewSession.cookies.flushStore();
+  } catch (error) {
+    writeUnknownError('session:persist-webview-session-cookies', error, { reason }, 'warn');
+  }
+}
+
+function scheduleWebviewSessionCookiePersistence(reason: string) {
+  if (webviewSessionCookieTimer) clearTimeout(webviewSessionCookieTimer);
+  webviewSessionCookieTimer = setTimeout(() => {
+    webviewSessionCookieTimer = undefined;
+    void persistWebviewSessionCookies(reason);
+  }, 500);
 }
 
 function parseModelIds(payload: any) {
@@ -1037,6 +1107,15 @@ ipcMain.handle('app:open-url', async (_event, targetUrl?: string) => {
   const url = String(targetUrl || RELEASES_PAGE_URL);
   if (!/^https?:\/\//i.test(url)) return { success: false, error: '只允许打开 http/https 链接。' };
   await shell.openExternal(url);
+  return { success: true };
+});
+
+ipcMain.handle('browser:open-internal-tab', (_event, targetUrl?: string) => {
+  const url = String(targetUrl || '').trim();
+  if (!/^https?:\/\//i.test(url)) return { success: false, error: '只允许打开 http/https 链接。' };
+  if (shouldBlockInternalTabUrl(url)) return { success: false, error: '该链接不能作为独立标签页打开。' };
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: '主窗口不可用。' };
+  mainWindow.webContents.send('browser:open-tab', { url });
   return { success: true };
 });
 
@@ -1477,6 +1556,11 @@ app.whenReady().then(() => {
     const fileName = item.getFilename();
     item.setSavePath(path.join(app.getPath('downloads'), fileName));
   });
+  webviewSession.cookies.on('changed', (_event, cookie, _cause, removed) => {
+    scheduleWebviewStorageFlush('webview:cookie-changed');
+    if (!removed && cookie?.session) scheduleWebviewSessionCookiePersistence('webview:session-cookie-changed');
+  });
+  void persistWebviewSessionCookies('app:startup');
 
   // Intercept webview new window creation requests native-side and forward them
   // to the renderer so the embedded browser can create an internal tab.
@@ -1813,5 +1897,11 @@ app.on('before-quit', (event) => {
     clearTimeout(webviewStorageFlushTimer);
     webviewStorageFlushTimer = undefined;
   }
-  void flushWebviewStorage('app:before-quit').finally(() => app.exit(0));
+  if (webviewSessionCookieTimer) {
+    clearTimeout(webviewSessionCookieTimer);
+    webviewSessionCookieTimer = undefined;
+  }
+  void persistWebviewSessionCookies('app:before-quit')
+    .finally(() => flushWebviewStorage('app:before-quit'))
+    .finally(() => app.quit());
 });

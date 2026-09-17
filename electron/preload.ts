@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  setTitlebarTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke('window:set-titlebar-theme', theme),
   
   // Navigation & Page Operations
   navigate: (url: string) => ipcRenderer.invoke('browser:navigate', url),
@@ -78,6 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRecentErrorLogs: (limit?: number) => ipcRenderer.invoke('diagnostics:get-recent-error-logs', limit),
   checkForUpdates: () => ipcRenderer.invoke('app:check-update'),
   openExternalUrl: (url: string) => ipcRenderer.invoke('app:open-url', url),
+  openInternalBrowserTab: (url: string) => ipcRenderer.invoke('browser:open-internal-tab', url),
   notify: (title: string, body: string) => ipcRenderer.invoke('app:notify', { title, body }),
   getWebviewSessionState: () => ipcRenderer.invoke('session:get-webview-state'),
   clearWebviewSession: () => ipcRenderer.invoke('session:clear-webview-login'),

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AIPanel } from './components/AIPanel';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { BrowserPanel } from './components/BrowserPanel';
@@ -9,14 +9,15 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { appStore, useAppStore } from './store/appStore';
-import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Settings, Square, Terminal, X } from 'lucide-react';
+import { WebAIWorkflow } from './webAI/WebAIWorkflow';
+import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
 
 type TabId = 'automation' | 'chapter' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'settings';
 
 const tabs: { id: TabId; label: string; icon: typeof Brain }[] = [
   { id: 'automation', label: '自动化', icon: Brain },
   { id: 'chapter', label: '章节学习', icon: BookOpen },
-  { id: 'snapshot', label: '页面快照', icon: Database },
+  { id: 'snapshot', label: '本地题库', icon: Database },
   { id: 'tokens', label: 'Token', icon: ChartNoAxesCombined },
   { id: 'history', label: '运行记录', icon: History },
   { id: 'bugs', label: '错误报告', icon: Bug },
@@ -40,14 +41,118 @@ const START_NOTICE_KEY = 'studypilot_start_notice_v2';
 
 export default function App() {
   const { status, statusText, logs, settings, isElectron } = useAppStore();
-  const [activeTab, setActiveTab] = useState<TabId>('automation');
+  const [activeTab, setActiveTab] = useState<TabId>('snapshot');
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
+  const workbenchBounds = () => {
+    const viewport = window.innerWidth;
+    const browserMin = Math.min(500, Math.max(300, Math.round(viewport * 0.46)));
+    const min = Math.min(420, Math.max(340, Math.round(viewport * 0.4)));
+    return { min, max: Math.max(min, viewport - browserMin) };
+  };
+  const [workbenchWidth, setWorkbenchWidth] = useState(() => {
+    const bounds = workbenchBounds();
+    return Math.min(600, bounds.max);
+  });
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const seen = localStorage.getItem(START_NOTICE_KEY);
     if (!seen) setShowNotice(true);
+  }, []);
+
+  useEffect(() => {
+    const keepWorkbenchInBounds = () => {
+      const { min, max } = workbenchBounds();
+      setWorkbenchWidth((width) => Math.max(min, Math.min(width, max)));
+    };
+    window.addEventListener('resize', keepWorkbenchInBounds);
+    return () => window.removeEventListener('resize', keepWorkbenchInBounds);
+  }, []);
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  useEffect(() => {
+    // The browser deck also paints the document background, so keep the theme
+    // on the root elements instead of limiting it to the React application.
+    document.documentElement.dataset.theme = settings.theme;
+    document.body.dataset.theme = settings.theme;
+    (window as any).electronAPI?.setTitlebarTheme?.(settings.theme);
+
+    return () => {
+      delete document.documentElement.dataset.theme;
+      delete document.body.dataset.theme;
+    };
+  }, [settings.theme]);
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+
+    let activeSurface: HTMLElement | null = null;
+    let releaseTimer: number | undefined;
+    let previousPoint = { x: 0, y: 0 };
+
+    const releaseSurface = () => {
+      if (!activeSurface) return;
+      const surface = activeSurface;
+      activeSurface = null;
+      surface.classList.remove('jelly-runtime--active');
+      surface.classList.add('jelly-runtime--release');
+      surface.style.removeProperty('--jelly-runtime-x');
+      surface.style.removeProperty('--jelly-runtime-y');
+      surface.style.removeProperty('--jelly-runtime-shift');
+      surface.style.removeProperty('--jelly-runtime-scale-x');
+      surface.style.removeProperty('--jelly-runtime-scale-y');
+      window.clearTimeout(releaseTimer);
+      releaseTimer = window.setTimeout(() => surface.classList.remove('jelly-runtime--release'), 440);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('.glass-panel, .kb-jelly-surface, .browser-solving-dock, .browser-address')
+        : null;
+
+      if (!target) {
+        releaseSurface();
+        return;
+      }
+
+      if (target !== activeSurface) {
+        releaseSurface();
+        activeSurface = target;
+        target.classList.remove('jelly-runtime--release');
+        target.classList.add('jelly-runtime', 'jelly-runtime--active');
+      }
+
+      const rect = target.getBoundingClientRect();
+      const velocityX = Math.max(-18, Math.min(18, event.clientX - previousPoint.x));
+      const relativeX = (event.clientX - rect.left) / Math.max(rect.width, 1) - 0.5;
+      const relativeY = (event.clientY - rect.top) / Math.max(rect.height, 1) - 0.5;
+      const stretch = Math.min(0.022, Math.abs(velocityX) * 0.0012);
+
+      target.style.setProperty('--jelly-runtime-x', `${(-relativeY * 1.15).toFixed(2)}deg`);
+      target.style.setProperty('--jelly-runtime-y', `${(relativeX * 1.15).toFixed(2)}deg`);
+      target.style.setProperty('--jelly-runtime-shift', `${(velocityX * 0.16).toFixed(2)}px`);
+      target.style.setProperty('--jelly-runtime-scale-x', `${(1 + stretch).toFixed(4)}`);
+      target.style.setProperty('--jelly-runtime-scale-y', `${(1 - stretch * 0.5).toFixed(4)}`);
+      previousPoint = { x: event.clientX, y: event.clientY };
+    };
+
+    const releaseOnExit = (event: PointerEvent) => {
+      const nextTarget = event.relatedTarget;
+      if (!(nextTarget instanceof Node) || !document.querySelector('.app-shell')?.contains(nextTarget)) releaseSurface();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerout', releaseOnExit, { passive: true });
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerout', releaseOnExit);
+      window.clearTimeout(releaseTimer);
+      releaseSurface();
+    };
   }, []);
 
   const closeNotice = () => {
@@ -68,6 +173,31 @@ export default function App() {
     setSideCollapsed(false);
   };
 
+  const startWorkbenchResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (sideCollapsed || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = workbenchWidth;
+    document.body.classList.add('is-resizing-workbench');
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const { min, max } = workbenchBounds();
+      const nextWidth = startWidth + (startX - moveEvent.clientX);
+      setWorkbenchWidth(Math.max(min, Math.min(Math.round(nextWidth), max)));
+    };
+    const handleEnd = () => {
+      document.body.classList.remove('is-resizing-workbench');
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleEnd);
+      resizeCleanupRef.current = null;
+    };
+
+    resizeCleanupRef.current?.();
+    resizeCleanupRef.current = handleEnd;
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleEnd, { once: true });
+  };
+
   const statusColor = status === 'error'
     ? '#ef4444'
     : status === 'done'
@@ -77,40 +207,53 @@ export default function App() {
         : '#6366f1';
 
   return (
-    <div data-theme={settings.theme} style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', color: 'var(--text-primary)', overflow: 'hidden' }}>
-      <header className="app-shell-bar app-window-titlebar" style={{ height: 40, borderBottom: '1px solid var(--border-glass)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', userSelect: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Brain size={18} style={{ color: 'var(--primary-color)' }} />
-          <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.9rem' }}>学习通答题辅助工具</span>
-          <span className="badge badge-primary" style={{ fontSize: '0.62rem', padding: '1px 7px' }}>v2</span>
+    <div data-theme={settings.theme} className="app-shell">
+      <header className="app-shell-bar app-window-titlebar app-header">
+        <div className="app-brand">
+          <div className="app-brand__mark"><Brain size={15} /></div>
+          <span className="app-brand__title">学习通答题辅助工作台</span>
+          <span className="app-brand__tag">纯本地离线架构</span>
         </div>
-        <div className="window-controls" style={{ display: 'flex', gap: 4 }}>
-          <button className="window-control" onClick={() => windowAction('minimize')} title="最小化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
-            <Minimize2 size={12} />
+        <div className="app-header__meta">
+          <div className="app-stream-status" title={statusText}>
+            <span className="app-stream-status__dot" style={{ background: statusColor, boxShadow: `0 0 10px ${statusColor}` }} />
+            <span>{statusLabels[status] || status}</span>
+            <i>•</i>
+            <strong>本地题库优先</strong>
+          </div>
+          <button className="theme-switch-btn" onClick={() => appStore.updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })} title={settings.theme === 'dark' ? '切换浅色模式' : '切换深色模式'}>
+            {settings.theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+            <span>{settings.theme === 'dark' ? '浅色模式' : '深色模式'}</span>
           </button>
-          <button className="window-control" onClick={() => windowAction('maximize')} title="最大化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
-            <Square size={10} />
-          </button>
-          <button className="window-control" onClick={() => windowAction('close')} title="关闭" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
-            <X size={12} />
-          </button>
+          <div className="window-controls" style={{ display: 'flex', gap: 4 }}>
+            <button className="window-control" onClick={() => windowAction('minimize')} title="最小化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+              <Minimize2 size={12} />
+            </button>
+            <button className="window-control" onClick={() => windowAction('maximize')} title="最大化" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+              <Square size={10} />
+            </button>
+            <button className="window-control" onClick={() => windowAction('close')} title="关闭" style={{ background: 'transparent', color: 'var(--text-secondary)', padding: '6px 10px', borderRadius: 4 }}>
+              <X size={12} />
+            </button>
+          </div>
         </div>
       </header>
 
-      <main style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <section style={{ flex: 1, minWidth: 0, borderRight: '1px solid var(--border-glass)', background: 'var(--bg-panel)' }}>
+      <main className="app-workspace">
+        <section className="browser-deck">
           <BrowserPanel />
         </section>
-        <aside className="app-right-drawer" style={{
-          width: sideCollapsed ? 56 : 'clamp(400px, 32vw, 600px)',
+        <aside className={`app-right-drawer assistant-dock${sideCollapsed ? ' is-collapsed' : ''}`} style={{
+          width: sideCollapsed ? 58 : workbenchWidth,
           flex: '0 0 auto',
-          minWidth: sideCollapsed ? 56 : 400,
+          minWidth: sideCollapsed ? 58 : workbenchWidth,
           display: 'flex',
           flexDirection: 'row',
           background: 'var(--bg-panel)',
           transition: 'width 180ms ease, min-width 180ms ease'
         }}>
-          {!sideCollapsed && <div className="app-right-drawer__content" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {!sideCollapsed && <div className="workbench-resizer" onPointerDown={startWorkbenchResize} role="separator" aria-orientation="vertical" aria-label="调整右侧工作台宽度" title="拖动调整工作台宽度" />}
+          {!sideCollapsed && <div className="app-right-drawer__content assistant-dock__content" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <AnnouncementBanner />
             <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div key={activeTab} className="side-panel-page">
@@ -130,8 +273,8 @@ export default function App() {
               title={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
               aria-label={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
               style={{
-                width: 56,
-                height: 52,
+                width: sideCollapsed ? 58 : 72,
+                height: 54,
                 display: 'grid',
                 placeItems: 'center',
                 color: 'var(--text-secondary)',
@@ -148,13 +291,16 @@ export default function App() {
               return (
                 <button
                   key={tab.id}
+                  className={`app-side-tab${active ? ' is-active' : ''}`}
                   onClick={() => openSideTab(tab.id)}
                   title={tab.label}
                   aria-label={tab.label}
+                  aria-current={active ? 'page' : undefined}
                   style={{
-                    width: 56,
-                    height: 52,
-                    display: 'grid',
+                    width: sideCollapsed ? 58 : 72,
+                    height: 58,
+                    display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: active ? 'var(--primary-color)' : 'var(--text-secondary)',
@@ -163,7 +309,8 @@ export default function App() {
                     borderRadius: 0
                   }}
                 >
-                  <Icon size={14} />
+                  <Icon size={15} />
+                  {!sideCollapsed && <span className="app-side-tabs__label">{tab.label}</span>}
                 </button>
               );
             })}
@@ -171,8 +318,10 @@ export default function App() {
         </aside>
       </main>
 
-      <footer className="app-shell-bar" style={{ borderTop: '1px solid var(--border-glass)' }}>
-        <div style={{ height: 34, padding: '0 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-secondary)', fontSize: '0.74rem' }}>
+      <WebAIWorkflow />
+
+      <footer className="app-shell-bar app-footer">
+        <div className="app-footer__inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
             <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{statusLabels[status] || status}：{statusText}</span>
@@ -218,7 +367,7 @@ export default function App() {
               <section>
                 <h3 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: 6 }}>第二步：配置搜题方式</h3>
                 <p>1. AI 搜题：在“设置”里选择服务商，填写 Base URL、模型和 API Key。可以通过“没有秘钥，前往”打开各服务商控制台说明。API 并发默认 5 路，接口限流时可降低；如果返回余额/额度不足，应用会在日志里提示你去充值、开通计费或更换 Key。</p>
-                <p>2. 不想使用 API：在作业页面按 Ctrl+A 全选题目内容，发给任意 AI，让它按下面格式返回，然后到“页面快照/本地题库”里导入。查询时会优先命中本地题库，未命中才会调用 API。</p>
+                <p>2. 不想使用 API：在作业页面按 Ctrl+A 全选题目内容，发给任意 AI，让它按下面格式返回，然后到“本地题库”里导入。查询时会优先命中本地题库，未命中才会调用 API。</p>
                 <pre style={{ whiteSpace: 'pre-wrap', background: 'rgba(99,102,241,0.08)', border: '1px solid var(--border-glass)', borderRadius: 8, padding: 12, color: 'var(--text-primary)', fontSize: '0.75rem', lineHeight: 1.55, marginTop: 8 }}>{`题目：示例选择题题干
 A. 选项一
 B. 选项二

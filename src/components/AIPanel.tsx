@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { openWebAI } from '../webAI/WebAIWorkflow';
 import { aiChatText } from '../utils/aiRequest';
 import {
   AlertTriangle,
@@ -267,6 +268,14 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 }
 
 export function AIPanel() {
+  const [answerMethod, setAnswerMethod] = useState<'api' | 'web'>(() => {
+    try { return localStorage.getItem('studypilot-answer-method') === 'web' ? 'web' : 'api'; } catch { return 'api'; }
+  });
+  const chooseAnswerMethod = (method: 'api' | 'web') => {
+    setAnswerMethod(method);
+    try { localStorage.setItem('studypilot-answer-method', method); } catch { /* Optional preference. */ }
+    if (method === 'web') openWebAI();
+  };
   const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, batchRunning, liveRunning, livePaused } = useAppStore();
   // 运行状态存放在 appStore（组件随 tab 切换卸载后仍可从 store 恢复真实状态）；
   // livePausedRef 仅作 async 循环内的即时读取通道，写入时同步 store
@@ -684,7 +693,7 @@ export function AIPanel() {
 
   const canParse = questions.length > 0 && !batchRunning && !liveRunning && status !== 'calling_ai';
   const parsedAnswerCount = questions.filter((question) => answerMap[question.hash]).length;
-  const canFill = parsedAnswerCount > 0 && !liveRunning && status !== 'executing';
+  const canFill = parsedAnswerCount > 0 && !batchRunning && !liveRunning && status !== 'executing';
 
   // 章节测试自动答题：抓题完成后由 BrowserPanel 触发，这里负责批量 AI 解析 + 填入 + 回调。
   // 复用 callAllAI 的解析逻辑与 applyAnswersToPage 的填入逻辑，不重复实现。
@@ -748,6 +757,10 @@ export function AIPanel() {
           <span className="badge badge-primary" style={{ whiteSpace: 'nowrap' }}>{questions.length} 题</span>
         </div>
 
+        <div className="answer-methods" role="radiogroup" aria-label="答题方式">
+          <label><input type="radio" name="answer-method" checked={answerMethod === 'api'} onChange={() => chooseAnswerMethod('api')} disabled={batchRunning || liveRunning || status === 'calling_ai'} />API AI</label>
+          <label><input type="radio" name="answer-method" checked={answerMethod === 'web'} onChange={() => chooseAnswerMethod('web')} disabled={batchRunning || liveRunning || status === 'calling_ai'} />网页 AI</label>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <button
             onClick={() => runAutomationAction('extract-question')}
@@ -756,7 +769,7 @@ export function AIPanel() {
             <FileQuestion size={15} /> 获取页面题目
           </button>
           <button
-            onClick={callAllAI}
+            onClick={() => answerMethod === 'web' ? openWebAI() : callAllAI()}
             disabled={!canParse}
             style={{ background: 'rgba(99,102,241,0.18)', color: 'var(--text-primary)', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canParse ? 1 : 0.55 }}
           >
@@ -770,11 +783,11 @@ export function AIPanel() {
             <MousePointerClick size={15} /> 开始填入
           </button>
           <button
-            onClick={callAllAIAndApplyLive}
+            onClick={() => answerMethod === 'web' ? openWebAI() : callAllAIAndApplyLive()}
             disabled={liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0}
             style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0 ? 0.55 : 1 }}
           >
-            <Play size={15} /> 自动化填入
+            <Play size={15} /> {answerMethod === 'web' ? '网页 AI 操作' : '自动化填入'}
           </button>
         </div>
 

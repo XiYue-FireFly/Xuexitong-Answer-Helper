@@ -629,12 +629,18 @@ export function SettingsPanel() {
       return;
     }
     try {
-      if ((window as any).electronAPI?.openExternalUrl) {
-        await (window as any).electronAPI.openExternalUrl(url);
+      const api = (window as any).electronAPI;
+      if (settings.allowRealPageAutomation && api?.openInternalBrowserTab) {
+        const result = await api.openInternalBrowserTab(url);
+        if (!result?.success) throw new Error(result?.error || '无法在应用内浏览器打开页面。');
+        appStore.addLog('info', '已在应用内浏览器打开 API Key 获取页面。');
+      } else if (api?.openExternalUrl) {
+        await api.openExternalUrl(url);
+        appStore.addLog('info', '已打开 API Key 获取页面。');
       } else {
         window.open(url, '_blank', 'noopener,noreferrer');
+        appStore.addLog('info', '已打开 API Key 获取页面。');
       }
-      appStore.addLog('info', '已打开 API Key 获取页面。');
     } catch (error: any) {
       window.open(url, '_blank', 'noopener,noreferrer');
       appStore.addLog('warn', `外部打开失败，已尝试在浏览器中打开：${error?.message || '未知错误'}`);

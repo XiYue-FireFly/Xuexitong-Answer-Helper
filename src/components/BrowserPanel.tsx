@@ -13,12 +13,16 @@ import {
   X
 } from 'lucide-react';
 import { appStore, AutomationPlan, AutomationStep, PageSnapshot, QuestionItem, useAppStore } from '../store/appStore';
+import { useBrowserBridge } from '../webAI/useBrowserBridge';
 
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
 const DEFAULT_BROWSER_URL = 'https://www.baidu.com';
+const BROWSER_SESSION_STORAGE_KEY = 'studypilot-browser-session-v1';
+const MAX_RESTORED_BROWSER_TABS = 8;
 const BLOCKED_INTERNAL_BROWSER_TAB_URL = /(addStudentWorkNewWeb|\/mooc-ans\/work\/(?:addStudentWorkNewWeb|save|submit)|\/work\/(?:addStudentWorkNewWeb|save|submit)|(?:submit|save)StudentWork|submitWork|saveWork)/i;
 
 type WebviewElement = HTMLElement & {
+  executeJavaScript?: (code: string, userGesture?: boolean) => Promise<any>;
   loadURL?: (url: string) => Promise<void>;
   getURL?: () => string;
   getTitle?: () => string;
@@ -41,6 +45,11 @@ interface BrowserTab {
   canGoBack: boolean;
   canGoForward: boolean;
 }
+
+type BrowserSession = {
+  tabs: BrowserTab[];
+  activeTabId: string;
+};
 
 type TabContextMenuAction = 'refresh' | 'copy' | 'close' | 'closeOthers' | 'closeRight';
 
@@ -168,6 +177,58 @@ function createBrowserTab(targetUrl: string, title?: string): BrowserTab {
     canGoBack: false,
     canGoForward: false
   };
+}
+
+function persistentBrowserUrl(rawUrl: unknown) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function restoreBrowserSession(fallbackUrl: string): BrowserSession {
+  const fallback = createBrowserTab(fallbackUrl, '首页');
+  if (typeof window === 'undefined') return { tabs: [fallback], activeTabId: fallback.id };
+
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(BROWSER_SESSION_STORAGE_KEY) || 'null');
+    const restoredTabs = (Array.isArray(stored?.tabs) ? stored.tabs : [])
+      .slice(0, MAX_RESTORED_BROWSER_TABS)
+      .map((item: any) => {
+        const url = persistentBrowserUrl(item?.url);
+        if (!url) return null;
+        const title = typeof item?.title === 'string' ? item.title.slice(0, 160) : undefined;
+        return createBrowserTab(url, title);
+      })
+      .filter((tab: BrowserTab | null): tab is BrowserTab => Boolean(tab));
+
+    if (restoredTabs.length === 0) return { tabs: [fallback], activeTabId: fallback.id };
+    const requestedIndex = Number(stored?.activeIndex);
+    const activeIndex = Number.isInteger(requestedIndex)
+      ? Math.min(Math.max(requestedIndex, 0), restoredTabs.length - 1)
+      : 0;
+    return { tabs: restoredTabs, activeTabId: restoredTabs[activeIndex].id };
+  } catch {
+    return { tabs: [fallback], activeTabId: fallback.id };
+  }
+}
+
+function persistBrowserSession(tabs: BrowserTab[], activeTabId: string) {
+  if (typeof window === 'undefined') return;
+  const savedTabs = tabs
+    .map((tab) => ({ url: persistentBrowserUrl(tab.url), title: tab.title.slice(0, 160) }))
+    .filter((tab) => Boolean(tab.url))
+    .slice(0, MAX_RESTORED_BROWSER_TABS);
+  if (savedTabs.length === 0) return;
+
+  try {
+    const activeIndex = Math.max(0, savedTabs.findIndex((tab) => tab.url === persistentBrowserUrl(tabs.find((tab) => tab.id === activeTabId)?.url)));
+    window.localStorage.setItem(BROWSER_SESSION_STORAGE_KEY, JSON.stringify({ version: 1, tabs: savedTabs, activeIndex }));
+  } catch {
+    // Browser history is a convenience feature; a disabled localStorage must not affect web browsing.
+  }
 }
 
 function normalizePageUrl(raw: string, baseUrl: string) {
@@ -363,17 +424,21 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
 }
 
 export function BrowserPanel() {
-  const { settings, status, snapshot, currentPlan, isElectron } = useAppStore();
+  const { settings, status, snapshot, currentPlan, isElectron, questions, answerMap } = useAppStore();
   const initialBrowserUrl = settings.mockModeUrl.includes('study-demo.studypilot.local') ? DEFAULT_BROWSER_URL : settings.mockModeUrl;
-  const initialTabRef = useRef<BrowserTab | null>(null);
-  if (!initialTabRef.current) initialTabRef.current = createBrowserTab(initialBrowserUrl, '首页');
+  const initialBrowserSessionRef = useRef<BrowserSession | null>(null);
+  if (!initialBrowserSessionRef.current) initialBrowserSessionRef.current = restoreBrowserSession(initialBrowserUrl);
+  const initialBrowserSession = initialBrowserSessionRef.current ?? restoreBrowserSession(initialBrowserUrl);
+  const initialActiveTab = initialBrowserSession.tabs.find((tab) => tab.id === initialBrowserSession.activeTabId)
+    || initialBrowserSession.tabs[0]
+    || createBrowserTab(initialBrowserUrl, '首页');
 
-  const [url, setUrl] = useState(initialBrowserUrl);
-  const [addressText, setAddressText] = useState(initialBrowserUrl);
-  const [history, setHistory] = useState([initialBrowserUrl]);
+  const [url, setUrl] = useState(initialActiveTab.url);
+  const [addressText, setAddressText] = useState(initialActiveTab.url);
+  const [history, setHistory] = useState([initialActiveTab.url]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [tabs, setTabs] = useState<BrowserTab[]>(() => [initialTabRef.current as BrowserTab]);
-  const [activeTabId, setActiveTabId] = useState(() => (initialTabRef.current as BrowserTab).id);
+  const [tabs, setTabs] = useState<BrowserTab[]>(() => initialBrowserSession.tabs);
+  const [activeTabId, setActiveTabId] = useState(() => initialBrowserSession.activeTabId);
   const [preloadPath, setPreloadPath] = useState('');
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
   const [goal, setGoal] = useState('填写请求表单，勾选接收更新，然后提交。');
@@ -381,6 +446,7 @@ export function BrowserPanel() {
   const [mockSelectedAnswers, setMockSelectedAnswers] = useState<Record<string, string[]>>({});
   const [mockSubmitted, setMockSubmitted] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
+  const [showSolvingProgress, setShowSolvingProgress] = useState(false);
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
@@ -389,18 +455,39 @@ export function BrowserPanel() {
   const pendingScanRef = useRef<number | null>(null);
   const recentOpenRef = useRef<Record<string, number>>({});
   const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0];
   const activeSource: AutomationPlan['source'] = isElectron && settings.allowRealPageAutomation ? 'webview' : 'mock';
   const canUseRealWebview = activeSource === 'webview';
+  const showBrowserTabs = canUseRealWebview ? Boolean(preloadPath) : true;
   const isLoadingPage = canUseRealWebview ? Boolean(activeTab?.loading) : false;
   const backDisabled = canUseRealWebview ? !activeTab?.canGoBack : historyIndex === 0;
   const forwardDisabled = canUseRealWebview ? !activeTab?.canGoForward : historyIndex === history.length - 1;
   const currentBrowserUrl = canUseRealWebview ? activeTab?.url || initialBrowserUrl : url;
 
+  const openWebAITab = useCallback((targetUrl: string, title: string) => {
+    const tab = createBrowserTab(targetUrl, title);
+    setTabs(previous => [...previous, tab]);
+    setActiveTabId(tab.id);
+    return tab.id;
+  }, []);
+  useBrowserBridge(canUseRealWebview, webviewRefs, activeTabId, openWebAITab, setActiveTabId);
+
   useEffect(() => {
     tabsRef.current = tabs;
-  }, [tabs]);
+    persistBrowserSession(tabs, activeTabId);
+  }, [activeTabId, tabs]);
+
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
+  useEffect(() => {
+    const saveBeforeClosing = () => persistBrowserSession(tabsRef.current, activeTabIdRef.current);
+    window.addEventListener('beforeunload', saveBeforeClosing);
+    return () => window.removeEventListener('beforeunload', saveBeforeClosing);
+  }, []);
 
   useEffect(() => {
     if (!tabContextMenu) return undefined;
@@ -428,6 +515,45 @@ export function BrowserPanel() {
     if (status === 'done') return 'badge-success';
     if (status === 'error') return 'badge-danger';
     return 'badge-primary';
+  }, [status]);
+
+  const solvingProgress = useMemo(() => {
+    const total = questions.length;
+    const resolved = questions.reduce((count, question) => count + (answerMap[question.hash] ? 1 : 0), 0);
+    const active = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
+    const state = status === 'extracting_question'
+      ? '正在抓取页面题目'
+      : status === 'calling_ai'
+        ? '正在解析答案'
+        : status === 'executing'
+          ? '正在填入页面'
+          : total === 0
+            ? '等待抓取页面题目'
+            : resolved === 0
+              ? `已抓取 ${total} 道，等待解析`
+              : resolved < total
+                ? `已解析 ${resolved} 道，继续处理`
+                : '本次处理完成';
+
+    const progress = total > 0
+      ? resolved === total
+        ? 100
+        : Math.min(94, 20 + Math.round((resolved / total) * 70) + (status === 'executing' ? 5 : 0))
+      : active ? 12 : 0;
+
+    return { active, progress, resolved, state, total };
+  }, [answerMap, questions, status]);
+
+  useEffect(() => {
+    const isQuestionWorkflow = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
+    if (isQuestionWorkflow) {
+      setShowSolvingProgress(true);
+      return undefined;
+    }
+    if (status !== 'done' && status !== 'error') return undefined;
+
+    const hideTimer = window.setTimeout(() => setShowSolvingProgress(false), 720);
+    return () => window.clearTimeout(hideTimer);
   }, [status]);
 
   const registerWebview = useCallback((tabId: string, webview: WebviewElement | null) => {
@@ -718,7 +844,11 @@ export function BrowserPanel() {
     const handleExtractQuestionRequest = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
-      const webview = getActiveWebview();
+      const webview = detail.targetTabId ? webviewRefs.current[detail.targetTabId] : getActiveWebview();
+      if (detail.expectedUrl && webview?.getURL?.() !== detail.expectedUrl) {
+        onComplete?.({ success: false, error: '原题目页面已跳转，请重新抓题。' });
+        return;
+      }
       if (!canUseRealWebview || !webview) {
         onComplete?.({ success: false, error: '请先在设置中启用真实 WebView。' });
         return;
@@ -776,7 +906,15 @@ export function BrowserPanel() {
     const processApplyAnswers = async (detail: any) => {
       const items = detail?.items || [];
       const onComplete = typeof detail?.onComplete === 'function' ? detail.onComplete : null;
-      const webview = getActiveWebview();
+      if (detail?.isCancelled?.()) {
+        onComplete?.({ success: false, error: '填入已取消。' });
+        return;
+      }
+      const webview = detail.targetTabId ? webviewRefs.current[detail.targetTabId] : getActiveWebview();
+      if (detail.targetTabId && (!webview || webview.getURL?.() !== detail.expectedUrl)) {
+        onComplete?.({ success: false, error: '原题目标签已关闭或跳转，答案已保留在题库。' });
+        return;
+      }
       const waitForApplyResult = () => new Promise<any>((resolve, reject) => {
         let resolver: ((result: any) => void) | null = null;
         const timeoutId = window.setTimeout(() => {
@@ -837,6 +975,14 @@ export function BrowserPanel() {
       appStore.setStatus('executing', `正在向当前页面填入 ${items.length} 道题的答案。`);
       let finalResult: any = { success: true, message: `已填入 ${items.length} 道题。` };
       for (const item of items) {
+        if (detail?.isCancelled?.()) {
+          finalResult = { success: false, error: '填入已取消。' };
+          break;
+        }
+        if (detail.targetTabId && webview.getURL?.() !== detail.expectedUrl) {
+          finalResult = { success: false, error: '填入期间原页面已跳转，已停止。' };
+          break;
+        }
         const resultPromise = waitForApplyResult();
         const sent = safeWebviewRun(() => webview.send?.('studypilot:apply-answer', {
           questionHash: item.question.hash,
@@ -1043,6 +1189,7 @@ export function BrowserPanel() {
   };
 
   const extractQuestion = () => {
+    setShowSolvingProgress(true);
     appStore.setStatus('extracting_question', activeSource === 'webview' ? '正在从当前页面抓取题目。' : '正在从演示页面抓取题目。');
     if (activeSource === 'webview') {
       const webview = getActiveWebview();
@@ -1109,7 +1256,7 @@ export function BrowserPanel() {
 
   return (
     <div className="mock-page-container" style={browserFullscreen ? { position: 'fixed', inset: 0, zIndex: 9999, background: '#05040a', borderRadius: 0 } : undefined}>
-      {canUseRealWebview && preloadPath && (
+      {showBrowserTabs && (
         <div className="browser-tabs-bar" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px 0', borderBottom: '1px solid var(--border-glass)', overflowX: 'auto' }}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
@@ -1312,6 +1459,22 @@ export function BrowserPanel() {
               </div>
             </div>
           )}
+
+          {showSolvingProgress && <section className={`browser-solving-dock${solvingProgress.active ? ' is-active' : ''}${status === 'done' ? ' is-complete' : ''}${status === 'error' ? ' is-error' : ''}`} aria-label="答题进度">
+            <div className="browser-solving-dock__topline">
+              <div>
+                <span className="browser-solving-dock__eyebrow">答题流程</span>
+                <strong>{solvingProgress.state}</strong>
+              </div>
+              <output aria-label={`已处理 ${solvingProgress.resolved} 道，共 ${solvingProgress.total} 道`}>
+                {solvingProgress.total > 0 ? `${solvingProgress.resolved} / ${solvingProgress.total}` : '--'}
+              </output>
+            </div>
+            <div className="browser-solving-dock__rail" aria-hidden="true">
+              <span style={{ width: `${solvingProgress.progress}%` }} />
+            </div>
+          </section>
+          }
         </div>
       </div>
     </div>
