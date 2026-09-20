@@ -23,6 +23,11 @@ describe('Web AI answer boundary', () => {
     assert.deepEqual(parsed.items[0].answer.matchedOptions, ['Banana']);
     assert.equal(parsed.items[1].answer.answer, 'first##second');
   });
+  it('preserves paragraph indentation and line breaks for fill-in answers', () => {
+    const indented = { ...completion, answer: '　　第一行\n　　第二行' };
+    const parsed = parseWebAnswer(response([choice, indented]), batch, 'web');
+    assert.equal(parsed.items[1].answer.answer, '　　第一行\n　　第二行');
+  });
   it('rejects mismatched option letters and content', () => {
     const parsed = parseWebAnswer(response([{ ...choice, choiceLabels: ['A'] }, completion]), batch, 'web');
     assert.equal(parsed.automatic, false);

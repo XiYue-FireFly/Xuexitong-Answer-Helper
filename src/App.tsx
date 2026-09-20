@@ -3,20 +3,17 @@ import { AIPanel } from './components/AIPanel';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { BrowserPanel } from './components/BrowserPanel';
 import { BugReportPanel } from './components/BugReportPanel';
-import { ChapterLearningPanel } from './components/ChapterLearningPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { appStore, useAppStore } from './store/appStore';
-import { WebAIWorkflow } from './webAI/WebAIWorkflow';
-import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
+import { Bell, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
 
-type TabId = 'automation' | 'chapter' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'settings';
+type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'settings';
 
 const tabs: { id: TabId; label: string; icon: typeof Brain }[] = [
-  { id: 'automation', label: '自动化', icon: Brain },
-  { id: 'chapter', label: '章节学习', icon: BookOpen },
+  { id: 'automation', label: '答题', icon: Brain },
   { id: 'snapshot', label: '本地题库', icon: Database },
   { id: 'tokens', label: 'Token', icon: ChartNoAxesCombined },
   { id: 'history', label: '运行记录', icon: History },
@@ -41,7 +38,7 @@ const START_NOTICE_KEY = 'studypilot_start_notice_v2';
 
 export default function App() {
   const { status, statusText, logs, settings, isElectron } = useAppStore();
-  const [activeTab, setActiveTab] = useState<TabId>('snapshot');
+  const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
@@ -60,6 +57,18 @@ export default function App() {
   useEffect(() => {
     const seen = localStorage.getItem(START_NOTICE_KEY);
     if (!seen) setShowNotice(true);
+  }, []);
+
+  useEffect(() => {
+    // The web workflow now lives inside the 答题 tab. A request from the
+    // question bank only needs to switch tabs; the embedded workflow consumes
+    // the short-lived localStorage request after it mounts.
+    const openAnswerTab = () => {
+      setActiveTab('automation');
+      setSideCollapsed(false);
+    };
+    window.addEventListener('studypilot:open-web-ai', openAnswerTab);
+    return () => window.removeEventListener('studypilot:open-web-ai', openAnswerTab);
   }, []);
 
   useEffect(() => {
@@ -258,7 +267,6 @@ export default function App() {
             <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <div key={activeTab} className="side-panel-page">
                 {activeTab === 'automation' && <AIPanel />}
-                {activeTab === 'chapter' && <ChapterLearningPanel />}
                 {activeTab === 'snapshot' && <KnowledgeBase />}
                 {activeTab === 'tokens' && <TokenUsagePanel />}
                 {activeTab === 'history' && <HistoryPanel />}
@@ -317,8 +325,6 @@ export default function App() {
           </nav>
         </aside>
       </main>
-
-      <WebAIWorkflow />
 
       <footer className="app-shell-bar app-footer">
         <div className="app-footer__inner">
@@ -380,7 +386,7 @@ B. 选项二
 
               <section>
                 <h3 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: 6 }}>第三步：开始答题</h3>
-                <p>进入作业或考试页面后，先点击“获取页面题目”，再点击“开始解析”或“自动化填入”。如果已有解析答案，可以直接点击“开始填入”。英语阅读、完形填空、七选五等页面会把文章上下文和小题一起抓取，填空题会尝试同步可见输入框和隐藏答案字段。</p>
+                <p>进入作业或考试页面后，打开“答题”页，先选择 API AI 或网页 AI，再按“获取页面题目 → 解析 → 核对 → 填入”的顺序操作。英语阅读、完形填空、七选五等页面会把文章上下文和小题一起抓取，填空题会按多个空的顺序写入并同步可见输入框和隐藏答案字段。</p>
               </section>
 
               <section>

@@ -1603,7 +1603,7 @@ function isChaoxingPage(): boolean {
  * 同时仍启动 DOM 轮询 loop 作为兜底（处理视频弹窗测验、人脸识别、文档阅读等页面内交互）。
  * 章节测试答题通过 onChapterTest 回调通知宿主，宿主处理完返回 true 让翻章继续。
  */
-async function runChapterLearningApiFirst(extractQuestions: ExtractQuestions) {
+async function runChapterLearningScriptFirst(extractQuestions: ExtractQuestions) {
   const pageAny = window as any;
   const options = chapterLearningOptions();
   const params = isChaoxingPage() ? resolveChaoxingRuntimeParams() : null;
@@ -1611,8 +1611,9 @@ async function runChapterLearningApiFirst(extractQuestions: ExtractQuestions) {
   if (params) {
     // API 直连模式：runChaoxingMainTask 内部按章节遍历，自带 sleep/stop 检查
     pageAny.__studyPilotChapterApiMode = true;
+    let handled = false;
     try {
-      await runChaoxingMainTask(
+      handled = await runChaoxingMainTask(
         params,
         {
           reviewMode: options.restudy,
@@ -1644,6 +1645,12 @@ async function runChapterLearningApiFirst(extractQuestions: ExtractQuestions) {
           }
         }
       );
+      if (!handled && pageAny.__studyPilotChapterRunning) {
+        // The script-compatible API chain could not obtain a usable course
+        // payload. Keep the original DOM engine available as a safe fallback.
+        pageAny.__studyPilotChapterApiMode = false;
+        startChapterLearningLoop(extractQuestions);
+      }
     } catch (error: any) {
       reportWebviewError('webview:chapter-api-task', {
         level: 'warn',
@@ -1654,9 +1661,15 @@ async function runChapterLearningApiFirst(extractQuestions: ExtractQuestions) {
       // 会被永久抑制，而 API 任务已不再运行，导致无任何翻章逻辑工作
       pageAny.__studyPilotChapterApiMode = false;
     }
+    if (!handled && pageAny.__studyPilotChapterRunning && !pageAny.__studyPilotChapterTimer) {
+      // Keep the original implementation as a full fallback when the
+      // script-compatible chapter chain cannot be used.
+      startChapterLearningLoop(extractQuestions);
+    }
   } else {
     // 非 API 模式：纯 DOM 轮询（保留原行为，适配其他平台或参数缺失场景）
     pageAny.__studyPilotChapterApiMode = false;
+    if (pageAny.__studyPilotChapterRunning) startChapterLearningLoop(extractQuestions);
   }
 }
 
@@ -1671,20 +1684,14 @@ export async function handleChapterLearningCommand(command: ChapterLearningComma
   if (command.action === 'start') {
     pageAny.__studyPilotChapterRunning = true;
     pageAny.__studyPilotAutoAnswerNotifiedUrl = null;
-    // DOM 轮询 loop 始终启动：负责视频弹窗测验、人脸识别、文档阅读等页面内交互防护
-    startChapterLearningLoop(extractQuestions);
-    attachPrimaryChapterVideoWatchers();
-    await playPrimaryChapterMedia();
-    // API 直连章节遍历（超星且参数齐全时生效；非超星/参数缺失时内部回退，不干扰 DOM loop）
-    void runChapterLearningApiFirst(extractQuestions);
+    // Script-compatible chapter traversal is the primary engine. The former
+    // DOM loop remains intact and is started only by the fallback path.
+    void runChapterLearningScriptFirst(extractQuestions);
     return;
   }
   if (command.action === 'play') {
     pageAny.__studyPilotChapterRunning = true;
-    startChapterLearningLoop(extractQuestions);
-    attachPrimaryChapterVideoWatchers();
-    await playPrimaryChapterMedia();
-    void runChapterLearningApiFirst(extractQuestions);
+    void runChapterLearningScriptFirst(extractQuestions);
     return;
   }
   if (command.action === 'pause') {

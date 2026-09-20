@@ -1,11 +1,12 @@
 import { build } from 'esbuild';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 await mkdir(path.join(root, 'dist-electron'), { recursive: true });
+await mkdir(path.join(root, 'dist-electron', 'preload-webview'), { recursive: true });
 
 await build({
   entryPoints: [path.join(root, 'electron', 'preload-webview.ts')],
@@ -18,3 +19,8 @@ await build({
   sourcemap: false,
   logLevel: 'info'
 });
+
+await copyFile(
+  path.join(root, 'electron', 'preload-webview', 'chaoxing-chapter-userscript.js'),
+  path.join(root, 'dist-electron', 'preload-webview', 'chaoxing-chapter-userscript.js')
+);

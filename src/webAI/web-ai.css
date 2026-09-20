@@ -36,6 +36,23 @@
 .answer-methods { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
 .answer-methods label { display: flex; align-items: center; gap: 6px; }
 
+.web-ai-inline .web-ai-body { display: grid; gap: 12px; }
+.web-ai-inline h3 { font-size: 14px; }
+.web-ai-inline fieldset { min-width: 0; border: 0; display: grid; gap: 14px; }
+.web-ai-inline legend { margin-bottom: 12px; font-weight: 700; }
+.web-ai-inline summary { cursor: pointer; font-size: 13px; }
+.web-ai-inline .web-ai-segments { display: flex; flex-wrap: wrap; gap: 12px; }
+.web-ai-inline .web-ai-segments label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.web-ai-inline button { min-height: 32px; padding: 6px 10px; display: inline-flex; gap: 6px; align-items: center; justify-content: center; border: 1px solid var(--border-glass); border-radius: 6px; color: var(--text-primary); background: var(--bg-panel); }
+.web-ai-inline button:disabled { opacity: 0.55; cursor: not-allowed; }
+.web-ai-inline .web-ai-primary { color: #fff; background: #4338ca; }
+.web-ai-inline textarea { width: 100%; min-width: 0; resize: vertical; color: var(--text-primary); background: var(--bg-app); font-size: 13px; line-height: 1.5; }
+.web-ai-inline .web-ai-steps { gap: 7px; }
+.web-ai-inline .web-ai-step { padding: 10px 12px; border-radius: 11px; }
+.web-ai-inline .web-ai-step-body button { min-height: 34px; }
+.web-ai-inline textarea { min-height: 120px; }
+.web-ai-inline .web-ai-question-picker { max-height: 150px; }
+
 /* 步骤式流程布局 */
 .web-ai-steps { display: grid; gap: 8px; }
 .web-ai-step { border: 1px solid var(--border-glass); border-radius: 8px; padding: 12px 14px; transition: border-color 0.15s, background 0.15s; }

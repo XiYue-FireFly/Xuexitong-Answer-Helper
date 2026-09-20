@@ -645,7 +645,7 @@ const defaultProviders: AIProviderConfig[] = Object.entries(AI_PROVIDER_PRESETS)
 }));
 
 const defaultSettings: AppSettings = {
-  allowRealPageAutomation: false,
+  allowRealPageAutomation: true,
   requireApprovalBeforeExecute: true,
   chapterAutoNext: true,
   chapterAutoPlay: true,

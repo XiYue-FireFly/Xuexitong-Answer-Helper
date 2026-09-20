@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { openWebAI } from '../webAI/WebAIWorkflow';
+import { WebAIWorkflow } from '../webAI/WebAIWorkflow';
 import { aiChatText } from '../utils/aiRequest';
 import {
   AlertTriangle,
@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Database,
   FileQuestion,
+  Globe as GlobeIcon,
   ListChecks,
   MousePointer2,
   MousePointerClick,
@@ -83,7 +84,7 @@ function questionTypeHint(type?: string) {
   if (type === 'single') return 'Single choice. Return the one correct option content.';
   if (type === 'multiple') return 'Multiple choice. Return every correct option content in matchedOptions.';
   if (type === 'judgement') return 'Judgement. Return only true/correct or false/wrong.';
-  if (type === 'completion') return 'Fill-in-the-blank. Separate multiple blanks with ##.';
+  if (type === 'completion') return 'Fill-in-the-blank. Return only directly fillable text. Separate multiple blanks in page order with ##; preserve required ordered/unordered list structure, paragraph breaks, and two-character first-line indentation.';
   if (type === 'essay') return 'Short answer. Return a concise answer that can be filled directly.';
   return 'Infer the question type from the stem and options first.';
 }
@@ -102,7 +103,7 @@ function buildPrompt(question: QuestionItem) {
     '2. For choice questions, answer should be the correct option content; matchedOptions must contain the full option text whenever possible.',
     '3. choiceLabels may contain A/B/C/D inferred from the option order below, but matchedOptions is the primary source for local matching.',
     '4. If the question is incomplete or uncertain, add warnings and set confidence below 0.55. Do not fabricate.',
-    '5. For judgement questions, answer only true/correct or false/wrong. For fill-in questions, separate blanks with ##.',
+    '5. For judgement questions, answer only true/correct or false/wrong. For fill-in questions, use ## as the only separator between multiple blanks, in left-to-right/top-to-bottom order. Short blanks return only a word/phrase; long answers preserve the requested full paragraph. Preserve required ordered or unordered list structure, meaningful newlines, and a two-character first-line indentation (two full-width spaces when Chinese formatting is required); do not add explanations, code fences, or an “answer:” prefix.',
     '',
     `Question number: ${question.index || ''}`,
     `Question type: ${question.type}`,
@@ -269,13 +270,27 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 
 export function AIPanel() {
   const [answerMethod, setAnswerMethod] = useState<'api' | 'web'>(() => {
-    try { return localStorage.getItem('studypilot-answer-method') === 'web' ? 'web' : 'api'; } catch { return 'api'; }
+    try {
+      // WebView is the safest default for the real page workflow. Keep an
+      // explicit API choice sticky for users who already selected it.
+      const pendingWebRequest = JSON.parse(localStorage.getItem('studypilot-web-ai-open-request-v1') || 'null');
+      const pendingIsFresh = Number.isFinite(Number(pendingWebRequest?.createdAt))
+        && Date.now() - Number(pendingWebRequest.createdAt) < 10 * 60 * 1000;
+      return localStorage.getItem('studypilot-answer-method') === 'api' && !pendingIsFresh ? 'api' : 'web';
+    } catch { return 'web'; }
   });
   const chooseAnswerMethod = (method: 'api' | 'web') => {
     setAnswerMethod(method);
     try { localStorage.setItem('studypilot-answer-method', method); } catch { /* Optional preference. */ }
-    if (method === 'web') openWebAI();
   };
+  useEffect(() => {
+    const handleOpenWeb = () => {
+      setAnswerMethod('web');
+      try { localStorage.removeItem('studypilot-web-ai-open-request-v1'); } catch { /* Optional cleanup. */ }
+    };
+    window.addEventListener('studypilot:open-web-ai', handleOpenWeb);
+    return () => window.removeEventListener('studypilot:open-web-ai', handleOpenWeb);
+  }, []);
   const { status, statusText, settings, questions, currentQuestion, currentQuestionIndex, currentAnswer, answerMap, questionBank, batchRunning, liveRunning, livePaused } = useAppStore();
   // 运行状态存放在 appStore（组件随 tab 切换卸载后仍可从 store 恢复真实状态）；
   // livePausedRef 仅作 async 循环内的即时读取通道，写入时同步 store
@@ -547,7 +562,7 @@ export function AIPanel() {
       await waitWhileLivePaused();
       const applyResult = await applyAnswerToPageAsync(current, answer);
       if (!applyResult?.success) throw new Error(`第 ${current.index || step + 1} 题填入失败：${applyResult?.error || '未知错误'}`);
-      appliedCount += 1;
+      if (!applyResult?.skipped) appliedCount += 1;
 
       await waitWhileLivePaused();
       appStore.setStatus('executing', `第 ${current.index || step + 1} 题已填入，正在进入下一题。`);
@@ -598,7 +613,7 @@ export function AIPanel() {
           appStore.setStatus('executing', `正在填入第 ${question.index || '?'} 题答案。`);
           const result = await applyAnswerToPageAsync(question, answer);
           if (result?.success) {
-            appliedCount += 1;
+            if (!result?.skipped) appliedCount += 1;
             appStore.addLog('success', `第 ${question.index || '?'} 题已自动填入。`);
           } else {
             appStore.addLog('error', `第 ${question.index || '?'} 题自动填入失败：${result?.error || '未知错误'}`);
@@ -751,16 +766,40 @@ export function AIPanel() {
           <div>
             <h4 style={{ fontSize: '0.95rem', color: 'var(--text-primary)', marginBottom: 6 }}>答题流程</h4>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', lineHeight: 1.55 }}>
-              先获取当前页面题目，再解析答案，最后填入页面。自动化填入会边查题边填入，适合多题页面。
+              先获取当前页面题目，再解析答案，最后填入页面。答题模式支持 API AI 与真实网页 AI；API 模式可边查题边填入。
             </p>
           </div>
           <span className="badge badge-primary" style={{ whiteSpace: 'nowrap' }}>{questions.length} 题</span>
         </div>
 
-        <div className="answer-methods" role="radiogroup" aria-label="答题方式">
-          <label><input type="radio" name="answer-method" checked={answerMethod === 'api'} onChange={() => chooseAnswerMethod('api')} disabled={batchRunning || liveRunning || status === 'calling_ai'} />API AI</label>
-          <label><input type="radio" name="answer-method" checked={answerMethod === 'web'} onChange={() => chooseAnswerMethod('web')} disabled={batchRunning || liveRunning || status === 'calling_ai'} />网页 AI</label>
+        <div className="answer-mode-switch" role="tablist" aria-label="答题方式">
+          <button
+            className={`answer-mode-switch__button${answerMethod === 'api' ? ' is-active is-api' : ''}`}
+            role="tab"
+            aria-selected={answerMethod === 'api'}
+            onClick={() => chooseAnswerMethod('api')}
+            disabled={batchRunning || liveRunning || status === 'calling_ai'}
+          >
+            <Zap size={15} />API AI<span>接口解析</span>
+          </button>
+          <button
+            className={`answer-mode-switch__button${answerMethod === 'web' ? ' is-active is-web' : ''}`}
+            role="tab"
+            aria-selected={answerMethod === 'web'}
+            onClick={() => chooseAnswerMethod('web')}
+            disabled={batchRunning || liveRunning || status === 'calling_ai'}
+          >
+            <GlobeIcon size={15} />网页 AI<span>真实网页</span>
+          </button>
         </div>
+        <div className="answer-usage-order" aria-label="答题使用顺序">
+          <span className="answer-usage-order__label">使用顺序</span>
+          <span>01 抓题</span><i>→</i><span>02 解析</span><i>→</i><span>03 核对答案</span><i>→</i><span>04 填入</span>
+        </div>
+
+        {answerMethod === 'web' && <WebAIWorkflow embedded />}
+
+        {answerMethod === 'api' && <>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <button
             onClick={() => runAutomationAction('extract-question')}
@@ -769,7 +808,7 @@ export function AIPanel() {
             <FileQuestion size={15} /> 获取页面题目
           </button>
           <button
-            onClick={() => answerMethod === 'web' ? openWebAI() : callAllAI()}
+            onClick={callAllAI}
             disabled={!canParse}
             style={{ background: 'rgba(99,102,241,0.18)', color: 'var(--text-primary)', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: canParse ? 1 : 0.55 }}
           >
@@ -783,11 +822,11 @@ export function AIPanel() {
             <MousePointerClick size={15} /> 开始填入
           </button>
           <button
-            onClick={() => answerMethod === 'web' ? openWebAI() : callAllAIAndApplyLive()}
+            onClick={callAllAIAndApplyLive}
             disabled={liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0}
             style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0 ? 0.55 : 1 }}
           >
-            <Play size={15} /> {answerMethod === 'web' ? '网页 AI 操作' : '自动化填入'}
+            <Play size={15} /> 自动化填入
           </button>
         </div>
 
@@ -849,9 +888,10 @@ export function AIPanel() {
             </span>
           </div>
         </div>
+        </>}
       </div>
 
-      <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--primary-color)' }}>
+      {answerMethod === 'api' && <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--primary-color)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <BrainCircuit size={18} style={{ color: 'var(--primary-color)' }} />
           <h4 style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>题目抓取与答案解析</h4>
@@ -859,17 +899,17 @@ export function AIPanel() {
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>
           抓题会过滤脚本和样式噪声。解析时优先查询本地题库，未命中才调用 AI，AI 结果会自动入库。
         </p>
-      </div>
+      </div>}
 
-      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+      {answerMethod === 'api' && <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前状态</h5>
           <span className="badge badge-primary">{statusLabels[status] || status}</span>
         </div>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: 1.5 }}>{statusText}</p>
-      </div>
+      </div>}
 
-      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+      {answerMethod === 'api' && <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>题库与 AI</h5>
           {activeProvider.apiKey ? <CheckCircle2 size={16} style={{ color: 'var(--success-color)' }} /> : <AlertTriangle size={16} style={{ color: 'var(--warning-color)' }} />}
@@ -880,9 +920,9 @@ export function AIPanel() {
           <div>模型：{activeProvider.model}</div>
           <div>状态：{activeProvider.apiKey ? '已配置 API Key' : '未配置 API Key，将使用演示答案'}</div>
         </div>
-      </div>
+      </div>}
 
-      <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
+      {answerMethod === 'api' && <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>题目列表</h5>
           <span className="badge badge-primary">{questions.length} 题</span>
@@ -965,9 +1005,9 @@ export function AIPanel() {
             })}
           </div>
         )}
-      </div>
+      </div>}
 
-      {currentQuestion && (
+      {answerMethod === 'api' && currentQuestion && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>当前题目</h5>
@@ -1019,7 +1059,7 @@ export function AIPanel() {
         </div>
       )}
 
-      {currentAnswer && (
+      {answerMethod === 'api' && currentAnswer && (
         <div className="glass-panel" style={{ padding: 16, borderRadius: 8, background: 'rgba(16,185,129,0.04)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h5 style={{ color: 'var(--text-primary)', fontSize: '0.86rem' }}>参考答案</h5>
@@ -1061,10 +1101,10 @@ export function AIPanel() {
         </div>
       )}
 
-      <div className="glass-panel" style={{ padding: 14, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
+      {answerMethod === 'api' && <div className="glass-panel" style={{ padding: 14, borderRadius: 8, color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.5 }}>
         <ShieldCheck size={14} style={{ color: 'var(--primary-color)', marginBottom: 6 }} />
         AI 返回的是学习参考答案。填入选项不会自动提交，请自行核对题目上下文、课程材料和平台规则。
-      </div>
+      </div>}
     </div>
   );
 }

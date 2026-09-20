@@ -186,7 +186,7 @@ export async function runChaoxingMainTask(
   params: CxChapterRuntimeParams,
   options: { reviewMode?: boolean; unlockMode?: boolean; autoVideo?: boolean; autoRead?: boolean; autoAnswer?: boolean; videoSpeed?: number; interval?: number },
   cb: CxMainTaskCallbacks
-): Promise<void> {
+): Promise<boolean> {
   const interval = options.interval ?? 3000;
   const videoSpeed = options.videoSpeed ?? 1;
 
@@ -194,12 +194,12 @@ export async function runChaoxingMainTask(
   const data = await getCourseChapter(params.courseid, params.clazzid);
   if (!data || !data.data || !data.data[0]) {
     cb.onLog('获取课程章节失败，回退到 DOM 模式', 'error');
-    return;
+    return false;
   }
   const courseData = data.data[0].course?.data?.[0];
   if (!courseData) {
     cb.onLog('解析课程数据失败，回退到 DOM 模式', 'error');
-    return;
+    return false;
   }
   const chapterData = flattenChapterData(sortChapterData(courseData.knowledge?.data || []));
   const statusTask = chapterData.some((item) => item.status === 'task');
@@ -270,7 +270,7 @@ export async function runChaoxingMainTask(
     const back = await doTask(item);
     if (unlockChapterNum > 0) {
       cb.onLog('章节未开放（一般作业正确率不够），已暂停', 'error');
-      return;
+      return true;
     }
     if (back === 'unlock' && lastItem && options.unlockMode) {
       await unlockChapter(params.courseid, params.clazzid, lastItem.id, params.userid, params.cpi);
@@ -283,6 +283,7 @@ export async function runChaoxingMainTask(
     cb.onStatus('章节任务已全部完成');
     cb.onLog('章节全部完成', 'success');
   }
+  return true;
 }
 
 /** 单个 attachment（任务点）完成逻辑，复刻 2.txt finishTask */

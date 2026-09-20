@@ -447,9 +447,11 @@ export function BrowserPanel() {
   const [mockSubmitted, setMockSubmitted] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [showSolvingProgress, setShowSolvingProgress] = useState(false);
+  const [appliedQuestionHashes, setAppliedQuestionHashes] = useState<Set<string>>(() => new Set());
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
+  const applyBatchActiveRef = useRef(false);
   const extractQuestionResolverRef = useRef<((result: any) => void) | null>(null);
   const examNextResolverRef = useRef<((result: any) => void) | null>(null);
   const pendingScanRef = useRef<number | null>(null);
@@ -520,6 +522,7 @@ export function BrowserPanel() {
   const solvingProgress = useMemo(() => {
     const total = questions.length;
     const resolved = questions.reduce((count, question) => count + (answerMap[question.hash] ? 1 : 0), 0);
+    const applied = questions.reduce((count, question) => count + (appliedQuestionHashes.has(question.hash) ? 1 : 0), 0);
     const active = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
     const state = status === 'extracting_question'
       ? '正在抓取页面题目'
@@ -531,18 +534,22 @@ export function BrowserPanel() {
             ? '等待抓取页面题目'
             : resolved === 0
               ? `已抓取 ${total} 道，等待解析`
-              : resolved < total
-                ? `已解析 ${resolved} 道，继续处理`
+                : applied < resolved
+                  ? `已解析 ${resolved} 道，${resolved - applied} 道待手动确认`
+                : resolved < total
+                  ? `已解析 ${resolved} 道，继续处理`
                 : '本次处理完成';
 
     const progress = total > 0
-      ? resolved === total
+      ? status === 'done' && applied === total
         ? 100
-        : Math.min(94, 20 + Math.round((resolved / total) * 70) + (status === 'executing' ? 5 : 0))
+        : applied === 0 && resolved === 0
+          ? (active ? 6 : 0)
+          : Math.min(98, Math.max(4, Math.round(((applied + Math.max(0, resolved - applied) * 0.72) / total) * 100)))
       : active ? 12 : 0;
 
-    return { active, progress, resolved, state, total };
-  }, [answerMap, questions, status]);
+    return { active, progress, resolved, applied, state, total };
+  }, [answerMap, appliedQuestionHashes, questions, status]);
 
   useEffect(() => {
     const isQuestionWorkflow = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
@@ -699,8 +706,16 @@ export function BrowserPanel() {
       const result = event.args[0];
       applyAnswerResolverRef.current?.(result);
       applyAnswerResolverRef.current = null;
-      if (result?.success) appStore.setStatus('done', result.message || '答案已填入当前页面。');
-      else appStore.setStatus('error', result?.error || '答案填入失败。');
+      if (result?.success) {
+        // Keep the rail alive while a multi-question apply queue is still
+        // moving. The final batch result updates the status after the last
+        // question, so the progress animation does not disappear between
+        // questions.
+        if (!applyBatchActiveRef.current) appStore.setStatus('done', result.message || '答案已填入当前页面。');
+      }
+      else if (!(applyBatchActiveRef.current && /填空答案写入后校验失败/.test(String(result?.error || '')))) {
+        appStore.setStatus('error', result?.error || '答案填入失败。');
+      }
     }
 
     if (event.channel === 'studypilot:chapter-learning-result') {
@@ -844,6 +859,8 @@ export function BrowserPanel() {
     const handleExtractQuestionRequest = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
+      if (detail.resetProgress) setAppliedQuestionHashes(new Set());
+      setShowSolvingProgress(true);
       const webview = detail.targetTabId ? webviewRefs.current[detail.targetTabId] : getActiveWebview();
       if (detail.expectedUrl && webview?.getURL?.() !== detail.expectedUrl) {
         onComplete?.({ success: false, error: '原题目页面已跳转，请重新抓题。' });
@@ -949,6 +966,11 @@ export function BrowserPanel() {
           }
 
           setMockSelectedAnswers((prev) => ({ ...prev, ...nextSelected }));
+          setAppliedQuestionHashes((previous) => {
+            const next = new Set(previous);
+            appliedItems.forEach((item) => next.add(item.question!.hash));
+            return next;
+          });
           const labels = appliedItems
             .map((item) => `第 ${item.question?.index || '?'} 题 ${item.labels.join('、')}`)
             .join('，');
@@ -973,36 +995,90 @@ export function BrowserPanel() {
       }
 
       appStore.setStatus('executing', `正在向当前页面填入 ${items.length} 道题的答案。`);
+      applyBatchActiveRef.current = true;
       let finalResult: any = { success: true, message: `已填入 ${items.length} 道题。` };
-      for (const item of items) {
-        if (detail?.isCancelled?.()) {
-          finalResult = { success: false, error: '填入已取消。' };
-          break;
+      const skippedCompletionQuestions: string[] = [];
+      const isCompletionVerificationFailure = (result: any) => /填空答案写入后校验失败/.test(String(result?.error || ''));
+      const notifyCompletionFallback = (question: QuestionItem, error: string) => {
+        const message = `第 ${question.index || '?'} 题填空答案连续两次校验失败，已跳过。请前往答案下的题目列表查找该题答案并手动填入。`;
+        appStore.addLog('warn', `${message} ${error}`);
+        const api = (window as any).electronAPI;
+        if (api?.notify) void api.notify('填空题需要手动处理', message).catch(() => undefined);
+      };
+      try {
+        for (const item of items) {
+          if (detail?.isCancelled?.()) {
+            finalResult = { success: false, error: '填入已取消。' };
+            break;
+          }
+          if (detail.targetTabId && webview.getURL?.() !== detail.expectedUrl) {
+            finalResult = { success: false, error: '填入期间原页面已跳转，已停止。' };
+            break;
+          }
+          const sendOneAnswer = async () => {
+            const resultPromise = waitForApplyResult();
+            const sent = safeWebviewRun(() => webview.send?.('studypilot:apply-answer', {
+              questionHash: item.question.hash,
+              answer: item.answer.answer,
+              choiceLabels: item.answer.choiceLabels,
+              matchedOptions: item.answer.matchedOptions,
+              question: item.question
+            }), '发送答案填入请求失败');
+            if (!sent) {
+              applyAnswerResolverRef.current?.({ success: false, error: '发送答案填入请求失败' });
+            }
+            return resultPromise.catch((error: Error) => ({ success: false, error: error.message }));
+          };
+          let result = await sendOneAnswer();
+          if (!result?.success && isCompletionVerificationFailure(result)) {
+            appStore.addLog('warn', `第 ${item.question.index || '?'} 题填空校验失败，正在重试一次。`);
+            await new Promise((resolve) => window.setTimeout(resolve, 420));
+            result = await sendOneAnswer();
+            if (!result?.success && isCompletionVerificationFailure(result)) {
+              skippedCompletionQuestions.push(String(item.question.index || '?'));
+              notifyCompletionFallback(item.question, result.error || '未知校验错误');
+              finalResult = {
+                success: true,
+                partial: true,
+                skipped: skippedCompletionQuestions.length,
+                message: `已填入部分答案，${skippedCompletionQuestions.length} 道填空题需手动处理。`
+              };
+              continue;
+            }
+          }
+          if (!result?.success) {
+            finalResult = result;
+            appStore.setStatus('error', result?.error || '答案选择失败');
+            break;
+          }
+          setAppliedQuestionHashes((previous) => {
+            const next = new Set(previous);
+            next.add(item.question.hash);
+            return next;
+          });
+          finalResult = skippedCompletionQuestions.length > 0
+            ? { ...result, success: true, partial: true, skipped: skippedCompletionQuestions.length, message: `已填入部分答案，${skippedCompletionQuestions.length} 道填空题需手动处理。` }
+            : result;
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
         }
-        if (detail.targetTabId && webview.getURL?.() !== detail.expectedUrl) {
-          finalResult = { success: false, error: '填入期间原页面已跳转，已停止。' };
-          break;
+        if (skippedCompletionQuestions.length > 0 && finalResult?.success !== false) {
+          finalResult = {
+            ...finalResult,
+            success: true,
+            partial: true,
+            skipped: skippedCompletionQuestions.length,
+            message: `已填入部分答案，${skippedCompletionQuestions.length} 道填空题需手动处理。`
+          };
         }
-        const resultPromise = waitForApplyResult();
-        const sent = safeWebviewRun(() => webview.send?.('studypilot:apply-answer', {
-          questionHash: item.question.hash,
-          answer: item.answer.answer,
-          choiceLabels: item.answer.choiceLabels,
-          matchedOptions: item.answer.matchedOptions,
-          question: item.question
-        }), '发送答案填入请求失败');
-        if (!sent) {
-          applyAnswerResolverRef.current?.({ success: false, error: '发送答案填入请求失败' });
-        }
-        const result = await resultPromise.catch((error: Error) => ({ success: false, error: error.message }));
-        if (!result?.success) {
-          finalResult = result;
-          appStore.setStatus('error', result?.error || '答案选择失败');
-          break;
-        }
-        finalResult = result;
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
+      } catch (error: any) {
+        finalResult = { success: false, error: error?.message || '答案填入过程中发生未知错误。' };
+        appStore.setStatus('error', finalResult.error);
+      } finally {
+        // Always release the batch guard, including unexpected WebView errors.
+        applyBatchActiveRef.current = false;
       }
+      if (finalResult?.success) appStore.setStatus('done', finalResult.message || '答案已填入当前页面。');
+      else if (finalResult?.error) appStore.setStatus('error', finalResult.error);
       onComplete?.(finalResult);
     };
 
@@ -1189,6 +1265,7 @@ export function BrowserPanel() {
   };
 
   const extractQuestion = () => {
+    setAppliedQuestionHashes(new Set());
     setShowSolvingProgress(true);
     appStore.setStatus('extracting_question', activeSource === 'webview' ? '正在从当前页面抓取题目。' : '正在从演示页面抓取题目。');
     if (activeSource === 'webview') {
@@ -1197,6 +1274,7 @@ export function BrowserPanel() {
       return;
     }
     appStore.setQuestions(mockQuestions.map((question) => ({ ...question, capturedAt: Date.now() })));
+    setAppliedQuestionHashes(new Set());
     appStore.setStatus('done', `题目抓取完成，共 ${mockQuestions.length} 题。`);
   };
 
@@ -1466,13 +1544,17 @@ export function BrowserPanel() {
                 <span className="browser-solving-dock__eyebrow">答题流程</span>
                 <strong>{solvingProgress.state}</strong>
               </div>
-              <output aria-label={`已处理 ${solvingProgress.resolved} 道，共 ${solvingProgress.total} 道`}>
-                {solvingProgress.total > 0 ? `${solvingProgress.resolved} / ${solvingProgress.total}` : '--'}
+              <output aria-label={`已填入 ${solvingProgress.applied} 道，共 ${solvingProgress.total} 道`}>
+                {solvingProgress.total > 0 ? `${solvingProgress.applied} / ${solvingProgress.total}` : '--'}
               </output>
             </div>
             <div className="browser-solving-dock__rail" aria-hidden="true">
               <span style={{ width: `${solvingProgress.progress}%` }} />
             </div>
+            {solvingProgress.total > 0 && <div className="browser-solving-dock__trail" aria-label={`已解析 ${solvingProgress.resolved} 道，已填入 ${solvingProgress.applied} 道`}>
+              <span>解析 {solvingProgress.resolved}/{solvingProgress.total}</span>
+              <span>填入 {solvingProgress.applied}/{solvingProgress.total}</span>
+            </div>}
           </section>
           }
         </div>

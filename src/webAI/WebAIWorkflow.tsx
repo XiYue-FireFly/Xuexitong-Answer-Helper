@@ -10,8 +10,30 @@ import { sendWebPrompt } from './sendPrompt';
 import './web-ai.css';
 
 const PENDING_KEY = 'studypilot-web-ai-pending-v1';
+const OPEN_REQUEST_KEY = 'studypilot-web-ai-open-request-v1';
+
+export type WebAIWorkflowProps = { embedded?: boolean };
+
 export function openWebAI(importOnly = false) {
+  try {
+    // Keep the request until the answer tab mounts. This matters when the
+    // action originates from the question-bank tab, where AIPanel is not
+    // mounted yet.
+    localStorage.setItem(OPEN_REQUEST_KEY, JSON.stringify({ importOnly, createdAt: Date.now() }));
+  } catch { /* The in-memory event below is still enough when the tab is open. */ }
   window.dispatchEvent(new CustomEvent('studypilot:open-web-ai', { detail: { importOnly } }));
+}
+
+function takeOpenRequest() {
+  try {
+    const value = JSON.parse(localStorage.getItem(OPEN_REQUEST_KEY) || 'null');
+    if (value && typeof value.createdAt === 'number' && Date.now() - value.createdAt < 10 * 60 * 1000) {
+      localStorage.removeItem(OPEN_REQUEST_KEY);
+      return { importOnly: Boolean(value.importOnly) };
+    }
+    localStorage.removeItem(OPEN_REQUEST_KEY);
+  } catch { /* Ignore an unavailable persisted request. */ }
+  return null;
 }
 function restorePending(): WebBatch | null {
   try {
@@ -30,14 +52,14 @@ function requestPage(channel: string, detail: Record<string, unknown>, timeout =
   });
 }
 
-export function WebAIWorkflow() {
+export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const { questions, settings } = useAppStore();
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(embedded);
   const [provider, setProvider] = useState<WebProvider>(() => {
     try { const value = restorePending()?.provider || localStorage.getItem('studypilot-web-ai-provider'); return WEB_AI_PROVIDERS.find(p => p.id === value)?.id || 'deepseek'; } catch { return 'deepseek'; }
   });
   const [mode, setMode] = useState<'internal' | 'external'>('internal');
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => questions.map(q => q.hash));
   const [batch, setBatch] = useState<WebBatch | null>(restorePending);
   const [prompt, setPrompt] = useState(() => { const pending = restorePending(); return pending ? buildWebPrompt(pending) : ''; });
   const [reply, setReply] = useState('');
@@ -61,8 +83,9 @@ export function WebAIWorkflow() {
   const canSend = !busy && canUseTab && attemptedRequest !== batch?.requestId;
 
   useEffect(() => {
-    if (visible) dialogRef.current?.showModal(); else dialogRef.current?.close();
-  }, [visible]);
+    if (embedded || !dialogRef.current) return;
+    if (visible) dialogRef.current.showModal(); else dialogRef.current.close();
+  }, [embedded, visible]);
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
@@ -72,6 +95,15 @@ export function WebAIWorkflow() {
     window.addEventListener('studypilot:open-web-ai', open);
     return () => window.removeEventListener('studypilot:open-web-ai', open);
   }, [busy]);
+  useEffect(() => {
+    const pending = takeOpenRequest();
+    if (!pending) return;
+    setVisible(true);
+    if (!pending.importOnly && !busy) setSelected(appStore.getState().questions.map(q => q.hash));
+  }, [busy]);
+  useEffect(() => {
+    if (!batch) setSelected(questions.map(question => question.hash));
+  }, [batch, questions]);
   useEffect(() => () => {
     runRef.current++;
     if (ownsTaskRef.current) appStore.setAutomationRunning({ batchRunning: false });
@@ -120,6 +152,39 @@ export function WebAIWorkflow() {
       try { localStorage.setItem(PENDING_KEY, JSON.stringify(next.batch)); localStorage.setItem('studypilot-web-ai-provider', provider); } catch { /* The current session can still continue. */ }
       setMessage(`已生成 ${next.batch.questions.length} 题提示词，共 ${next.prompt.length.toLocaleString()} 字符。`);
     } catch (error) { setMessage((error as Error).message); }
+  };
+
+  const extractQuestions = async () => {
+    if (busy) return;
+    const run = beginAction();
+    if (run === null) return;
+    try {
+      if (!settings.allowRealPageAutomation) throw new Error('请先在设置中启用真实 WebView。');
+      const source = await browserCommand<BrowserSource>({ action: 'source', tabId: sourceRef.current?.tabId });
+      checkRun(run);
+      sourceRef.current = source;
+      const result = await requestPage('studypilot:extract-question-request', {
+        targetTabId: source.tabId,
+        expectedUrl: source.url,
+        resetProgress: true
+      });
+      checkRun(run);
+      const extracted = (Array.isArray(result.questions) ? result.questions : result.data ? [result.data] : [])
+        .filter(Boolean) as QuestionItem[];
+      if (extracted.length === 0) throw new Error('当前页面未识别到可用题目。');
+      setSelected(extracted.map(question => question.hash));
+      setBatch(null);
+      setPrompt('');
+      setReply('');
+      setImported(false);
+      setCompletedItems([]);
+      setRemaining([]);
+      setAttemptedRequest('');
+      setPosition({ current: 0, total: 0 });
+      setMessage(`已抓取 ${extracted.length} 道题，请点击“生成提示词”。`);
+      appStore.setStatus('done', `网页 AI 已抓取 ${extracted.length} 道题。`);
+    } catch (error) { showError(error, run); }
+    finally { finishAction(run); }
   };
 
   const openWebsite = async () => {
@@ -261,18 +326,7 @@ export function WebAIWorkflow() {
   const hasReply = Boolean(reply.trim());
   const hasPreview = Boolean(preview?.items.length);
 
-  return <>
-    {!visible && (busy || canUseTab) && <div className="web-ai-task" role="status">
-      <Globe size={16} /><span>{message}</span>
-      <div className="web-ai-task-actions">
-        <button onClick={() => void send()} disabled={!canSend}><Send size={15} />发送提示词</button>
-        <button onClick={() => void read()} disabled={busy || !canUseTab}><ClipboardPaste size={15} />提取答案</button>
-        <button onClick={() => setVisible(true)}>查看</button>
-        {busy && <button onClick={stop} title="停止网页 AI"><Square size={15} /></button>}
-      </div>
-    </div>}
-    <dialog ref={dialogRef} className="web-ai-dialog" onCancel={() => setVisible(false)} onClose={() => setVisible(false)} aria-labelledby="web-ai-title">
-      <header><h2 id="web-ai-title"><Globe size={20} />网页 AI</h2><button onClick={() => setVisible(false)} title="关闭弹窗"><X size={18} /></button></header>
+  const workflowBody = (
       <div className="web-ai-body">
         {/* AI 网站选择区 */}
         <fieldset disabled={busy}>
@@ -292,6 +346,10 @@ export function WebAIWorkflow() {
               <span className="web-ai-step-status">{hasQuestions ? `已抓取 ${questions.length} 题` : '请先前往题目页抓题'}</span>
             </div>
             <div className="web-ai-step-body">
+              <button disabled={busy || !settings.allowRealPageAutomation} onClick={() => void extractQuestions()}>
+                <ClipboardPaste size={15} />
+                获取页面题目
+              </button>
               <button
                 disabled={busy || !hasSelected}
                 onClick={() => generate()}
@@ -427,6 +485,36 @@ export function WebAIWorkflow() {
           </section>}
         </>}
       </div>
+  );
+
+  if (embedded) {
+    return (
+      <section className="web-ai-inline" aria-labelledby="web-ai-title">
+        <header className="web-ai-inline__header">
+          <div>
+            <span className="web-ai-inline__eyebrow">REAL WEB WORKFLOW</span>
+            <h2 id="web-ai-title"><Globe size={19} />网页 AI 答题</h2>
+          </div>
+          <span className="web-ai-inline__live"><span />真实 WebView</span>
+        </header>
+        {workflowBody}
+      </section>
+    );
+  }
+
+  return <>
+    {!visible && (busy || canUseTab) && <div className="web-ai-task" role="status">
+      <Globe size={16} /><span>{message}</span>
+      <div className="web-ai-task-actions">
+        <button onClick={() => void send()} disabled={!canSend}><Send size={15} />发送提示词</button>
+        <button onClick={() => void read()} disabled={busy || !canUseTab}><ClipboardPaste size={15} />提取答案</button>
+        <button onClick={() => setVisible(true)}>查看</button>
+        {busy && <button onClick={stop} title="停止网页 AI"><Square size={15} /></button>}
+      </div>
+    </div>}
+    <dialog ref={dialogRef} className="web-ai-dialog" onCancel={() => setVisible(false)} onClose={() => setVisible(false)} aria-labelledby="web-ai-title">
+      <header><h2 id="web-ai-title"><Globe size={20} />网页 AI</h2><button onClick={() => setVisible(false)} title="关闭弹窗"><X size={18} /></button></header>
+      {workflowBody}
     </dialog>
   </>;
 }

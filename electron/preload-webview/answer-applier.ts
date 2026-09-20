@@ -330,8 +330,81 @@ function answerPartsFromPayload(payload: AnswerApplyPayload) {
 
 function isFillQuestion(payload: AnswerApplyPayload) {
   const root = questionRootForPayload(payload);
-  const hasFields = root.querySelectorAll('textarea, input[type="text"], input:not([type]), [contenteditable="true"]').length > 0;
+  const hasFields = collectCompletionFields(root).length > 0;
   return payload.question?.type === 'completion' || (hasFields && extractOptionTargets(root).length === 0);
+}
+
+const COMPLETION_FIELD_SELECTOR = 'textarea, input[type="text"], input:not([type]), [contenteditable="true"]';
+
+/**
+ * UEditor and several Chaoxing pages put the actual editable body in a same-
+ * origin iframe. querySelector on the question root cannot cross that frame,
+ * so the old completion path incorrectly reported that no blank input existed.
+ */
+function collectCompletionFields(root: HTMLElement) {
+  const fields: HTMLElement[] = [];
+  const seen = new Set<HTMLElement>();
+  const add = (element: HTMLElement | null) => {
+    if (element && !seen.has(element)) {
+      seen.add(element);
+      fields.push(element);
+    }
+  };
+  const scanDocument = (doc: Document) => {
+    doc.querySelectorAll(COMPLETION_FIELD_SELECTOR).forEach((element) => add(element as HTMLElement));
+    const body = doc.body;
+    if (body && (body.isContentEditable || doc.designMode === 'on')) add(body);
+    doc.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        if (frame.contentDocument) scanDocument(frame.contentDocument);
+      } catch {
+        // Cross-origin editor frames cannot be inspected; retain the normal
+        // DOM fallback for those pages.
+      }
+    });
+  };
+  root.querySelectorAll(COMPLETION_FIELD_SELECTOR).forEach((element) => add(element as HTMLElement));
+  root.querySelectorAll('iframe').forEach((frame) => {
+    try {
+      if (frame.contentDocument) scanDocument(frame.contentDocument);
+    } catch {
+      // Ignore inaccessible frames.
+    }
+  });
+  return fields.filter(isCompletionField);
+}
+
+function dispatchEditorInput(element: HTMLElement) {
+  const EventCtor = element.ownerDocument.defaultView?.Event || Event;
+  element.dispatchEvent(new EventCtor('input', { bubbles: true }));
+  element.dispatchEvent(new EventCtor('change', { bubbles: true }));
+}
+
+function formatRichTextAnswer(element: HTMLElement, value: string) {
+  const doc = element.ownerDocument;
+  const lines = String(value || '').replace(/\r\n?/g, '\n').split('\n');
+  const ordered = lines.length > 0 && lines.every((line) => !line.trim() || /^\s*\d+[.、)]\s+/.test(line));
+  const unordered = lines.length > 0 && lines.every((line) => !line.trim() || /^\s*[-*•·]\s+/.test(line));
+  element.replaceChildren();
+
+  if (ordered || unordered) {
+    const list = doc.createElement(ordered ? 'ol' : 'ul');
+    lines.filter((line) => line.trim()).forEach((line) => {
+      const item = doc.createElement('li');
+      item.textContent = line.replace(/^\s*(?:\d+[.、)]|[-*•·])\s+/, '');
+      list.appendChild(item);
+    });
+    element.appendChild(list);
+    return;
+  }
+
+  lines.forEach((line, index) => {
+    const paragraph = doc.createElement('p');
+    // Keep the requested two-character first-line indent as actual text so it
+    // survives UEditor serialization and answer verification.
+    paragraph.textContent = `${index === 0 ? '　　' : ''}${line}`;
+    element.appendChild(paragraph);
+  });
 }
 
 function fillElementValue(element: HTMLElement, value: string) {
@@ -344,11 +417,12 @@ function fillElementValue(element: HTMLElement, value: string) {
     const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set;
     if (nativeSetter) nativeSetter.call(element, value);
     else element.value = value;
-  } else if (element.isContentEditable) {
-    element.textContent = value;
+  } else if (element.isContentEditable || element.ownerDocument.designMode === 'on') {
+    formatRichTextAnswer(element, value);
   }
-  dispatchInput(element);
-  element.dispatchEvent(new Event('blur', { bubbles: true }));
+  dispatchEditorInput(element);
+  const EventCtor = element.ownerDocument.defaultView?.Event || Event;
+  element.dispatchEvent(new EventCtor('blur', { bubbles: true }));
 }
 
 function isCompletionField(element: HTMLElement) {
@@ -365,18 +439,31 @@ function isCompletionField(element: HTMLElement) {
 }
 
 function cleanCompletionValue(rawValue: string) {
-  return cleanText(rawValue)
+  let value = String(rawValue || '')
+    .replace(/\r\n?/g, '\n')
     .replace(/^(?:答案|参考答案|填空答案)\s*[:：]\s*/i, '')
     .replace(/\s*(?:解析|分析|说明)\s*[:：][\s\S]*$/i, '')
-    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
-    .trim();
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
+  // Remove transport-only blank lines while preserving meaningful leading
+  // indentation (for example the required two-character paragraph indent).
+  value = value.replace(/^\n+|\n+$/g, '').replace(/[ \t]+$/g, '');
+  return value;
 }
 
-function completionValuesFromPayload(payload: AnswerApplyPayload) {
+function completionValuesFromPayload(payload: AnswerApplyPayload, fieldCount = 1) {
   const raw = [
     payload.answer,
     ...(payload.matchedOptions || [])
   ].map((item) => cleanCompletionValue(item)).filter(Boolean).join('\n');
+  // Web AI uses ## as the unambiguous blank separator. Do this before the
+  // legacy numbered/comma parsing so punctuation and paragraph formatting in
+  // an answer are preserved exactly as the user/model supplied them.
+  const hashSeparated = raw
+    // Only trim ASCII transport spaces around ##. Full-width spaces after a
+    // separator can be intentional first-line indentation and must survive.
+    .split(/[ \t]*##[ \t]*/g)
+    .map((part) => cleanCompletionValue(part));
+  if (hashSeparated.length > 1 && hashSeparated.some(Boolean)) return hashSeparated;
   // 空序号识别必须避开小数：
   // - “第1空: xxx / 1空 xxx”要求带“空/题”关键字；
   // - “1: xxx / 1、xxx”使用非点分隔符；
@@ -392,7 +479,7 @@ function completionValuesFromPayload(payload: AnswerApplyPayload) {
     .replace(/^\d+\s*[:：、)]\s*/, '')
     .replace(/^\d+\.\s+/, '');
   const parts = raw
-    .split(/(?:\n|;|；|\|)/g)
+    .split(fieldCount > 1 ? /(?:\n|;|；|\|)/g : /(?:;|；|\|)/g)
     .map(stripLeadingIndex)
     .filter(Boolean);
   if (parts.length > 1) return parts;
@@ -404,6 +491,52 @@ function completionValuesFromPayload(payload: AnswerApplyPayload) {
   if (commaParts.length > 1 && commaParts.every((part) => part.length <= 40)) return commaParts;
 
   return [cleanCompletionValue(payload.answer || raw || '')].filter(Boolean);
+}
+
+function completionFieldValue(element: HTMLElement) {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return element.value;
+  const doc = element.ownerDocument;
+  const listText = Array.from(element.querySelectorAll('ol, ul')).map((list) => {
+    const ordered = list.tagName.toLowerCase() === 'ol';
+    return Array.from(list.querySelectorAll(':scope > li'))
+      .map((item, index) => `${ordered ? `${index + 1}. ` : '• '}${item.textContent || ''}`)
+      .join('\n');
+  });
+  if (listText.length > 0) return listText.join('\n');
+  const paragraphs = Array.from(element.querySelectorAll(':scope > p'));
+  if (paragraphs.length > 0) return paragraphs.map((paragraph) => paragraph.textContent || '').join('\n');
+  return doc.body === element ? element.textContent || '' : element.textContent || '';
+}
+
+function completionFieldMatches(element: HTMLElement, expected: string) {
+  const rich = !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement);
+  const lines = String(expected || '').replace(/\r\n?/g, '\n').split('\n');
+  const ordered = lines.length > 0 && lines.every((line) => !line.trim() || /^\s*\d+[.、)]\s+/.test(line));
+  const unordered = lines.length > 0 && lines.every((line) => !line.trim() || /^\s*[-*•·]\s+/.test(line));
+  const expectedValue = rich && ordered
+    ? lines.filter((line) => line.trim()).map((line, index) => `${index + 1}. ${line.replace(/^\s*\d+[.、)]\s+/, '')}`).join('\n')
+    : rich && unordered
+      ? lines.filter((line) => line.trim()).map((line) => `• ${line.replace(/^\s*[-*•·]\s+/, '')}`).join('\n')
+      : rich && !/^\s|\u3000/.test(expected)
+        ? `　　${expected}`
+        : expected;
+  const actual = completionFieldValue(element);
+  const normalizeLineEndings = (value: string) => String(value || '').replace(/\r\n?/g, '\n');
+  if (normalizeLineEndings(actual) === normalizeLineEndings(expectedValue)) return true;
+  // If the answer intentionally carries paragraph breaks or leading
+  // indentation, a whitespace-collapsed comparison would hide a real format
+  // loss and incorrectly skip the retry.
+  if (/^\s|\n|\u3000/.test(expectedValue)) return false;
+  // Textareas/editors may normalize line endings or collapse incidental
+  // whitespace; do not reject meaningful indentation/content changes.
+  return cleanText(actual) === cleanText(expected);
+}
+
+function rewriteCompletionFields(fields: HTMLElement[], values: string[], sourceFields = fields) {
+  fields.forEach((field) => {
+    const index = sourceFields.indexOf(field);
+    fillElementValue(field, values[index >= 0 ? index : 0] ?? values[0] ?? '');
+  });
 }
 
 function syncCompletionAnswerWithPage(qid: string, values: string[]) {
@@ -424,13 +557,12 @@ function syncCompletionAnswerWithPage(qid: string, values: string[]) {
 
 function applyCompletionAnswer(payload: AnswerApplyPayload) {
   const root = questionRootForPayload(payload);
-  const fields = (Array.from(root.querySelectorAll('textarea, input[type="text"], input:not([type]), [contenteditable="true"]')) as HTMLElement[])
-    .filter(isCompletionField);
+  const fields = collectCompletionFields(root);
   if (fields.length === 0) return { success: false, error: '未找到可填写的填空输入框。' };
 
-  const values = completionValuesFromPayload(payload);
+  const values = completionValuesFromPayload(payload, fields.length);
   if (values.length === 0) return { success: false, error: '填空答案为空，未执行填入。' };
-  fields.forEach((field, index) => fillElementValue(field, values[index] || values[0] || ''));
+  rewriteCompletionFields(fields, values);
 
   const qid = qidForPayload(payload);
   if (qid) {
@@ -444,14 +576,18 @@ function applyCompletionAnswer(payload: AnswerApplyPayload) {
   syncCompletionAnswerWithPage(qid, values);
 
   const failedFields = fields.filter((field, index) => {
-    const expected = values[index] || values[0] || '';
-    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-      return cleanText(field.value) !== cleanText(expected);
-    }
-    return cleanText(field.textContent || '') !== cleanText(expected);
+    const expected = values[index] ?? values[0] ?? '';
+    return !completionFieldMatches(field, expected);
   });
   if (failedFields.length > 0) {
-    return { success: false, error: `填空答案写入后校验失败：${failedFields.length} 个输入框未保持目标值。`, values };
+    // Some controlled editors overwrite the first native setter call in the
+    // next microtask. One bounded retry handles that race without touching the
+    // surrounding answer-selection pipeline.
+    rewriteCompletionFields(failedFields, values, fields);
+    const stillFailed = fields.filter((field, index) => !completionFieldMatches(field, values[index] ?? values[0] ?? ''));
+    if (stillFailed.length > 0) {
+      return { success: false, error: `填空答案写入后校验失败：${stillFailed.length} 个输入框未保持目标值。`, values, retryable: true };
+    }
   }
 
   const warning = fields.length > values.length ? `答案数量少于空格数量，已将第一个答案复用到剩余 ${fields.length - values.length} 个空。` : '';

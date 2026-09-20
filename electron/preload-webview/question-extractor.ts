@@ -79,6 +79,13 @@ export const OPTION_SELECTORS = [
   'li'
 ];
 
+const TEXT_ENTRY_SELECTORS = 'textarea, input[type="text"], input:not([type]), [contenteditable="true"]';
+const QUESTION_ROOT_SELECTOR = [
+  '.questionLi', '[data-question]', '[data-sp-question]', '[qid][qtype]',
+  '[questionid][qtype]', '.question', '.question-item', '.subject-item',
+  '.exam-question', '.singleQuestionDiv', '.timu', '.TiMu', '.CeSheng', '.questionCard'
+].join(',');
+
 export function readQuestionTypeHint(root: HTMLElement) {
   const qid = root.getAttribute('qid') ||
     root.getAttribute('questionid') ||
@@ -120,14 +127,34 @@ function inferTypeFromDom(root: HTMLElement, options: string[]): QuestionType {
   const typeText = `${hint.typeName} ${text}`;
   const hasMultipleMarker = Boolean(root.querySelector('.num_option_dx, [role="checkbox"], input[type="checkbox"]'));
   const hasSingleMarker = Boolean(root.querySelector('.num_option, [role="radio"], input[type="radio"]'));
+  const textEntryElements = Array.from(root.querySelectorAll(TEXT_ENTRY_SELECTORS)) as HTMLElement[];
+  const hasCompletionEditor = textEntryElements.some((element) => {
+    const metadata = [
+      element.className,
+      element.id,
+      element.getAttribute('name'),
+      element.getAttribute('data-type'),
+      element.getAttribute('placeholder'),
+      element.parentElement?.className
+    ].filter(Boolean).join(' ');
+    return /blank|fill|completion|cloze|填空/i.test(metadata);
+  });
+  const hasCompletionCue = qtype === '2' || /填空题|填空|第\s*\d+\s*空|_{2,}|\bblank\s*\d+/i.test(typeText) || hasCompletionEditor;
+  const hasRichTextEditor = textEntryElements.some((element) =>
+    element.matches('[contenteditable="true"]') && !hasCompletionEditor
+  );
 
+  // Text-entry semantics must win over generic `li` option extraction. A
+  // material/essay question often contains ordered list items, which should
+  // never turn a textarea-based question into a single-choice question.
+  if (textEntryElements.length > 0 && hasCompletionCue) return 'completion';
+  if (qtype === '4' || /问答题|简答题|论述题|作文题|资料题|材料题|综合题/i.test(typeText)) return 'essay';
   if (qtype === '1' || hasMultipleMarker || checkboxes > 0 || /\u591a\u9009\u9898|\u591a\u9879\u9009\u62e9|\u591a\u9009/.test(typeText)) return 'multiple';
   if (qtype === '3' || (radios === 2 && /正确|错误|对|错|true|false/i.test(text))) return 'judgement';
   if (qtype === '2' || /\u586b\u7a7a\u9898|\u586b\u7a7a/.test(typeText)) return 'completion';
-  if (qtype === '4' || /\u95ee\u7b54\u9898|\u7b80\u7b54\u9898|\u8bba\u8ff0\u9898/.test(typeText)) return 'essay';
   if (qtype === '0' || /\u5355\u9009\u9898|\u5355\u9879\u9009\u62e9|\u5355\u9009/.test(typeText) || radios > 0 || hasSingleMarker || options.length >= 2) return 'single';
-  if (textareas > 0) return 'essay';
-  if (textInputs > 0) return 'completion';
+  if (textareas > 0 || hasRichTextEditor) return 'essay';
+  if (textInputs > 0 && hasCompletionCue) return 'completion';
   return 'unknown';
 }
 
@@ -135,12 +162,12 @@ function inferTypeFromText(text: string, options: string[]): QuestionType {
   if (/\u591a\u9009\u9898|\u591a\u9879\u9009\u62e9|\u591a\u9009/i.test(text)) return 'multiple';
   if ((/\u5224\u65ad\u9898|\u5224\u65ad|\u6b63\u786e|\u9519\u8bef|\u5bf9|\u9519|true|false/i.test(text)) && options.length <= 2) return 'judgement';
   if (/\u586b\u7a7a\u9898|\u586b\u7a7a/i.test(text)) return 'completion';
-  if (/\u95ee\u7b54\u9898|\u7b80\u7b54\u9898|\u8bba\u8ff0\u9898/i.test(text)) return 'essay';
+  if (/\u95ee\u7b54\u9898|\u7b80\u7b54\u9898|\u8bba\u8ff0\u9898|\u8d44\u6599\u9898|\u6750\u6599\u9898|\u7efc\u5408\u9898|\u4f5c\u6587\u9898/i.test(text)) return 'essay';
   if (/\u5355\u9009\u9898|\u5355\u9879\u9009\u62e9|\u5355\u9009|\u9009\u62e9\u9898/i.test(text)) return 'single';
   if (/多选题|多项选择/i.test(text)) return 'multiple';
   if (/判断题|正确|错误|对|错|true|false/i.test(text) && options.length <= 2) return 'judgement';
   if (/填空题/i.test(text)) return 'completion';
-  if (/问答题|简答题|论述题/i.test(text)) return 'essay';
+  if (/问答题|简答题|论述题|资料题|材料题|综合题|作文题/i.test(text)) return 'essay';
   if (/单选题|选择题/i.test(text) || options.length >= 2) return 'single';
   return 'unknown';
 }
@@ -152,6 +179,26 @@ function isNoiseText(text: string) {
   if (/(function\s+\w+|var\s+\w+\s*=|\$\(|\.css|@keyframes|document\.|window\.|ajax|submitWork|ready2Submit)/i.test(normalized)) return true;
   const codeHits = (normalized.match(/[{}();=<>]/g) || []).length;
   return codeHits > Math.max(12, normalized.length / 20);
+}
+
+export function isQuestionMetadataOnly(rawText: string) {
+  let text = cleanText(rawText)
+    .replace(/^\s*\d{1,3}\s*[.、．)]\s*/, '')
+    .trim();
+  text = text.replace(/^[（(【\[]\s*/, '').replace(/[）)】\]]\s*$/, '').trim();
+  return /^(?:单选题|多选题|判断题|填空题|问答题|简答题|论述题|资料题|材料题|综合题|作文题)(?:\s*[,，:：]?\s*\d+(?:\.\d+)?\s*分?)?$/i.test(text);
+}
+
+export function isQuestionRootTextNoise(rawText: string) {
+  const text = cleanText(rawText);
+  if (!text) return true;
+  if (text.length <= 2500) return isNoiseText(text);
+  // A material/reading question can legitimately be long. Keep the normal
+  // code-noise checks, but do not apply the body-page length limit to a known
+  // question root.
+  if (/(function\s+\w+|var\s+\w+\s*=|\$\(|\.css|@keyframes|document\.|window\.|ajax|submitWork|ready2Submit)/i.test(text)) return true;
+  const codeHits = (text.match(/[{}();=<>]/g) || []).length;
+  return codeHits > Math.max(24, text.length / 20);
 }
 
 function isLikelyReadingContext(text: string) {
@@ -297,6 +344,15 @@ export function dedupeOptionTargets(targets: QuestionOptionTarget[]) {
     });
 }
 
+function isLikelyOptionListItem(element: HTMLElement) {
+  const text = cleanText(element.textContent || '');
+  if (!text || text.length > 240) return false;
+  const optionClass = /(?:^|[-_])(option|answer|choice)(?:[-_]|$)/i.test(element.className || '');
+  const hasControl = Boolean(element.querySelector('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]'));
+  const hasLetterPrefix = /^\s*[A-HＡ-Ｈ]\s*[.、．):：。)]\s*/i.test(text);
+  return optionClass || hasControl || hasLetterPrefix;
+}
+
 export function extractOptionTargets(root: HTMLElement) {
   const chaoxingExamTargets = normalizeOptionTargets(optionTargetsFromElements((Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[])
     .filter((element) => element.querySelector('.num_option, .num_option_dx') && element.querySelector('.answer_p'))));
@@ -310,7 +366,9 @@ export function extractOptionTargets(root: HTMLElement) {
   if (inputTargets.length >= 2) return inputTargets.slice(0, 12);
 
   for (const selector of OPTION_SELECTORS) {
-    const targets = normalizeOptionTargets(optionTargetsFromElements(Array.from(root.querySelectorAll(selector)) as HTMLElement[]));
+    const elements = Array.from(root.querySelectorAll(selector)) as HTMLElement[];
+    const filtered = selector === 'li' ? elements.filter(isLikelyOptionListItem) : elements;
+    const targets = normalizeOptionTargets(optionTargetsFromElements(filtered));
     if (targets.length >= 2) return targets.slice(0, 12);
   }
 
@@ -350,32 +408,53 @@ function findQuestionText(root: HTMLElement, optionTargets: QuestionOptionTarget
         .map((node) => node.textContent || '')
         .join(' '));
     }
-    if (!isNoiseText(text) && text.length >= 4) return text;
+    if (!isQuestionRootTextNoise(text) && text.length >= 4 && !isQuestionMetadataOnly(text)) return text;
   }
 
   for (const selector of TITLE_SELECTORS) {
     const element = root.querySelector(selector);
     if (!element) continue;
     const text = visibleText(element);
-    if (!isNoiseText(text) && text.length >= 4) return text;
+    if (!isQuestionRootTextNoise(text) && text.length >= 4 && !isQuestionMetadataOnly(text)) return text;
   }
 
   const clone = root.cloneNode(true) as HTMLElement;
   removeNoise(clone);
-  OPTION_SELECTORS.forEach((selector) => clone.querySelectorAll(selector).forEach((node) => node.remove()));
+  clone.querySelectorAll(TEXT_ENTRY_SELECTORS).forEach((node) => node.remove());
+  clone.querySelectorAll(TITLE_SELECTORS.join(',')).forEach((node) => {
+    if (isQuestionMetadataOnly(visibleText(node))) node.remove();
+  });
+  OPTION_SELECTORS.filter((selector) => selector !== 'li').forEach((selector) => clone.querySelectorAll(selector).forEach((node) => node.remove()));
+  if (optionTargets.length > 0) {
+    clone.querySelectorAll('li').forEach((node) => {
+      const text = normalizeText(visibleText(node));
+      if (optionTargets.some((target) => normalizeText(target.text) === text)) node.remove();
+    });
+  }
   let text = cleanText(clone.textContent || '');
   for (const option of optionTargets) text = text.replace(option.text, '');
-  return cleanText(text);
+  return cleanText(text).replace(/^\s*\d{1,3}\s*[.、．)]\s*/, '').trim();
 }
 
 function questionFromRoot(root: HTMLElement, index: number): ExtractedQuestion | null {
   const optionTargets = extractOptionTargets(root);
   const options = optionTargets.map((target) => target.text);
   const question = findQuestionText(root, optionTargets);
+  const inputFields = Array.from(root.querySelectorAll(TEXT_ENTRY_SELECTORS)).filter((element) => isVisible(element as HTMLElement));
+  const hint = readQuestionTypeHint(root);
+  const inferredType = inferTypeFromDom(root, options);
+  const explicitEssay = hint.qtype === '4' || inferredType === 'essay' || /问答题|简答题|论述题|作文题|资料题|材料题|综合题/i.test(`${hint.typeName} ${question || ''}`);
+  const hasBlankCue = /填空|第\s*\d+\s*空|_{2,}|\bblank\s*\d+/i.test(question || '');
+  const isLikelyCompletion = !explicitEssay && inputFields.length > 0 && (hasBlankCue || inferTypeFromDom(root, options) === 'completion');
 
-  if (!question || isNoiseText(question)) return null;
+  if (!question || isQuestionRootTextNoise(question) || isQuestionMetadataOnly(question)) return null;
   if (options.length > 0 && question.length > 1200) return null;
-  if (options.length === 0 && !/[？?]|(单选|多选|判断|填空|问答|题)/.test(question)) return null;
+  // Open-ended questions commonly end with a full stop rather than a question
+  // mark, and the type label itself may live in a separate metadata heading
+  // (for example “21.（论述题，30分）”).  In that layout the cleaned stem no
+  // longer contains the word “论述题”, so the generic punctuation/type guard
+  // used to discard the otherwise valid question before it reached the prompt.
+  if (options.length === 0 && !isLikelyCompletion && !explicitEssay && !/[？?]|(单选|多选|判断|填空|问答|题)/.test(question)) return null;
 
   return {
     id: `q_${Date.now()}_${index}`,
@@ -383,7 +462,7 @@ function questionFromRoot(root: HTMLElement, index: number): ExtractedQuestion |
     question,
     options,
     optionTargets,
-    type: inferTypeFromDom(root, options),
+    type: isLikelyCompletion ? 'completion' : inferredType,
     source: 'webview',
     pageUrl: window.location.href,
     pageTitle: cleanText(document.title) || window.location.href,
@@ -391,6 +470,49 @@ function questionFromRoot(root: HTMLElement, index: number): ExtractedQuestion |
     index,
     selector: selectorFor(root)
   };
+}
+
+function extractDetachedCompletionQuestions(startIndex: number, recognizedRoots = new Set<HTMLElement>()) {
+  const fields = Array.from(document.querySelectorAll(TEXT_ENTRY_SELECTORS)).filter((element) => isVisible(element as HTMLElement)) as HTMLElement[];
+  const roots = new Map<HTMLElement, HTMLElement[]>();
+  for (const field of fields) {
+    let root = field.closest(QUESTION_ROOT_SELECTOR) as HTMLElement | null;
+    if (root && recognizedRoots.has(root)) continue;
+    if (!root) {
+      let candidate = field.parentElement;
+      for (let depth = 0; candidate && depth < 5; depth += 1, candidate = candidate.parentElement) {
+        const text = visibleText(candidate);
+        if (candidate.querySelector(TITLE_SELECTORS.join(',')) || (text.length >= 12 && text.length <= 1600)) {
+          root = candidate;
+          break;
+        }
+      }
+    }
+    if (!root || recognizedRoots.has(root)) continue;
+    roots.set(root, [...(roots.get(root) || []), field]);
+  }
+  const recovered: ExtractedQuestion[] = [];
+  let index = startIndex;
+  for (const [root, rootFields] of roots) {
+    const hint = readQuestionTypeHint(root);
+    const stem = findQuestionText(root, []).replace(/\s+/g, ' ').trim();
+    const typeText = `${hint.typeName} ${stem}`;
+    if (!stem || isNoiseText(stem)) continue;
+    if (hint.qtype === '4' || /问答题|简答题|论述题|作文题|资料题|材料题|综合题/i.test(typeText)) continue;
+    const hasBlankEditorClass = rootFields.some((field) => /blankInpDiv|textDIV|eidtDiv|blank/i.test(`${field.className || ''} ${field.parentElement?.className || ''}`));
+    const hasBlankCue = /填空|第\s*\d+\s*空|_{2,}|\bblank\s*\d+/i.test(typeText);
+    if (!(hint.qtype === '2' || hasBlankEditorClass || hasBlankCue)) continue;
+    if (root.querySelector('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) continue;
+    recovered.push({
+      id: `q_${Date.now()}_completion_${index}`,
+      hash: hashText(`${stem}\n${rootFields.length} blanks`), question: stem,
+      options: [], optionTargets: [], type: 'completion', source: 'webview',
+      pageUrl: window.location.href, pageTitle: cleanText(document.title) || window.location.href,
+      capturedAt: Date.now(), index, selector: selectorFor(root)
+    });
+    index += 1;
+  }
+  return recovered;
 }
 
 function splitContinuousText(rawText: string) {
@@ -579,14 +701,14 @@ export function extractQuestions() {
   const seen = new Set<string>();
 
   for (const selector of QUESTION_CONTAINER_SELECTORS) {
-    const elements = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
-    for (const element of elements) {
-      if (!isVisible(element)) continue;
-      const text = visibleText(element);
-      if (isNoiseText(text) || seen.has(text)) continue;
-      seen.add(text);
-      roots.push(element);
-    }
+      const elements = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
+      for (const element of elements) {
+        if (!isVisible(element)) continue;
+        const text = visibleText(element);
+        if (isQuestionRootTextNoise(text) || seen.has(text)) continue;
+        seen.add(text);
+        roots.push(element);
+      }
     if (roots.length > 1) break;
   }
 
@@ -594,11 +716,22 @@ export function extractQuestions() {
     .map((root, index) => questionFromRoot(root, index + 1))
     .filter(Boolean) as ExtractedQuestion[];
 
+  // Only skip roots that produced a usable DOM question. A known container can
+  // still be a failed extraction (for example a fill editor without a title),
+  // and those fields should get one recovery attempt below.
+  const recognizedRoots = new Set<HTMLElement>();
+  roots.forEach((root) => {
+    const rootSelector = selectorFor(root);
+    if (domQuestions.some((question) => question.selector === rootSelector)) recognizedRoots.add(root);
+  });
+  const recoveredCompletionQuestions = extractDetachedCompletionQuestions(domQuestions.length + 1, recognizedRoots);
+
   const bodyClone = document.body.cloneNode(true) as HTMLElement;
   removeNoise(bodyClone);
   const bodyText = bodyClone.textContent || '';
 
-  if (domQuestions.length > 0) return applyFontDecode(uniqueBy(attachReadingContext(domQuestions, bodyText), (question) => question.hash));
+  const domCandidates = uniqueBy([...domQuestions, ...recoveredCompletionQuestions], (question) => `${question.type}|${normalizeText(question.question)}|${question.options.map(normalizeText).join('|')}`);
+  if (domCandidates.length > 0) return applyFontDecode(attachReadingContext(domCandidates, bodyText));
 
   const readingQuestions = splitReadingQuestions(bodyClone.textContent || '');
   if (readingQuestions.length > 0) return applyFontDecode(uniqueBy(readingQuestions, (question) => question.hash));
