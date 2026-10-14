@@ -4,8 +4,8 @@ import { appStore, useAppStore } from '../store/appStore';
 import type { QuestionItem } from '../store/appStore';
 import { browserCommand } from './browserBridge';
 import type { BrowserSource, WebPageState } from './browserBridge';
-import { buildWebPrompt, hasCompleteWebResponse, parseWebAnswer, prepareWebBatch, sameQuestions, validateWebPrompt, WEB_AI_BATCH_SIZE, WEB_AI_PROMPT_LIMIT, WEB_AI_PROVIDERS } from './protocol';
-import type { AnswerItem, WebBatch, WebProvider } from './protocol';
+import { buildWebPrompt, hasCompleteWebResponse, parseWebAnswer, prepareWebBatch, sameQuestions, validateWebPrompt, WEB_AI_PROMPT_LIMIT, WEB_AI_PROVIDERS } from './protocol';
+import type { AnswerItem, SkippedWebQuestion, WebBatch, WebProvider } from './protocol';
 import { sendWebPrompt } from './sendPrompt';
 import './web-ai.css';
 
@@ -35,12 +35,22 @@ function takeOpenRequest() {
   } catch { /* Ignore an unavailable persisted request. */ }
   return null;
 }
-function restorePending(): WebBatch | null {
+function restorePending(): { batch: WebBatch | null; prompt: string; error: string } {
   try {
     const value = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
-    if (typeof value?.requestId === 'string' && Array.isArray(value.questions) && value.questions.length && value.questions.every((q: any) => typeof q.hash === 'string' && typeof q.question === 'string' && Array.isArray(q.options))) return value;
-  } catch { /* An unavailable draft must not block the workbench. */ }
-  return null;
+    if (!value) return { batch: null, prompt: '', error: '' };
+    if (typeof value.requestId !== 'string' || !value.requestId.trim() || !Array.isArray(value.questions) || !value.questions.length ||
+      !value.questions.every((q: any) => q && typeof q.hash === 'string' && typeof q.question === 'string' && typeof q.type === 'string' &&
+        (q.context == null || typeof q.context === 'string') && Array.isArray(q.options) && q.options.every((option: unknown) => typeof option === 'string') &&
+        (q.optionTargets == null || (Array.isArray(q.optionTargets) && q.optionTargets.every((target: any) => target && typeof target.text === 'string' && typeof target.label === 'string'))))) {
+      throw new Error('草稿格式不完整');
+    }
+    const prompt = buildWebPrompt(value);
+    validateWebPrompt(prompt, value);
+    return { batch: value, prompt, error: '' };
+  } catch {
+    return { batch: null, prompt: '', error: '上次提示词草稿已损坏或超过 300000 字符，请重新抓题并生成提示词。' };
+  }
 }
 function requestPage(channel: string, detail: Record<string, unknown>, timeout = 15000): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -55,19 +65,21 @@ function requestPage(channel: string, detail: Record<string, unknown>, timeout =
 export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const { questions, settings } = useAppStore();
   const [visible, setVisible] = useState(embedded);
+  const [pending] = useState(restorePending);
   const [provider, setProvider] = useState<WebProvider>(() => {
-    try { const value = restorePending()?.provider || localStorage.getItem('studypilot-web-ai-provider'); return WEB_AI_PROVIDERS.find(p => p.id === value)?.id || 'deepseek'; } catch { return 'deepseek'; }
+    try { const value = pending.batch?.provider || localStorage.getItem('studypilot-web-ai-provider'); return WEB_AI_PROVIDERS.find(p => p.id === value)?.id || 'deepseek'; } catch { return 'deepseek'; }
   });
   const [mode, setMode] = useState<'internal' | 'external'>('internal');
   const [selected, setSelected] = useState<string[]>(() => questions.map(q => q.hash));
-  const [batch, setBatch] = useState<WebBatch | null>(restorePending);
-  const [prompt, setPrompt] = useState(() => { const pending = restorePending(); return pending ? buildWebPrompt(pending) : ''; });
+  const [batch, setBatch] = useState<WebBatch | null>(pending.batch);
+  const [prompt, setPrompt] = useState(pending.prompt);
   const [reply, setReply] = useState('');
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(pending.error);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState(false);
-  const [position, setPosition] = useState({ current: 0, total: 0 });
+  const [position, setPosition] = useState(pending.batch ? 1 : 0);
   const [remaining, setRemaining] = useState<QuestionItem[]>([]);
+  const [skipped, setSkipped] = useState<SkippedWebQuestion[]>([]);
   const [completedItems, setCompletedItems] = useState<AnswerItem[]>([]);
   const [aiTab, setAITab] = useState<{ id: string; provider: WebProvider } | null>(null);
   const [attemptedRequest, setAttemptedRequest] = useState('');
@@ -80,7 +92,11 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const preview = useMemo(() => batch && reply.trim() ? parseWebAnswer(reply, batch, `${batchProvider.name} 网页`) : null, [reply, batch, batchProvider.name]);
   const matchesProvider = Boolean(batch && (!batch.provider || batch.provider === provider));
   const canUseTab = mode === 'internal' && matchesProvider && aiTab?.provider === provider;
-  const canSend = !busy && canUseTab && attemptedRequest !== batch?.requestId;
+  const promptError = useMemo(() => {
+    if (!batch) return '';
+    try { validateWebPrompt(prompt, batch); return ''; } catch (error) { return (error as Error).message; }
+  }, [prompt, batch]);
+  const canSend = !busy && canUseTab && !promptError && attemptedRequest !== batch?.requestId;
 
   useEffect(() => {
     if (embedded || !dialogRef.current) return;
@@ -112,7 +128,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const checkRun = (run: number) => { if (run !== runRef.current) throw new Error('操作已停止。'); };
   const beginAction = () => {
     const state = appStore.getState();
-    if (busy || state.batchRunning || state.liveRunning || ['calling_ai', 'executing', 'learning'].includes(state.status)) {
+    if (busy || state.batchRunning || state.liveRunning || ['calling_ai', 'executing'].includes(state.status)) {
       setMessage('请先等待当前任务结束。');
       return null;
     }
@@ -137,7 +153,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const generate = (nextBatch = false) => {
     if (busy) return;
     try {
-      const items = nextBatch ? remaining : questions.filter(q => selected.includes(q.hash));
+      const items = nextBatch ? remaining : questions.filter(q => selected.includes(q.hash)).map((q, index) => q.index ? q : { ...q, index: index + 1 });
       const next = prepareWebBatch(items, provider);
       if (!nextBatch) {
         setCompletedItems([]);
@@ -147,10 +163,18 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
         }
       }
       setBatch(next.batch); setPrompt(next.prompt); setRemaining(next.remaining);
+      setSkipped(previous => nextBatch
+        ? [...previous, ...next.skipped.filter(item => !previous.some(old => old.questionHash === item.questionHash && old.questionIndex === item.questionIndex))]
+        : next.skipped);
       setReply(''); setImported(false); setAttemptedRequest('');
-      setPosition(previous => nextBatch ? { ...previous, current: previous.current + 1 } : { current: 1, total: Math.ceil(items.length / WEB_AI_BATCH_SIZE) });
-      try { localStorage.setItem(PENDING_KEY, JSON.stringify(next.batch)); localStorage.setItem('studypilot-web-ai-provider', provider); } catch { /* The current session can still continue. */ }
-      setMessage(`已生成 ${next.batch.questions.length} 题提示词，共 ${next.prompt.length.toLocaleString()} 字符。`);
+      setPosition(previous => nextBatch ? previous + (next.batch ? 1 : 0) : next.batch ? 1 : 0);
+      try {
+        if (next.batch) localStorage.setItem(PENDING_KEY, JSON.stringify(next.batch)); else localStorage.removeItem(PENDING_KEY);
+        localStorage.setItem('studypilot-web-ai-provider', provider);
+      } catch { /* The current session can still continue. */ }
+      setMessage(next.batch
+        ? `已生成 ${next.batch.questions.length} 题提示词，共 ${next.prompt.length.toLocaleString()} 字符，待处理 ${next.remaining.length} 题。`
+        : '剩余题目均超过单批字符上限，已跳过本次发送；原题和此前已入库答案保留。');
     } catch (error) { setMessage((error as Error).message); }
   };
 
@@ -179,8 +203,9 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
       setImported(false);
       setCompletedItems([]);
       setRemaining([]);
+      setSkipped([]);
       setAttemptedRequest('');
-      setPosition({ current: 0, total: 0 });
+      setPosition(0);
       setMessage(`已抓取 ${extracted.length} 道题，请点击“生成提示词”。`);
       appStore.setStatus('done', `网页 AI 已抓取 ${extracted.length} 道题。`);
     } catch (error) { showError(error, run); }
@@ -333,7 +358,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
           <legend>AI 网站选择</legend>
           <div className="web-ai-segments">{WEB_AI_PROVIDERS.map(item => <label key={item.id}><input type="radio" name="web-provider" checked={provider === item.id} onChange={() => setProvider(item.id)} />{item.name}</label>)}</div>
           <div className="web-ai-segments">{(['internal', 'external'] as const).map(value => <label key={value}><input type="radio" name="web-mode" checked={mode === value} onChange={() => setMode(value)} />{value === 'internal' ? '应用内浏览器' : '系统默认浏览器'}</label>)}</div>
-          <details><summary>选择题目（{selected.length}/{questions.length}） · 每批最多 {WEB_AI_BATCH_SIZE} 题</summary><div className="web-ai-question-picker">{questions.map((question, index) => <label key={`${question.hash}-${index}`}><input type="checkbox" checked={selected.includes(question.hash)} onChange={event => setSelected(prev => event.target.checked ? [...prev, question.hash] : prev.filter(hash => hash !== question.hash))} /><span>{question.index || index + 1}. {question.question}</span></label>)}</div></details>
+          <details><summary>选择题目（{selected.length}/{questions.length}） · 不限题数</summary><p className="web-ai-message">每批完整提示词 ≤ 300000 字符，按原题顺序整题分批。</p><div className="web-ai-question-picker">{questions.map((question, index) => <label key={`${question.hash}-${index}`}><input type="checkbox" checked={selected.includes(question.hash)} onChange={event => setSelected(prev => event.target.checked ? [...prev, question.hash] : prev.filter(hash => hash !== question.hash))} /><span>{question.index || index + 1}. {question.question}</span></label>)}</div></details>
         </fieldset>
 
         {/* 步骤式操作流程 */}
@@ -346,11 +371,12 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
               <span className="web-ai-step-status">{hasQuestions ? `已抓取 ${questions.length} 题` : '请先前往题目页抓题'}</span>
             </div>
             <div className="web-ai-step-body">
-              <button disabled={busy || !settings.allowRealPageAutomation} onClick={() => void extractQuestions()}>
+              <button className="web-ai-secondary" disabled={busy || !settings.allowRealPageAutomation} onClick={() => void extractQuestions()}>
                 <ClipboardPaste size={15} />
                 获取页面题目
               </button>
               <button
+                className="web-ai-primary"
                 disabled={busy || !hasSelected}
                 onClick={() => generate()}
               >
@@ -369,6 +395,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
             </div>
             <div className="web-ai-step-body">
               <button
+                className="web-ai-secondary"
                 disabled={busy || !matchesProvider}
                 onClick={() => void openWebsite()}
               >
@@ -391,7 +418,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
             <div className="web-ai-step-body">
               {mode === 'internal' ? (
                 <button
-                  className={canSend ? 'web-ai-primary' : ''}
+                  className="web-ai-primary"
                   disabled={!canSend}
                   onClick={() => void send()}
                 >
@@ -399,7 +426,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
                   {attemptedRequest === batch?.requestId ? '重新发送提示词' : '发送提示词到 AI'}
                 </button>
               ) : (
-                <button disabled={busy || !hasBatch} onClick={() => void copy()}>
+                <button className="web-ai-secondary" disabled={busy || !hasBatch || Boolean(promptError)} onClick={() => void copy()}>
                   <Copy size={15} />复制提示词（手动粘贴）
                 </button>
               )}
@@ -419,6 +446,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
             <div className="web-ai-step-body">
               {mode === 'internal' ? (
                 <button
+                  className="web-ai-secondary"
                   disabled={busy || !canUseTab}
                   onClick={() => void read()}
                 >
@@ -438,11 +466,11 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
               <span className="web-ai-step-status">{imported ? `已入库 ${preview?.items.length ?? 0} 题` : hasPreview ? `解析到 ${preview!.items.length} 题，待入库` : '等待答案'}</span>
             </div>
             <div className="web-ai-step-body">
-              <button disabled={busy || imported || !hasPreview} onClick={importPreview}>
+              <button className="web-ai-primary" disabled={busy || imported || !hasPreview} onClick={importPreview}>
                 <ClipboardPaste size={15} />{imported ? '✓ 已入库' : `确认入库 ${preview?.items.length || 0} 题`}
               </button>
               {remaining.length > 0 && (
-                <button disabled={busy || !imported || preview?.items.length !== batch?.questions.length} onClick={() => generate(true)}>
+                <button className="web-ai-secondary" disabled={busy || !imported || preview?.items.length !== batch?.questions.length} onClick={() => generate(true)}>
                   <Play size={15} />生成下一批（剩余 {remaining.length} 题）
                 </button>
               )}
@@ -451,14 +479,14 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
 
           {/* 步骤 6：开始填入 */}
           {mode === 'internal' && (
-            <div className={`web-ai-step ${sourceRef.current && completedItems.length > 0 && imported ? 'web-ai-step-active' : 'web-ai-step-disabled'}`}>
+            <div className={`web-ai-step ${sourceRef.current && completedItems.length > 0 && (imported || !batch) ? 'web-ai-step-active' : 'web-ai-step-disabled'}`}>
               <div className="web-ai-step-header">
                 <span className="web-ai-step-num">⑥</span>
                 <span className="web-ai-step-title">开始填入</span>
                 <span className="web-ai-step-status">{completedItems.length > 0 ? `${completedItems.length} 题等待填入原页面` : '录入题库后可填入'}</span>
               </div>
               <div className="web-ai-step-body">
-                <button disabled={busy || !sourceRef.current || completedItems.length === 0} onClick={() => void approveFill()}>
+                <button className="web-ai-primary" disabled={busy || !sourceRef.current || completedItems.length === 0} onClick={() => void approveFill()}>
                   <Play size={15} />确认填入 {completedItems.length} 题到原页面
                 </button>
               </div>
@@ -467,15 +495,21 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
         </div>
 
         {/* 停止按钮 */}
-        {busy && <div className="web-ai-actions"><button onClick={stop}><Square size={15} />停止当前操作</button></div>}
+        {busy && <div className="web-ai-actions"><button className="web-ai-danger" onClick={stop}><Square size={15} />停止当前操作</button></div>}
 
         {message && <p className="web-ai-message" role="status">{message}</p>}
+        {skipped.length > 0 && <details className="web-ai-skipped">
+          <summary>已跳过 {skipped.length} 题 · 原题保留</summary>
+          <p>以下题目连同必要模板单独发送仍超过 300000 字符，已从本次提示词跳过。</p>
+          <ul>{skipped.map(item => <li key={`${item.questionHash}-${item.questionIndex}`}>第 {item.questionIndex} 题：单题提示词 {item.promptLength.toLocaleString()} 字符，超过单批上限。</li>)}</ul>
+        </details>}
 
         {/* 提示词与回答区 */}
         {batch && <>
-          <div className="web-ai-section-heading"><h3>提示词 · {batch.questions.length} 题{position.total > 0 ? ` · ${position.current}/${position.total} 批` : ''}</h3><button onClick={copy} title="复制提示词" disabled={busy || !prompt}><Copy size={16} /></button></div>
+          <div className="web-ai-section-heading"><h3>第 {position} 批 · 本批 {batch.questions.length} 题 · 待处理 {remaining.length} 题 · 跳过 {skipped.length} 题</h3><button className="web-ai-ghost" onClick={copy} title="复制提示词" aria-label="复制提示词" disabled={busy || !prompt || Boolean(promptError)}><Copy size={16} /></button></div>
           <textarea aria-label="题目提示词" value={prompt} readOnly={busy || attemptedRequest === batch.requestId} onChange={event => setPrompt(event.target.value)} rows={8} />
           <small className="web-ai-message">{prompt.length.toLocaleString()} / {WEB_AI_PROMPT_LIMIT.toLocaleString()} 字符</small>
+          {promptError && <p className="web-ai-error" role="alert">{promptError}</p>}
           <a href={selectedProvider.url} target="_blank" rel="noreferrer">{selectedProvider.name}<ExternalLink size={12} /></a>
           <h3>AI 回答</h3>
           <textarea aria-label="粘贴 AI 回答" placeholder="粘贴完整 AI 回答" rows={8} value={reply} disabled={busy} onChange={event => { setReply(event.target.value); setImported(false); }} />
@@ -506,14 +540,14 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
     {!visible && (busy || canUseTab) && <div className="web-ai-task" role="status">
       <Globe size={16} /><span>{message}</span>
       <div className="web-ai-task-actions">
-        <button onClick={() => void send()} disabled={!canSend}><Send size={15} />发送提示词</button>
-        <button onClick={() => void read()} disabled={busy || !canUseTab}><ClipboardPaste size={15} />提取答案</button>
-        <button onClick={() => setVisible(true)}>查看</button>
-        {busy && <button onClick={stop} title="停止网页 AI"><Square size={15} /></button>}
+        <button className="web-ai-primary" onClick={() => void send()} disabled={!canSend}><Send size={15} />发送提示词</button>
+        <button className="web-ai-secondary" onClick={() => void read()} disabled={busy || !canUseTab}><ClipboardPaste size={15} />提取答案</button>
+        <button className="web-ai-ghost" onClick={() => setVisible(true)}>查看</button>
+        {busy && <button className="web-ai-danger" onClick={stop} title="停止网页 AI" aria-label="停止网页 AI"><Square size={15} /></button>}
       </div>
     </div>}
     <dialog ref={dialogRef} className="web-ai-dialog" onCancel={() => setVisible(false)} onClose={() => setVisible(false)} aria-labelledby="web-ai-title">
-      <header><h2 id="web-ai-title"><Globe size={20} />网页 AI</h2><button onClick={() => setVisible(false)} title="关闭弹窗"><X size={18} /></button></header>
+      <header><h2 id="web-ai-title"><Globe size={20} />网页 AI</h2><button className="web-ai-ghost" onClick={() => setVisible(false)} title="关闭弹窗" aria-label="关闭弹窗"><X size={18} /></button></header>
       {workflowBody}
     </dialog>
   </>;

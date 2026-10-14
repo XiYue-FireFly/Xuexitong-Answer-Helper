@@ -15,15 +15,6 @@ import {
 let mainWindow: BrowserWindow | null = null;
 const DB_FILE = path.join(app.getPath('userData'), 'studypilot_db.json');
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
-const CHAPTER_SCRIPT_ALLOWED_HOSTS = [
-  'cx.icodef.com', 'api.tikuhai.com', 'sso.chaoxing.com', 'mooc1-api.chaoxing.com',
-  'mooc1-1.chaoxing.com', 'mooc1-2.chaoxing.com', 'mooc2-ans.chaoxing.com',
-  'cdn.bootcdn.net', 'cdnjs.cloudflare.com', 'mooc1.chaoxing.com', 'chaoxing.com',
-  'fystat-ans.chaoxing.com', 'stat2-ans.chaoxing.com', 'mooc1.gdhkmooc.com',
-  'mooc2-ans.hnsyu.net', 'mooc1.hnsyu.net', 'mooc1.hlju.edu.cn', 'forestpolice.org',
-  'muketool.com', 'ocsjs.com', 'lib.baomitu.com', 'mirrors.sustech.edu.cn'
-] as const;
-const activeChapterProxyRequests = new Map<string, { abort: () => void }>();
 let webviewStorageFlushTimer: ReturnType<typeof setTimeout> | undefined;
 let webviewSessionCookieTimer: ReturnType<typeof setTimeout> | undefined;
 let isFinalizingQuit = false;
@@ -250,115 +241,6 @@ function createRequestHeaders(url: string) {
   };
   if (/api\.github\.com/i.test(url)) headers['X-GitHub-Api-Version'] = '2022-11-28';
   return headers;
-}
-
-function isChapterScriptAllowedUrl(rawUrl: unknown) {
-  try {
-    const parsed = new URL(String(rawUrl || ''));
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-    return CHAPTER_SCRIPT_ALLOWED_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
-  } catch {
-    return false;
-  }
-}
-
-function chapterProxyRequestKey(senderId: number, requestId: string) {
-  return `${senderId}:${requestId}`;
-}
-
-type ChapterProxyPayload = {
-  requestId?: string;
-  url?: string;
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string | ArrayBuffer | Uint8Array;
-  pageUrl?: string;
-  userAgent?: string;
-};
-
-async function proxyChapterScriptRequest(senderId: number, payload: ChapterProxyPayload, redirectCount = 0): Promise<any> {
-  const rawUrl = String(payload?.url || '').trim();
-  if (!isChapterScriptAllowedUrl(rawUrl)) {
-    return { success: false, error: '请求域名不在章节脚本白名单中。', statusText: 'blocked' };
-  }
-  if (redirectCount > 5) return { success: false, error: '请求重定向次数过多。', statusText: 'redirect' };
-
-  const target = new URL(rawUrl);
-  const requestId = String(payload?.requestId || '');
-  const key = chapterProxyRequestKey(senderId, requestId);
-  const incomingHeaders = payload?.headers && typeof payload.headers === 'object' ? payload.headers : {};
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(incomingHeaders)) {
-    if (!name || value == null) continue;
-    const lower = name.toLowerCase();
-    if (['host', 'content-length', 'connection', 'accept-encoding'].includes(lower)) continue;
-    headers[name] = Array.isArray(value) ? value.join(', ') : String(value);
-  }
-
-  const pageUrl = String(payload?.pageUrl || '').trim();
-  try {
-    const page = new URL(pageUrl);
-    if (page.protocol === 'http:' || page.protocol === 'https:') {
-      headers.Referer = page.toString();
-      headers.Origin = page.origin;
-    }
-  } catch {
-    // 页面 URL 不可用时仍允许请求，但不伪造来源头。
-  }
-  headers['User-Agent'] = String(payload?.userAgent || headers['User-Agent'] || `StudyPilot/${app.getVersion()} (Windows Electron)`);
-  headers.Accept = headers.Accept || 'application/json, text/plain;q=0.8, */*;q=0.5';
-  headers['Accept-Encoding'] = 'identity';
-  let body: string | Uint8Array | undefined;
-  const rawBody: any = payload?.body;
-  if (rawBody !== undefined && rawBody !== null && rawBody !== '') {
-    if (typeof rawBody === 'string') body = rawBody;
-    else if (rawBody instanceof ArrayBuffer) body = new Uint8Array(rawBody);
-    else if (ArrayBuffer.isView(rawBody)) body = new Uint8Array(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength);
-    else body = String(rawBody);
-    if (!headers['Content-Type']) headers['Content-Type'] = 'text/plain;charset=UTF-8';
-  }
-
-  const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
-  const controller = new AbortController();
-  const activeRequest = { abort: () => controller.abort() };
-  activeChapterProxyRequests.set(key, activeRequest);
-  try {
-    const response = await webviewSession.fetch(target.toString(), {
-      method: String(payload?.method || 'GET').toUpperCase(),
-      headers,
-      body: body as any,
-      credentials: 'include',
-      redirect: 'manual',
-      signal: controller.signal
-    } as any);
-    const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location) {
-      const nextUrl = new URL(location, target).toString();
-      const nextPayload: ChapterProxyPayload = { ...payload, url: nextUrl };
-      if (response.status === 303) {
-        nextPayload.method = 'GET';
-        nextPayload.body = undefined;
-      }
-      return await proxyChapterScriptRequest(senderId, nextPayload, redirectCount + 1);
-    }
-    const text = await response.text();
-    return {
-      success: true,
-      status: response.status,
-      statusText: response.statusText || '',
-      text,
-      finalUrl: response.url || target.toString(),
-      headers: Object.fromEntries(response.headers.entries()),
-      responseHeaders: Array.from(response.headers.entries()).map(([name, value]) => `${name}: ${value}`).join('\r\n')
-    };
-  } catch (error: any) {
-    return { success: false, error: error?.message || '章节脚本请求失败。', statusText: 'error' };
-  } finally {
-    if (activeChapterProxyRequests.get(key) === activeRequest) {
-      activeChapterProxyRequests.delete(key);
-    }
-  }
 }
 
 function safeParseJson(text: string, url: string) {
@@ -1008,23 +890,6 @@ ipcMain.handle('settings:get-webview-preload', () => {
   // webview 的 preload 属性要求 file:/asar: 协议 URL；裸 Windows 路径会相对于宿主页面解析，
   // dev（http 宿主）下被直接拒绝导致整套自动化桥静默失效，prod 仅靠盘符启发式侥幸工作
   return pathToFileURL(path.join(__dirname, 'preload-webview.js')).toString();
-});
-
-// 内置章节脚本的 GM_xmlhttpRequest 代理：只允许脚本声明的域名，并复用 WebView 登录态。
-ipcMain.handle('cx:api-fetch', async (event, payload: ChapterProxyPayload) => {
-  try {
-    return await proxyChapterScriptRequest(event.sender.id, payload || {});
-  } catch (error: any) {
-    return { success: false, error: error?.message || '章节脚本请求失败。', statusText: 'error' };
-  }
-});
-
-ipcMain.on('cx:api-fetch-abort', (event, requestId: unknown) => {
-  const key = chapterProxyRequestKey(event.sender.id, String(requestId || ''));
-  const active = activeChapterProxyRequests.get(key);
-  if (!active) return;
-  activeChapterProxyRequests.delete(key);
-  active.abort();
 });
 
 function modelDiscoveryUrl(rawBaseUrl: unknown) {

@@ -44,29 +44,3 @@ export interface AnswerApplyPayload {
   matchedOptions?: string[];
   question?: QuestionPayload;
 }
-
-export interface ChapterLearningOptions {
-  autoNext?: boolean;
-  autoPlay?: boolean;
-  muted?: boolean;
-  playbackRate?: number;
-  autoReadDocument?: boolean;
-  autoAnswerQuestions?: boolean;
-  restudy?: boolean;
-  unlockMode?: boolean;
-  faceRecognition?: boolean;
-  rateHack?: boolean;
-}
-
-export interface ChapterLearningCommand {
-  action: 'scan' | 'start' | 'pause' | 'play' | 'stop' | 'set-options';
-  options?: ChapterLearningOptions;
-}
-
-export interface TaskPoint {
-  type: 'video' | 'document' | 'audio' | 'work' | 'exam' | 'unknown';
-  title: string;
-  completed: boolean;
-  element?: HTMLElement;
-  iframe?: HTMLIFrameElement;
-}

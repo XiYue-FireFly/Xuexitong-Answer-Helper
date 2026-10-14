@@ -257,36 +257,6 @@ function shouldBlockInternalBrowserTab(targetUrl: string) {
   return BLOCKED_INTERNAL_BROWSER_TAB_URL.test(String(targetUrl || ''));
 }
 
-function comparableNavigationUrl(rawUrl: string) {
-  try {
-    const parsed = new URL(rawUrl);
-    ['t', '_', 'timestamp', 'rand'].forEach((name) => parsed.searchParams.delete(name));
-    const query = parsed.searchParams.toString();
-    return `${parsed.origin}${parsed.pathname}${query ? `?${query}` : ''}`;
-  } catch {
-    return String(rawUrl || '').split('#')[0];
-  }
-}
-
-function chapterNavigationIdentity(rawUrl: string) {
-  try {
-    const parsed = new URL(rawUrl);
-    const id = parsed.searchParams.get('chapterId') ||
-      parsed.searchParams.get('chapterid') ||
-      parsed.searchParams.get('knowledgeId') ||
-      parsed.searchParams.get('knowledgeid');
-    return id ? `chapter:${id}` : comparableNavigationUrl(rawUrl);
-  } catch {
-    return comparableNavigationUrl(rawUrl);
-  }
-}
-
-function isSameChapterNavigation(currentUrl: string, targetUrl: string) {
-  if (!currentUrl || !targetUrl) return false;
-  return comparableNavigationUrl(currentUrl) === comparableNavigationUrl(targetUrl) ||
-    chapterNavigationIdentity(currentUrl) === chapterNavigationIdentity(targetUrl);
-}
-
 function isExamStartUrl(targetUrl: string) {
   try {
     const parsed = new URL(targetUrl);
@@ -718,90 +688,6 @@ export function BrowserPanel() {
       }
     }
 
-    if (event.channel === 'studypilot:chapter-learning-result') {
-      const result = event.args[0];
-      if (result?.success) {
-        appStore.setChapterLearning(result.data);
-        if (result.data?.running) appStore.setStatus('learning', result.data.lastMessage || '章节学习辅助运行中。');
-      } else {
-        appStore.setStatus('error', result?.error || '章节学习辅助执行失败。');
-      }
-    }
-
-    if (event.channel === 'studypilot:chapter-open-next') {
-      const payload = event.args?.[0] || {};
-      const targetUrl = payload.url;
-      if (payload.clickedInPage) {
-        const clickedAtUrl = safeWebviewRead(() => webviewRefs.current[tabId]?.getURL?.(), '');
-        window.setTimeout(() => {
-          const currentUrl = safeWebviewRead(() => webviewRefs.current[tabId]?.getURL?.(), '');
-          const clickDidNotNavigate = clickedAtUrl && currentUrl && comparableNavigationUrl(clickedAtUrl) === comparableNavigationUrl(currentUrl);
-          if (targetUrl && clickDidNotNavigate && !isSameChapterNavigation(currentUrl, targetUrl)) {
-            const webview = webviewRefs.current[tabId];
-            handleTabStateChange(tabId, { url: targetUrl, title: payload.title || friendlyTitle(targetUrl), loading: true });
-            const result = safeWebviewRead(() => webview?.loadURL?.(targetUrl), undefined as Promise<void> | undefined);
-            if (result?.catch) {
-              result.catch((error: any) => {
-                if (error?.code === 'ERR_ABORTED' || error?.errno === -3) return;
-                appStore.addLog('warn', `下一章节兜底跳转失败：${error?.message || targetUrl}`);
-              });
-            }
-            window.setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
-                detail: { action: 'start', options: payload.options || {} }
-              }));
-            }, 2600);
-            return;
-          }
-          window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
-            detail: { action: 'start', options: payload.options || {} }
-          }));
-        }, 2600);
-      } else if (targetUrl) {
-        openBrowserTab(targetUrl, { title: payload.title || '下一章节', openerTabId: tabId });
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
-            detail: { action: 'start', options: payload.options || {} }
-          }));
-        }, 2200);
-      }
-    }
-
-    if (event.channel === 'studypilot:chapter-auto-answer') {
-      appStore.addLog('info', '章节学习检测到测试题，正在触发自动答题流程。');
-      appStore.setStatus('extracting_question', '正在抓取章节测试题目。');
-      // 1. 抓题（复用 extract-question-request，等 webview 返回 question-result）
-      window.dispatchEvent(new CustomEvent('studypilot:extract-question-request', {
-        detail: {
-          onComplete: (extractResult: any) => {
-            if (!extractResult?.success || !extractResult?.questions?.length) {
-              appStore.addLog('warn', '章节测试未抓到题目，继续学习。');
-              return;
-            }
-            appStore.addLog('success', `章节测试抓到 ${extractResult.questions.length} 道题，开始 AI 解析并填入。`);
-            // 2. 批量 AI 解析 + 填入（AIPanel 监听 answer-all-and-apply）
-            window.dispatchEvent(new CustomEvent('studypilot:answer-all-and-apply', {
-              detail: {
-                onComplete: (applyResult: any) => {
-                  if (applyResult?.success) {
-                    appStore.addLog('success', '章节测试答案已填入，继续章节学习。');
-                  } else {
-                    appStore.addLog('warn', `章节测试答题未完成：${applyResult?.error || '未知'}，仍继续学习。`);
-                  }
-                  // 3. 清除通知标志并轻触 set-options，让 chapter-learning 的 API 遍历/DOM 轮询继续翻章
-                  window.setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('studypilot:chapter-learning-action', {
-                      detail: { action: 'set-options', options: {} }
-                    }));
-                  }, 1500);
-                }
-              }
-            }));
-          }
-        }
-      }));
-    }
-
     if (event.channel === 'studypilot:execute-result') {
       const result = event.args[0];
       if (result?.success) appStore.completePlan(result.message || '已在当前页面完成自动化操作。');
@@ -1084,24 +970,6 @@ export function BrowserPanel() {
 
     window.addEventListener('studypilot:apply-answers', handleApplyAnswers);
     return () => window.removeEventListener('studypilot:apply-answers', handleApplyAnswers);
-  }, [canUseRealWebview, getActiveWebview]);
-
-  useEffect(() => {
-    const handleChapterLearningAction = (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      const webview = getActiveWebview();
-      if (!canUseRealWebview || !webview) {
-        appStore.setStatus('error', '请先在设置中启用真实 WebView，再使用章节学习。');
-        return;
-      }
-      const action = detail.action || 'scan';
-      const options = detail.options || {};
-      appStore.setStatus('learning', action === 'stop' ? '正在停止章节学习辅助。' : '正在处理当前章节。');
-      safeWebviewRun(() => webview.send?.('studypilot:chapter-learning', { action, options }), '发送章节学习指令失败');
-    };
-
-    window.addEventListener('studypilot:chapter-learning-action', handleChapterLearningAction);
-    return () => window.removeEventListener('studypilot:chapter-learning-action', handleChapterLearningAction);
   }, [canUseRealWebview, getActiveWebview]);
 
   const navigate = (event: React.FormEvent) => {

@@ -7,10 +7,11 @@ import { HistoryPanel } from './components/HistoryPanel';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
+import { TutorialPanel } from './components/TutorialPanel';
 import { appStore, useAppStore } from './store/appStore';
-import { Bell, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
+import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
 
-type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'settings';
+type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
 
 const tabs: { id: TabId; label: string; icon: typeof Brain }[] = [
   { id: 'automation', label: '答题', icon: Brain },
@@ -18,6 +19,7 @@ const tabs: { id: TabId; label: string; icon: typeof Brain }[] = [
   { id: 'tokens', label: 'Token', icon: ChartNoAxesCombined },
   { id: 'history', label: '运行记录', icon: History },
   { id: 'bugs', label: '错误报告', icon: Bug },
+  { id: 'tutorial', label: '使用教程', icon: BookOpen },
   { id: 'settings', label: '设置', icon: Settings }
 ];
 
@@ -29,7 +31,6 @@ const statusLabels: Record<string, string> = {
   executing: '执行中',
   extracting_question: '抓题中',
   calling_ai: 'AI 解析中',
-  learning: '章节学习',
   done: '完成',
   error: '错误'
 };
@@ -271,6 +272,7 @@ export default function App() {
                 {activeTab === 'tokens' && <TokenUsagePanel />}
                 {activeTab === 'history' && <HistoryPanel />}
                 {activeTab === 'bugs' && <BugReportPanel />}
+                {activeTab === 'tutorial' && <TutorialPanel />}
                 {activeTab === 'settings' && <SettingsPanel />}
               </div>
             </div>

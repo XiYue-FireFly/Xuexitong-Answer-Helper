@@ -1,6 +1,6 @@
 {
   "name": "study-pilot",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -73,7 +73,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "electron": "^31.3.0",
+    "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.21.5",
     "typescript": "^5.5.4",

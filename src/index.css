@@ -693,7 +693,7 @@ input[type='range'] {
 .browser-deck .mock-page-container .glass-panel { animation: browser-content-arrive 540ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .browser-deck .mock-page-container .glass-panel + .glass-panel { animation-delay: 75ms; }
 
-.browser-solving-dock:not(.is-active) .browser-solving-dock__rail > span::after { animation-duration: 4.2s; opacity: 0.42; }
+.browser-solving-dock:not(.is-active) .browser-solving-dock__rail > span::after { animation: none; opacity: 0; }
 
 @keyframes workbench-card-arrive {
   from { opacity: 0; transform: translateY(10px) scale(0.988); }
@@ -1835,11 +1835,9 @@ select:focus,
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(112deg, transparent 34%, rgba(255, 255, 255, 0.13) 50%, transparent 66%);
-  transform: translateX(-130%);
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 60%);
 }
-
-.browser-solving-dock.is-active::before { animation: browser-dock-sheen 2.8s ease-in-out infinite; }
 
 .browser-solving-dock__topline {
   position: relative;
@@ -1856,7 +1854,7 @@ select:focus,
 
 .browser-solving-dock__rail {
   position: relative;
-  height: 6px;
+  height: 5px;
   margin-top: 9px;
   overflow: hidden;
   border-radius: 999px;
@@ -1870,8 +1868,8 @@ select:focus,
   height: 100%;
   overflow: hidden;
   border-radius: inherit;
-  background: linear-gradient(90deg, #6366f1, #a855f7 55%, #34d399);
-  box-shadow: 0 0 14px rgba(129, 140, 248, 0.7);
+  background: linear-gradient(90deg, #6366f1, #8b5cf6 65%, #a78bfa);
+  box-shadow: 0 0 9px rgba(129, 140, 248, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1879,10 +1877,18 @@ select:focus,
   content: '';
   position: absolute;
   inset: 0;
-  width: 42%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.92), transparent);
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.48), transparent);
   transform: translateX(-180%);
-  animation: browser-progress-stream 2.1s ease-in-out infinite;
+  opacity: 0;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .browser-solving-dock.is-active:not(.is-complete):not(.is-error) .browser-solving-dock__rail > span::after {
+    opacity: 1;
+    animation: browser-progress-stream 2.8s ease-in-out infinite;
+  }
 }
 
 .browser-solving-dock__trail {
@@ -1902,11 +1908,6 @@ select:focus,
   74%, 100% { transform: translateX(360%); }
 }
 
-@keyframes browser-dock-sheen {
-  0%, 38% { transform: translateX(-130%); }
-  72%, 100% { transform: translateX(170%); }
-}
-
 [data-theme='light'] .browser-solving-dock {
   border-color: rgba(79, 70, 229, 0.23);
   background: rgba(255, 255, 255, 0.88);
@@ -1921,7 +1922,7 @@ select:focus,
   .kb-type-pill { transition: none; transform: none !important; }
   .kb-jelly-surface::after { display: none; }
   .kb-progress span::after { animation: none; }
-  .browser-solving-dock.is-active::before,
+  .browser-solving-dock__rail > span { transition: none; }
   .browser-solving-dock__rail > span::after { animation: none; }
   .kb-jelly-surface.is-releasing,
   .kb-bento-card--hero::before,
@@ -2187,16 +2188,27 @@ body.is-resizing-workbench * { cursor: col-resize !important; user-select: none 
   width: min(370px, calc(100% - 48px));
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.9);
-  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.5), 0 0 30px var(--primary-glow);
+  background: linear-gradient(135deg, rgba(20, 27, 49, 0.94), rgba(15, 21, 37, 0.94));
+  box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
+
+/* Keep the centered capsule stable when the shared pointer effect targets it. */
+.browser-solving-dock.jelly-runtime--active,
+.browser-solving-dock.jelly-runtime--release { transform: translateX(-50%) !important; }
 
 .browser-solving-dock__topline { align-items: center; }
 .browser-solving-dock__rail { margin-top: 6px; }
 .browser-solving-dock.is-complete { border-color: rgba(16, 185, 129, 0.55); }
 .browser-solving-dock.is-complete .browser-solving-dock__rail > span { background: linear-gradient(90deg, #10b981, #34d399, #a7f3d0); }
+.browser-solving-dock.is-complete output { color: #34d399; }
 .browser-solving-dock.is-error { border-color: rgba(239, 68, 68, 0.55); }
 .browser-solving-dock.is-error .browser-solving-dock__rail > span { background: linear-gradient(90deg, #ef4444, #f97316); }
+.browser-solving-dock.is-error output { color: #fda4af; }
+.browser-solving-dock:is(.is-complete, .is-error) .browser-solving-dock__rail > span::after { animation: none; opacity: 0; }
+[data-theme='light'] .browser-solving-dock.is-complete output { color: #047857; }
+[data-theme='light'] .browser-solving-dock.is-error output { color: #be123c; }
+[data-theme='light'] .browser-solving-dock__trail { color: #475569; }
+[data-theme='light'] .browser-solving-dock__trail span:last-child { color: #047857; }
 
 .answer-mode-switch {
   display: grid;

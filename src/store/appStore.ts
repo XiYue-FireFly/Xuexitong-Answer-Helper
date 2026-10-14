@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 export type AutomationAction = 'click' | 'fill' | 'select' | 'wait';
-export type AutomationStatus = 'idle' | 'scanning' | 'planning' | 'awaiting_approval' | 'executing' | 'extracting_question' | 'calling_ai' | 'learning' | 'done' | 'error';
+export type AutomationStatus = 'idle' | 'scanning' | 'planning' | 'awaiting_approval' | 'executing' | 'extracting_question' | 'calling_ai' | 'done' | 'error';
 export type QuestionType = 'single' | 'multiple' | 'judgement' | 'completion' | 'essay' | 'unknown';
 
 export interface PageControl {
@@ -151,73 +151,11 @@ export interface AppLog {
 export interface AppSettings {
   allowRealPageAutomation: boolean;
   requireApprovalBeforeExecute: boolean;
-  chapterAutoNext: boolean;
-  chapterAutoPlay: boolean;
-  chapterVideoMuted: boolean;
-  chapterVideoSpeed: number;
-  chapterAutoReadDocument: boolean;
-  chapterAutoAnswerQuestions: boolean;
-  chapterRestudy: boolean;
-  chapterUnlockMode: boolean;
-  chapterFaceRecognition: boolean;
-  chapterRateHack: boolean;
   mockModeUrl: string;
   theme: 'dark' | 'light';
   providers: AIProviderConfig[];
   activeProviderId: string;
   apiConcurrency: number;
-}
-
-export interface ChapterVideoInfo {
-  index: number;
-  duration: number;
-  currentTime: number;
-  paused: boolean;
-  muted: boolean;
-  playbackRate: number;
-  ended: boolean;
-  src?: string;
-  frame?: string;
-}
-
-export interface ChapterAudioInfo {
-  index: number;
-  duration: number;
-  currentTime: number;
-  paused: boolean;
-  muted: boolean;
-  playbackRate: number;
-  ended: boolean;
-  src?: string;
-  frame?: string;
-}
-
-export interface TaskPointInfo {
-  type: 'video' | 'document' | 'audio' | 'work' | 'exam' | 'unknown';
-  title: string;
-  completed: boolean;
-}
-
-export interface ChapterLinkInfo {
-  title: string;
-  url: string;
-  active: boolean;
-}
-
-export interface ChapterLearningState {
-  url: string;
-  title: string;
-  videos: ChapterVideoInfo[];
-  audios: ChapterAudioInfo[];
-  chapters: ChapterLinkInfo[];
-  activeChapterIndex: number;
-  nextChapter?: ChapterLinkInfo;
-  taskPoints: TaskPointInfo[];
-  documentReaders: number;
-  allTasksCompleted: boolean;
-  lastMessage: string;
-  updatedAt: number;
-  running: boolean;
 }
 
 export const AI_PROVIDER_PRESETS: Record<string, AIProviderPreset> = {
@@ -647,16 +585,6 @@ const defaultProviders: AIProviderConfig[] = Object.entries(AI_PROVIDER_PRESETS)
 const defaultSettings: AppSettings = {
   allowRealPageAutomation: true,
   requireApprovalBeforeExecute: true,
-  chapterAutoNext: true,
-  chapterAutoPlay: true,
-  chapterVideoMuted: false,
-  chapterVideoSpeed: 1,
-    chapterAutoReadDocument: true,
-    chapterAutoAnswerQuestions: false,
-    chapterRestudy: false,
-    chapterUnlockMode: true,
-    chapterFaceRecognition: true,
-    chapterRateHack: true,
   mockModeUrl: 'https://study-demo.studypilot.local/automation',
   theme: 'dark',
   providers: defaultProviders,
@@ -740,7 +668,6 @@ class GlobalStore {
     currentQuestionIndex: 0,
     currentAnswer: null as AIAnswerResult | null,
     answerMap: {} as Record<string, AIAnswerResult>,
-    chapterLearning: null as ChapterLearningState | null,
     questionBank: this.loadQuestionBank(),
     history: this.loadHistory(),
     answerHistory: this.loadAnswerHistory(),
@@ -1569,12 +1496,6 @@ class GlobalStore {
       if (index >= 0) this.state.currentQuestionIndex = index;
     }
     this.addLog('success', `已返回第 ${question.index || question.hash.slice(0, 6)} 题参考答案，置信度 ${(normalizedAnswer.confidence * 100).toFixed(0)}%。`);
-    this.emit();
-  }
-
-  setChapterLearning(state: ChapterLearningState | null) {
-    this.state.chapterLearning = state;
-    if (state) this.addLog('info', `章节学习状态已更新：${state.lastMessage}`);
     this.emit();
   }
 

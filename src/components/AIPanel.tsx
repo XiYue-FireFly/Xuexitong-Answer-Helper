@@ -710,55 +710,6 @@ export function AIPanel() {
   const parsedAnswerCount = questions.filter((question) => answerMap[question.hash]).length;
   const canFill = parsedAnswerCount > 0 && !batchRunning && !liveRunning && status !== 'executing';
 
-  // 章节测试自动答题：抓题完成后由 BrowserPanel 触发，这里负责批量 AI 解析 + 填入 + 回调。
-  // 复用 callAllAI 的解析逻辑与 applyAnswersToPage 的填入逻辑，不重复实现。
-  // 空依赖数组：只在 mount 时绑定一次。handler 内通过 appStore.getState() 读最新状态，
-  // 不依赖渲染期闭包；无依赖数组会导致每次 store 变化（setBatchRunning/setStatus 等）都
-  // 重新解绑/绑定 listener，处理中途的 await 期间反复 rebind 既浪费又可能漏事件。
-  useEffect(() => {
-    const handleAnswerAllAndApply = async (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
-      const snapshotQuestions = appStore.getState().questions;
-      if (snapshotQuestions.length === 0) {
-        onComplete?.({ success: false, error: '没有可解析的题目。' });
-        return;
-      }
-      setBatchRunning(true);
-      try {
-        for (let index = 0; index < snapshotQuestions.length; index += 1) {
-          const question = snapshotQuestions[index];
-          if (appStore.getState().answerMap[question.hash]) continue;
-          appStore.setCurrentQuestionIndex(index);
-          appStore.setStatus('calling_ai', `章节测试解析第 ${question.index || index + 1} / ${snapshotQuestions.length} 题。`);
-          const answer = await requestAIWithRetry(question);
-          appStore.setCurrentAnswer(answer);
-        }
-        const items = snapshotQuestions
-          .map((question) => ({ question, answer: appStore.getState().answerMap[question.hash] }))
-          .filter((item): item is { question: QuestionItem; answer: AIAnswerResult } => Boolean(item.answer));
-        if (items.length === 0) {
-          onComplete?.({ success: false, error: 'AI 解析未得到任何答案。' });
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          applyAnswersToPage(items, (result) => {
-            onComplete?.(result);
-            resolve();
-          });
-        });
-        appStore.setStatus('done', `章节测试已填入 ${items.length} 道题。`);
-      } catch (error: any) {
-        appStore.setStatus('error', `章节测试答题失败：${error?.message || 'unknown'}`);
-        onComplete?.({ success: false, error: error?.message || '章节测试答题失败。' });
-      } finally {
-        setBatchRunning(false);
-      }
-    };
-    window.addEventListener('studypilot:answer-all-and-apply', handleAnswerAllAndApply as EventListener);
-    return () => window.removeEventListener('studypilot:answer-all-and-apply', handleAnswerAllAndApply as EventListener);
-  }, []);
-
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, height: '100%', overflowY: 'auto' }}>
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
