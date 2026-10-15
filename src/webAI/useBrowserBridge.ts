@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { MutableRefObject } from 'react';
 import { WEB_AI_BROWSER_EVENT, webPageAction } from './browserBridge';
+import { composerTextMatches } from './composerText';
 import type { WebCommand } from './browserBridge';
 import { WEB_AI_PROVIDERS } from './protocol';
 
@@ -25,7 +26,7 @@ export function useBrowserBridge(enabled: boolean, views: MutableRefObject<Recor
         if (command.action === 'source') return { tabId, url };
         if (command.action === 'focus') { focus(tabId); return { tabId, url }; }
         if (!view.executeJavaScript) throw new Error('网页尚未就绪。');
-        const result = await view.executeJavaScript(`(${webPageAction.toString()})(${JSON.stringify(command.action)}, ${JSON.stringify(command.provider)}, ${JSON.stringify(command.prompt || '')})`, true);
+        const result = await view.executeJavaScript(`(${webPageAction.toString()})(${JSON.stringify(command.action)}, ${JSON.stringify(command.provider)}, ${JSON.stringify(command.prompt || '')}, ${JSON.stringify(command.deadline || 0)}, (${composerTextMatches.toString()}))`, true);
         if (command.isCancelled?.()) throw new Error('操作已停止。');
         if (command.action === 'send' && result?.needsEnter) {
           if (!view.sendInputEvent) return { ...result, reason: '当前浏览器不支持自动按键，请手动发送。' };

@@ -14,6 +14,9 @@ import {
 } from 'lucide-react';
 import { appStore, AutomationPlan, AutomationStep, PageSnapshot, QuestionItem, useAppStore } from '../store/appStore';
 import { useBrowserBridge } from '../webAI/useBrowserBridge';
+import { webAIController } from '../webAI/WebAIController';
+import { AnswerActivityLayer } from '../answerActivity/AnswerActivityLayer';
+import { apiActivity } from '../answerActivity/activityStore';
 
 const WEBVIEW_PARTITION = 'persist:studypilot-sites';
 const DEFAULT_BROWSER_URL = 'https://www.baidu.com';
@@ -394,7 +397,7 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
 }
 
 export function BrowserPanel() {
-  const { settings, status, snapshot, currentPlan, isElectron, questions, answerMap } = useAppStore();
+  const { settings, status, snapshot, currentPlan, isElectron, questions } = useAppStore();
   const initialBrowserUrl = settings.mockModeUrl.includes('study-demo.studypilot.local') ? DEFAULT_BROWSER_URL : settings.mockModeUrl;
   const initialBrowserSessionRef = useRef<BrowserSession | null>(null);
   if (!initialBrowserSessionRef.current) initialBrowserSessionRef.current = restoreBrowserSession(initialBrowserUrl);
@@ -416,8 +419,6 @@ export function BrowserPanel() {
   const [mockSelectedAnswers, setMockSelectedAnswers] = useState<Record<string, string[]>>({});
   const [mockSubmitted, setMockSubmitted] = useState(false);
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
-  const [showSolvingProgress, setShowSolvingProgress] = useState(false);
-  const [appliedQuestionHashes, setAppliedQuestionHashes] = useState<Set<string>>(() => new Set());
 
   const webviewRefs = useRef<Record<string, WebviewElement>>({});
   const applyAnswerResolverRef = useRef<((result: any) => void) | null>(null);
@@ -487,50 +488,6 @@ export function BrowserPanel() {
     if (status === 'done') return 'badge-success';
     if (status === 'error') return 'badge-danger';
     return 'badge-primary';
-  }, [status]);
-
-  const solvingProgress = useMemo(() => {
-    const total = questions.length;
-    const resolved = questions.reduce((count, question) => count + (answerMap[question.hash] ? 1 : 0), 0);
-    const applied = questions.reduce((count, question) => count + (appliedQuestionHashes.has(question.hash) ? 1 : 0), 0);
-    const active = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
-    const state = status === 'extracting_question'
-      ? '正在抓取页面题目'
-      : status === 'calling_ai'
-        ? '正在解析答案'
-        : status === 'executing'
-          ? '正在填入页面'
-          : total === 0
-            ? '等待抓取页面题目'
-            : resolved === 0
-              ? `已抓取 ${total} 道，等待解析`
-                : applied < resolved
-                  ? `已解析 ${resolved} 道，${resolved - applied} 道待手动确认`
-                : resolved < total
-                  ? `已解析 ${resolved} 道，继续处理`
-                : '本次处理完成';
-
-    const progress = total > 0
-      ? status === 'done' && applied === total
-        ? 100
-        : applied === 0 && resolved === 0
-          ? (active ? 6 : 0)
-          : Math.min(98, Math.max(4, Math.round(((applied + Math.max(0, resolved - applied) * 0.72) / total) * 100)))
-      : active ? 12 : 0;
-
-    return { active, progress, resolved, applied, state, total };
-  }, [answerMap, appliedQuestionHashes, questions, status]);
-
-  useEffect(() => {
-    const isQuestionWorkflow = status === 'extracting_question' || status === 'calling_ai' || status === 'executing';
-    if (isQuestionWorkflow) {
-      setShowSolvingProgress(true);
-      return undefined;
-    }
-    if (status !== 'done' && status !== 'error') return undefined;
-
-    const hideTimer = window.setTimeout(() => setShowSolvingProgress(false), 720);
-    return () => window.clearTimeout(hideTimer);
   }, [status]);
 
   const registerWebview = useCallback((tabId: string, webview: WebviewElement | null) => {
@@ -668,6 +625,7 @@ export function BrowserPanel() {
 
     if (event.channel === 'studypilot:exam-next-question-result') {
       const result = event.args[0];
+      apiActivity.nextResult(result);
       examNextResolverRef.current?.(result);
       examNextResolverRef.current = null;
     }
@@ -745,8 +703,6 @@ export function BrowserPanel() {
     const handleExtractQuestionRequest = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
-      if (detail.resetProgress) setAppliedQuestionHashes(new Set());
-      setShowSolvingProgress(true);
       const webview = detail.targetTabId ? webviewRefs.current[detail.targetTabId] : getActiveWebview();
       if (detail.expectedUrl && webview?.getURL?.() !== detail.expectedUrl) {
         onComplete?.({ success: false, error: '原题目页面已跳转，请重新抓题。' });
@@ -808,7 +764,12 @@ export function BrowserPanel() {
     };
     const processApplyAnswers = async (detail: any) => {
       const items = detail?.items || [];
-      const onComplete = typeof detail?.onComplete === 'function' ? detail.onComplete : null;
+      const observeApi = !detail?.targetTabId;
+      if (observeApi) apiActivity.beginApply(Array.isArray(items) ? items.map((item: any) => item.question?.hash).filter(Boolean) : [], webAIController.getSnapshot().busy);
+      const onComplete = (result: any) => {
+        if (observeApi) apiActivity.finishApply(result);
+        if (typeof detail?.onComplete === 'function') detail.onComplete(result);
+      };
       if (detail?.isCancelled?.()) {
         onComplete?.({ success: false, error: '填入已取消。' });
         return;
@@ -852,11 +813,7 @@ export function BrowserPanel() {
           }
 
           setMockSelectedAnswers((prev) => ({ ...prev, ...nextSelected }));
-          setAppliedQuestionHashes((previous) => {
-            const next = new Set(previous);
-            appliedItems.forEach((item) => next.add(item.question!.hash));
-            return next;
-          });
+          if (observeApi) appliedItems.forEach((item) => apiActivity.applied(item.question!.hash));
           const labels = appliedItems
             .map((item) => `第 ${item.question?.index || '?'} 题 ${item.labels.join('、')}`)
             .join('，');
@@ -923,6 +880,7 @@ export function BrowserPanel() {
             if (!result?.success && isCompletionVerificationFailure(result)) {
               skippedCompletionQuestions.push(String(item.question.index || '?'));
               notifyCompletionFallback(item.question, result.error || '未知校验错误');
+              if (observeApi) apiActivity.skipped(item.question.hash);
               finalResult = {
                 success: true,
                 partial: true,
@@ -937,11 +895,10 @@ export function BrowserPanel() {
             appStore.setStatus('error', result?.error || '答案选择失败');
             break;
           }
-          setAppliedQuestionHashes((previous) => {
-            const next = new Set(previous);
-            next.add(item.question.hash);
-            return next;
-          });
+          if (observeApi) {
+            if (!result.skipped && !result.partial) apiActivity.applied(item.question.hash);
+            else apiActivity.skipped(item.question.hash);
+          }
           finalResult = skippedCompletionQuestions.length > 0
             ? { ...result, success: true, partial: true, skipped: skippedCompletionQuestions.length, message: `已填入部分答案，${skippedCompletionQuestions.length} 道填空题需手动处理。` }
             : result;
@@ -1133,8 +1090,6 @@ export function BrowserPanel() {
   };
 
   const extractQuestion = () => {
-    setAppliedQuestionHashes(new Set());
-    setShowSolvingProgress(true);
     appStore.setStatus('extracting_question', activeSource === 'webview' ? '正在从当前页面抓取题目。' : '正在从演示页面抓取题目。');
     if (activeSource === 'webview') {
       const webview = getActiveWebview();
@@ -1142,7 +1097,6 @@ export function BrowserPanel() {
       return;
     }
     appStore.setQuestions(mockQuestions.map((question) => ({ ...question, capturedAt: Date.now() })));
-    setAppliedQuestionHashes(new Set());
     appStore.setStatus('done', `题目抓取完成，共 ${mockQuestions.length} 题。`);
   };
 
@@ -1406,25 +1360,7 @@ export function BrowserPanel() {
             </div>
           )}
 
-          {showSolvingProgress && <section className={`browser-solving-dock${solvingProgress.active ? ' is-active' : ''}${status === 'done' ? ' is-complete' : ''}${status === 'error' ? ' is-error' : ''}`} aria-label="答题进度">
-            <div className="browser-solving-dock__topline">
-              <div>
-                <span className="browser-solving-dock__eyebrow">答题流程</span>
-                <strong>{solvingProgress.state}</strong>
-              </div>
-              <output aria-label={`已填入 ${solvingProgress.applied} 道，共 ${solvingProgress.total} 道`}>
-                {solvingProgress.total > 0 ? `${solvingProgress.applied} / ${solvingProgress.total}` : '--'}
-              </output>
-            </div>
-            <div className="browser-solving-dock__rail" aria-hidden="true">
-              <span style={{ width: `${solvingProgress.progress}%` }} />
-            </div>
-            {solvingProgress.total > 0 && <div className="browser-solving-dock__trail" aria-label={`已解析 ${solvingProgress.resolved} 道，已填入 ${solvingProgress.applied} 道`}>
-              <span>解析 {solvingProgress.resolved}/{solvingProgress.total}</span>
-              <span>填入 {solvingProgress.applied}/{solvingProgress.total}</span>
-            </div>}
-          </section>
-          }
+          <AnswerActivityLayer />
         </div>
       </div>
     </div>

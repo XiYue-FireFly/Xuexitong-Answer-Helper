@@ -17,6 +17,7 @@ export async function sendWebPrompt(options: {
   let attempted = false;
   let notified = false;
   let reason = '';
+  let readySince: number | null = null;
   // Let the site's input handler commit its composer state before the first send.
   await options.wait();
   while (now() - started < 120000) {
@@ -25,11 +26,15 @@ export async function sendWebPrompt(options: {
     try { state = await options.inspect(); }
     catch (error) { options.checkCancelled(); throw new WebAISendError(`无法确认发送状态：${(error as Error).message}`); }
     options.checkCancelled();
-    if (state.ready && state.inputText?.trim() === '' && (state.busy || Boolean(state.text && state.text !== options.baseline))) return;
-    if (!attempted && now() - started < 15000) {
+    if (state.ready && state.inputText?.trim() === '' && !state.attachmentState && (state.busy || Boolean(state.text && state.text !== options.baseline))) return;
+    if (state.attachmentState === 'failed') throw new WebAISendError('TXT 附件上传失败，请在网页重试上传后点击“重试”。');
+    if (state.attachmentState === 'pending') { if (!attempted) readySince = null; await options.wait(); continue; }
+    readySince ??= now();
+    if (!attempted && now() - readySince < 15000) {
       try {
         const result = await options.send();
         attempted = Boolean(result.attempted);
+        if (!attempted && result.attachmentState === 'pending') readySince = null;
         reason = result.reason || reason;
       } catch (error) {
         // A lost acknowledgement can follow a successful click. Do not resend.
@@ -38,11 +43,11 @@ export async function sendWebPrompt(options: {
       }
       options.checkCancelled();
     }
-    if (now() - started >= 15000 && !notified) {
+    if (readySince !== null && now() - readySince >= 15000 && !notified) {
       notified = true;
-      options.onManualSend(`${reason || '尚未确认发送成功。'}请在网页点击发送，回答完成后点击“提取答案”。`);
+      options.onManualSend(`${reason || '尚未确认发送成功。'}请检查网页发送状态，确认后将自动检测并提取回答。`);
     }
     await options.wait();
   }
-  throw new WebAISendError('未确认提示词已发送，已保留网页和提示词。请在网站发送后点击“提取答案”。');
+  throw new WebAISendError('未确认提示词已发送，已保留网页和提示词。请检查网页后点击“重试”。');
 }

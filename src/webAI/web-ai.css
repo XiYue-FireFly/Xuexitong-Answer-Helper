@@ -25,6 +25,14 @@
 .web-ai-preview small { color: var(--text-secondary); }
 .web-ai-error { color: var(--danger-color); font-size: 13px; }
 .web-ai-body a { display: inline-flex; gap: 5px; align-items: center; color: var(--primary-color); font-size: 13px; }
+.web-ai-flow-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--border-glass); border-radius: 8px; background: var(--bg-app); }
+.web-ai-flow-switch button { min-width: 0; }
+.web-ai-flow-switch button.is-active { color: var(--text-primary); border-color: var(--border-glass-focused); background: var(--bg-panel-solid); box-shadow: 0 2px 8px #0001; }
+.web-ai-auto-controls { display: grid; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border-glass); border-bottom: 1px solid var(--border-glass); }
+.web-ai-auto-status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--text-primary); font-size: 13px; }
+.web-ai-auto-status > span { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--text-muted); }
+.web-ai-auto-status > span.is-running { background: var(--success-color); box-shadow: 0 0 8px var(--success-color); }
+.web-ai-auto-status small { margin-left: auto; font-size: 11px; color: var(--text-muted); }
 .web-ai-task { position: fixed; bottom: 44px; right: 84px; z-index: 90; width: min(440px, calc(100vw - 100px)); display: flex; align-items: center; gap: 10px; padding: 12px; color: var(--text-primary); background: var(--bg-panel-solid); border: 1px solid var(--border-glass); border-radius: 8px; font-size: 13px; box-shadow: 0 8px 30px #0003; }
 .web-ai-task span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .web-ai-task button, .web-ai-task > svg { flex-shrink: 0; }
@@ -52,6 +60,14 @@
 .web-ai-inline .web-ai-step-body button { min-height: 34px; }
 .web-ai-inline textarea { min-height: 120px; }
 .web-ai-inline .web-ai-question-picker { max-height: 150px; }
+
+/* Large answer forms must not tilt around a center far outside the visible viewport. */
+.side-panel-page .glass-panel:has(.web-ai-inline) {
+  transform: none !important;
+  animation: none !important;
+  will-change: auto;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
 
 /* 步骤式流程布局 */
 .web-ai-steps { display: grid; gap: 8px; }

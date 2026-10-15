@@ -24,6 +24,43 @@ function scenario() {
 }
 
 describe('Web AI send acknowledgement', () => {
+  it('sends a TXT after a long upload without asking for manual sending', async () => {
+    const test = scenario();
+    let clicks = 0;
+    await sendWebPrompt({ ...test.options,
+      inspect: async () => clicks ? generating : { ...draft, inputText: '', promptReady: true, attachmentState: test.options.now() < 30000 ? 'pending' : 'ready' },
+      send: async () => {
+        if (test.options.now() < 30000) return { ...draft, attempted: false, attachmentState: 'pending' };
+        clicks++; return { ...draft, attempted: true };
+      }
+    });
+    assert.equal(clicks, 1);
+    assert.equal(test.messages.length, 0);
+  });
+  it('does not acknowledge an attachment still present in the composer as sent', async () => {
+    const test = scenario();
+    await assert.rejects(sendWebPrompt({ ...test.options,
+      inspect: async () => ({ ...generating, attachmentState: 'ready', promptReady: true }),
+      send: async () => ({ ...draft, attempted: true })
+    }), WebAISendError);
+  });
+  it('starts a fresh send window after a TXT changes from ready to uploading to ready', async () => {
+    const test = scenario();
+    let calls = 0;
+    let sent = false;
+    await sendWebPrompt({ ...test.options,
+      inspect: async () => sent ? generating : { ...draft, inputText: '', promptReady: true,
+        attachmentState: calls > 0 && test.options.now() < 30000 ? 'pending' : 'ready' },
+      send: async () => {
+        calls++;
+        if (test.options.now() < 30000) return { ...draft, attempted: false, attachmentState: 'pending' };
+        sent = true; return { ...draft, attempted: true };
+      }
+    });
+    assert.equal(calls, 2);
+    assert.equal(sent, true);
+    assert.equal(test.messages.length, 0);
+  });
   it('waits for a disabled button to enable instead of aborting after 600ms', async () => {
     const test = scenario();
     let clicks = 0;

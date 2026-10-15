@@ -1,17 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ClipboardPaste, Copy, ExternalLink, Globe, Play, Send, Square, X } from 'lucide-react';
-import { appStore, useAppStore } from '../store/appStore';
-import type { QuestionItem } from '../store/appStore';
-import { browserCommand } from './browserBridge';
-import type { BrowserSource, WebPageState } from './browserBridge';
-import { buildWebPrompt, hasCompleteWebResponse, parseWebAnswer, prepareWebBatch, sameQuestions, validateWebPrompt, WEB_AI_PROMPT_LIMIT, WEB_AI_PROVIDERS } from './protocol';
-import type { AnswerItem, SkippedWebQuestion, WebBatch, WebProvider } from './protocol';
-import { sendWebPrompt } from './sendPrompt';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { ClipboardPaste, Copy, ExternalLink, Globe, ListChecks, Pause, Play, RotateCcw, Send, Square, X, Zap } from 'lucide-react';
+import { useAppStore } from '../store/appStore';
+import { parseWebAnswer, validateWebPrompt, WEB_AI_PROMPT_LIMIT, WEB_AI_PROVIDERS } from './protocol';
+import type { WebProvider } from './protocol';
+import { webAIController } from './WebAIController';
 import './web-ai.css';
 
-const PENDING_KEY = 'studypilot-web-ai-pending-v1';
 const OPEN_REQUEST_KEY = 'studypilot-web-ai-open-request-v1';
-
 export type WebAIWorkflowProps = { embedded?: boolean };
 
 export function openWebAI(importOnly = false) {
@@ -35,57 +30,11 @@ function takeOpenRequest() {
   } catch { /* Ignore an unavailable persisted request. */ }
   return null;
 }
-function restorePending(): { batch: WebBatch | null; prompt: string; error: string } {
-  try {
-    const value = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
-    if (!value) return { batch: null, prompt: '', error: '' };
-    if (typeof value.requestId !== 'string' || !value.requestId.trim() || !Array.isArray(value.questions) || !value.questions.length ||
-      !value.questions.every((q: any) => q && typeof q.hash === 'string' && typeof q.question === 'string' && typeof q.type === 'string' &&
-        (q.context == null || typeof q.context === 'string') && Array.isArray(q.options) && q.options.every((option: unknown) => typeof option === 'string') &&
-        (q.optionTargets == null || (Array.isArray(q.optionTargets) && q.optionTargets.every((target: any) => target && typeof target.text === 'string' && typeof target.label === 'string'))))) {
-      throw new Error('草稿格式不完整');
-    }
-    const prompt = buildWebPrompt(value);
-    validateWebPrompt(prompt, value);
-    return { batch: value, prompt, error: '' };
-  } catch {
-    return { batch: null, prompt: '', error: '上次提示词草稿已损坏或超过 300000 字符，请重新抓题并生成提示词。' };
-  }
-}
-function requestPage(channel: string, detail: Record<string, unknown>, timeout = 15000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error('原题目页面响应超时。')), timeout);
-    window.dispatchEvent(new CustomEvent(channel, { detail: { ...detail, onComplete: (result: any) => {
-      window.clearTimeout(timer);
-      if (result?.success) resolve(result); else reject(new Error(result?.error || '页面操作失败。'));
-    } } }));
-  });
-}
 
 export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   const { questions, settings } = useAppStore();
-  const [visible, setVisible] = useState(embedded);
-  const [pending] = useState(restorePending);
-  const [provider, setProvider] = useState<WebProvider>(() => {
-    try { const value = pending.batch?.provider || localStorage.getItem('studypilot-web-ai-provider'); return WEB_AI_PROVIDERS.find(p => p.id === value)?.id || 'deepseek'; } catch { return 'deepseek'; }
-  });
-  const [mode, setMode] = useState<'internal' | 'external'>('internal');
-  const [selected, setSelected] = useState<string[]>(() => questions.map(q => q.hash));
-  const [batch, setBatch] = useState<WebBatch | null>(pending.batch);
-  const [prompt, setPrompt] = useState(pending.prompt);
-  const [reply, setReply] = useState('');
-  const [message, setMessage] = useState(pending.error);
-  const [busy, setBusy] = useState(false);
-  const [imported, setImported] = useState(false);
-  const [position, setPosition] = useState(pending.batch ? 1 : 0);
-  const [remaining, setRemaining] = useState<QuestionItem[]>([]);
-  const [skipped, setSkipped] = useState<SkippedWebQuestion[]>([]);
-  const [completedItems, setCompletedItems] = useState<AnswerItem[]>([]);
-  const [aiTab, setAITab] = useState<{ id: string; provider: WebProvider } | null>(null);
-  const [attemptedRequest, setAttemptedRequest] = useState('');
-  const sourceRef = useRef<BrowserSource | null>(null);
-  const runRef = useRef(0);
-  const ownsTaskRef = useRef(false);
+  const state = useSyncExternalStore(webAIController.subscribe, webAIController.getSnapshot);
+  const { provider, mode, flow, selected, batch, prompt, reply, message, busy, imported, position, remaining, skipped, completedItems, aiTab, attemptedRequest, visible, source, paused } = state;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const selectedProvider = WEB_AI_PROVIDERS.find(item => item.id === provider)!;
   const batchProvider = WEB_AI_PROVIDERS.find(item => item.id === batch?.provider) || selectedProvider;
@@ -97,251 +46,33 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
     try { validateWebPrompt(prompt, batch); return ''; } catch (error) { return (error as Error).message; }
   }, [prompt, batch]);
   const canSend = !busy && canUseTab && !promptError && attemptedRequest !== batch?.requestId;
+  const setVisible = (value: boolean) => webAIController.edit({ visible: value });
+  const setProvider = (value: WebProvider) => webAIController.edit({ provider: value });
+  const setMode = (value: 'internal' | 'external') => webAIController.edit({ mode: value });
+  const setSelected = (value: string[] | ((previous: string[]) => string[])) => webAIController.edit({ selected: typeof value === 'function' ? value(webAIController.getSnapshot().selected) : value });
+  const setPrompt = (value: string) => webAIController.edit({ prompt: value });
+  const setReply = (value: string) => webAIController.edit({ reply: value });
+  const { generate, extractQuestions, openWebsite, send, read, importPreview, approveFill, stop, copy } = webAIController;
 
   useEffect(() => {
     if (embedded || !dialogRef.current) return;
-    if (visible) dialogRef.current.showModal(); else dialogRef.current.close();
+    if (visible && !dialogRef.current.open) dialogRef.current.showModal();
+    else if (!visible && dialogRef.current.open) dialogRef.current.close();
   }, [embedded, visible]);
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      setVisible(true);
-      if (!detail.importOnly && !busy) setSelected(appStore.getState().questions.map(q => q.hash));
+      const current = webAIController.getSnapshot();
+      webAIController.edit({ visible: true, ...(!current.busy ? { flow: 'manual' as const, ...(!detail.importOnly ? { selected: questions.map(q => q.hash) } : {}) } : {}) });
     };
     window.addEventListener('studypilot:open-web-ai', open);
-    return () => window.removeEventListener('studypilot:open-web-ai', open);
-  }, [busy]);
-  useEffect(() => {
     const pending = takeOpenRequest();
-    if (!pending) return;
-    setVisible(true);
-    if (!pending.importOnly && !busy) setSelected(appStore.getState().questions.map(q => q.hash));
-  }, [busy]);
+    if (pending) open(new CustomEvent('studypilot:open-web-ai', { detail: pending }));
+    return () => window.removeEventListener('studypilot:open-web-ai', open);
+  }, [questions]);
   useEffect(() => {
-    if (!batch) setSelected(questions.map(question => question.hash));
-  }, [batch, questions]);
-  useEffect(() => () => {
-    runRef.current++;
-    if (ownsTaskRef.current) appStore.setAutomationRunning({ batchRunning: false });
-  }, []);
-
-  const checkRun = (run: number) => { if (run !== runRef.current) throw new Error('操作已停止。'); };
-  const beginAction = () => {
-    const state = appStore.getState();
-    if (busy || state.batchRunning || state.liveRunning || ['calling_ai', 'executing'].includes(state.status)) {
-      setMessage('请先等待当前任务结束。');
-      return null;
-    }
-    const run = ++runRef.current;
-    ownsTaskRef.current = true;
-    appStore.setAutomationRunning({ batchRunning: true });
-    setBusy(true);
-    return run;
-  };
-  const finishAction = (run: number) => {
-    if (run !== runRef.current) return;
-    ownsTaskRef.current = false;
-    appStore.setAutomationRunning({ batchRunning: false });
-    setBusy(false);
-  };
-  const showError = (error: unknown, run: number) => {
-    if (run !== runRef.current) return;
-    setMessage((error as Error).message);
-    appStore.setStatus('error', (error as Error).message);
-  };
-
-  const generate = (nextBatch = false) => {
-    if (busy) return;
-    try {
-      const items = nextBatch ? remaining : questions.filter(q => selected.includes(q.hash)).map((q, index) => q.index ? q : { ...q, index: index + 1 });
-      const next = prepareWebBatch(items, provider);
-      if (!nextBatch) {
-        setCompletedItems([]);
-        if (!sourceRef.current || items.some(q => !q.pageUrl || q.pageUrl !== sourceRef.current?.url)) {
-          sourceRef.current = null;
-          setAITab(null);
-        }
-      }
-      setBatch(next.batch); setPrompt(next.prompt); setRemaining(next.remaining);
-      setSkipped(previous => nextBatch
-        ? [...previous, ...next.skipped.filter(item => !previous.some(old => old.questionHash === item.questionHash && old.questionIndex === item.questionIndex))]
-        : next.skipped);
-      setReply(''); setImported(false); setAttemptedRequest('');
-      setPosition(previous => nextBatch ? previous + (next.batch ? 1 : 0) : next.batch ? 1 : 0);
-      try {
-        if (next.batch) localStorage.setItem(PENDING_KEY, JSON.stringify(next.batch)); else localStorage.removeItem(PENDING_KEY);
-        localStorage.setItem('studypilot-web-ai-provider', provider);
-      } catch { /* The current session can still continue. */ }
-      setMessage(next.batch
-        ? `已生成 ${next.batch.questions.length} 题提示词，共 ${next.prompt.length.toLocaleString()} 字符，待处理 ${next.remaining.length} 题。`
-        : '剩余题目均超过单批字符上限，已跳过本次发送；原题和此前已入库答案保留。');
-    } catch (error) { setMessage((error as Error).message); }
-  };
-
-  const extractQuestions = async () => {
-    if (busy) return;
-    const run = beginAction();
-    if (run === null) return;
-    try {
-      if (!settings.allowRealPageAutomation) throw new Error('请先在设置中启用真实 WebView。');
-      const source = await browserCommand<BrowserSource>({ action: 'source', tabId: sourceRef.current?.tabId });
-      checkRun(run);
-      sourceRef.current = source;
-      const result = await requestPage('studypilot:extract-question-request', {
-        targetTabId: source.tabId,
-        expectedUrl: source.url,
-        resetProgress: true
-      });
-      checkRun(run);
-      const extracted = (Array.isArray(result.questions) ? result.questions : result.data ? [result.data] : [])
-        .filter(Boolean) as QuestionItem[];
-      if (extracted.length === 0) throw new Error('当前页面未识别到可用题目。');
-      setSelected(extracted.map(question => question.hash));
-      setBatch(null);
-      setPrompt('');
-      setReply('');
-      setImported(false);
-      setCompletedItems([]);
-      setRemaining([]);
-      setSkipped([]);
-      setAttemptedRequest('');
-      setPosition(0);
-      setMessage(`已抓取 ${extracted.length} 道题，请点击“生成提示词”。`);
-      appStore.setStatus('done', `网页 AI 已抓取 ${extracted.length} 道题。`);
-    } catch (error) { showError(error, run); }
-    finally { finishAction(run); }
-  };
-
-  const openWebsite = async () => {
-    if (!batch || !matchesProvider) { setMessage('请先为所选网站生成提示词。'); return; }
-    const run = beginAction();
-    if (run === null) return;
-    try {
-      if (mode === 'external') {
-        const api = (window as any).electronAPI;
-        if (!api?.openExternalUrl) { setMessage('请使用下方网站链接打开聊天页。'); return; }
-        const result = await api.openExternalUrl(selectedProvider.url);
-        checkRun(run);
-        if (!result?.success) throw new Error(result?.error || '打开系统浏览器失败。');
-        setMessage('网站已打开。');
-      } else {
-        if (!settings.allowRealPageAutomation) throw new Error('请先在设置中启用真实 WebView。');
-        const source = await browserCommand<BrowserSource>({ action: 'source', tabId: sourceRef.current?.tabId });
-        checkRun(run);
-        if (batch.questions.some(q => q.pageUrl && q.pageUrl !== source.url)) throw new Error('请先切回抓题来源标签，再打开 AI 网站。');
-        sourceRef.current = source;
-        let opened: BrowserSource;
-        try {
-          if (!aiTab || aiTab.provider !== provider) throw new Error('new tab');
-          opened = await browserCommand<BrowserSource>({ action: 'focus', tabId: aiTab.id });
-        } catch {
-          checkRun(run);
-          opened = await browserCommand<BrowserSource>({ action: 'open', provider });
-        }
-        checkRun(run);
-        setAITab({ id: opened.tabId, provider });
-        setVisible(false);
-        setMessage('网站已打开，登录后可发送提示词。');
-      }
-    } catch (error) { showError(error, run); }
-    finally { finishAction(run); }
-  };
-
-  const send = async () => {
-    if (!batch || !aiTab || !canSend) return;
-    const run = beginAction();
-    if (run === null) return;
-    try {
-      validateWebPrompt(prompt, batch);
-      setVisible(false);
-      await browserCommand({ action: 'focus', tabId: aiTab.id });
-      checkRun(run);
-      const before = await browserCommand<WebPageState>({ action: 'inspect', provider, tabId: aiTab.id });
-      checkRun(run);
-      if (hasCompleteWebResponse(before.text, batch.requestId)) {
-        setAttemptedRequest(batch.requestId); setMessage('本批已有回答，可以提取答案。'); return;
-      }
-      if (!before.ready || before.busy) throw new Error(before.busy ? '网站仍在生成，请稍后发送。' : '请先登录并进入聊天页，再点击发送提示词。');
-      setMessage('正在发送提示词…');
-      appStore.setStatus('calling_ai', '网页 AI：发送提示词。');
-      const baseline = await browserCommand<WebPageState>({ action: 'prepare', provider, tabId: aiTab.id, prompt, isCancelled: () => run !== runRef.current });
-      await sendWebPrompt({
-        inspect: () => browserCommand<WebPageState>({ action: 'inspect', provider, tabId: aiTab.id }),
-        send: async () => {
-          try {
-            const result = await browserCommand<WebPageState>({ action: 'send', provider, tabId: aiTab.id, prompt, isCancelled: () => run !== runRef.current });
-            if (run === runRef.current && result.attempted) setAttemptedRequest(batch.requestId);
-            return result;
-          } catch (error) { if (run === runRef.current) setAttemptedRequest(batch.requestId); throw error; }
-        },
-        wait: async () => { await new Promise(resolve => window.setTimeout(resolve, 500)); checkRun(run); },
-        checkCancelled: () => checkRun(run), onManualSend: setMessage, baseline: baseline.text
-      });
-      checkRun(run);
-      setAttemptedRequest(batch.requestId);
-      setMessage('提示词已发送，回答完成后可提取答案。');
-      appStore.setStatus('done', '网页 AI 提示词已发送。');
-    } catch (error) { showError(error, run); }
-    finally { finishAction(run); }
-  };
-
-  const read = async () => {
-    if (!batch || !aiTab || !canUseTab) return;
-    const run = beginAction();
-    if (run === null) return;
-    try {
-      const state = await browserCommand<WebPageState>({ action: 'inspect', provider: aiTab.provider, tabId: aiTab.id });
-      checkRun(run);
-      if (state.busy) throw new Error('回答仍在生成，请等待完成后再提取答案。');
-      if (!state.text.trim()) throw new Error('尚未找到回答，请等待生成完成或粘贴回答。');
-      setReply(state.text);
-      if (state.text !== reply) setImported(false);
-      setVisible(true);
-      setMessage('已提取答案，请核对预览后确认入库。');
-    } catch (error) { showError(error, run); }
-    finally { finishAction(run); }
-  };
-
-  const importPreview = () => {
-    if (busy || !preview?.items.length) return;
-    preview.items.forEach(item => { appStore.upsertQuestionBank(item.question, item.answer); appStore.setAnswerForQuestion(item.question, item.answer); });
-    setCompletedItems(previous => [...previous.filter(item => !preview.items.some(next => next.question.hash === item.question.hash)), ...preview.items]);
-    setImported(true); setMessage(`已导入 ${preview.items.length} 道有效答案。`);
-  };
-  const approveFill = async () => {
-    const source = sourceRef.current;
-    if (!source || !completedItems.length) return;
-    const run = beginAction();
-    if (run === null) return;
-    setVisible(false);
-    try {
-      appStore.setStatus('executing', '网页 AI：正在核对原题目。');
-      await browserCommand({ action: 'focus', tabId: source.tabId });
-      checkRun(run);
-      const result = await requestPage('studypilot:extract-question-request', { targetTabId: source.tabId, expectedUrl: source.url });
-      checkRun(run);
-      const actual = Array.isArray(result.questions) ? result.questions : result.data ? [result.data] : [];
-      if (!sameQuestions(completedItems.map(item => item.question), actual)) throw new Error('原页面题目或选项已变化，已停止填入；答案保留在题库。');
-      for (const item of completedItems) {
-        checkRun(run);
-        const question = actual.find((candidate: QuestionItem) => candidate.hash === item.question.hash);
-        await requestPage('studypilot:apply-answers', { items: [{ ...item, question }], targetTabId: source.tabId, expectedUrl: source.url, isCancelled: () => run !== runRef.current });
-      }
-      checkRun(run);
-      setMessage('已填入原题目页面。'); appStore.setStatus('done', '网页 AI 答案填入完成。');
-    } catch (error) { showError(error, run); }
-    finally { if (run === runRef.current) setVisible(true); finishAction(run); }
-  };
-  const stop = () => {
-    runRef.current++;
-    if (ownsTaskRef.current) { appStore.setStatus('idle', '网页 AI 操作已停止。'); appStore.setAutomationRunning({ batchRunning: false }); }
-    ownsTaskRef.current = false; setBusy(false);
-    setMessage('已停止当前操作，网站上已发送的请求可能仍在生成。');
-  };
-  const copy = async () => {
-    try { if (batch) validateWebPrompt(prompt, batch); await navigator.clipboard.writeText(prompt); setMessage('提示词已复制。'); }
-    catch (error) { setMessage(`复制失败：${(error as Error).message}`); }
-  };
+    if (!batch && !busy && !state.canRetry) webAIController.edit({ selected: questions.map(question => question.hash) });
+  }, [batch, busy, questions, state.canRetry]);
 
   // 计算步骤状态
   const hasQuestions = questions.length > 0;
@@ -353,16 +84,32 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
 
   const workflowBody = (
       <div className="web-ai-body">
+        <div className="web-ai-flow-switch" role="tablist" aria-label="Web 答题方式">
+          <button role="tab" aria-selected={flow === 'automatic'} className={flow === 'automatic' ? 'is-active' : ''} disabled={busy} onClick={() => webAIController.edit({ flow: 'automatic' })}><Zap size={15} />自动答题</button>
+          <button role="tab" aria-selected={flow === 'manual'} className={flow === 'manual' ? 'is-active' : ''} disabled={busy} onClick={() => webAIController.edit({ flow: 'manual' })}><ListChecks size={15} />手动步骤</button>
+        </div>
         {/* AI 网站选择区 */}
         <fieldset disabled={busy}>
           <legend>AI 网站选择</legend>
           <div className="web-ai-segments">{WEB_AI_PROVIDERS.map(item => <label key={item.id}><input type="radio" name="web-provider" checked={provider === item.id} onChange={() => setProvider(item.id)} />{item.name}</label>)}</div>
           <div className="web-ai-segments">{(['internal', 'external'] as const).map(value => <label key={value}><input type="radio" name="web-mode" checked={mode === value} onChange={() => setMode(value)} />{value === 'internal' ? '应用内浏览器' : '系统默认浏览器'}</label>)}</div>
-          <details><summary>选择题目（{selected.length}/{questions.length}） · 不限题数</summary><p className="web-ai-message">每批完整提示词 ≤ 300000 字符，按原题顺序整题分批。</p><div className="web-ai-question-picker">{questions.map((question, index) => <label key={`${question.hash}-${index}`}><input type="checkbox" checked={selected.includes(question.hash)} onChange={event => setSelected(prev => event.target.checked ? [...prev, question.hash] : prev.filter(hash => hash !== question.hash))} /><span>{question.index || index + 1}. {question.question}</span></label>)}</div></details>
+          {flow === 'manual' && <details><summary>选择题目（{selected.length}/{questions.length}） · 不限题数</summary><p className="web-ai-message">每批完整提示词 ≤ 300000 字符，按原题顺序整题分批。</p><div className="web-ai-question-picker">{questions.map((question, index) => <label key={`${question.hash}-${index}`}><input type="checkbox" checked={selected.includes(question.hash)} onChange={event => setSelected(prev => event.target.checked ? [...prev, question.hash] : prev.filter(hash => hash !== question.hash))} /><span>{question.index || index + 1}. {question.question}</span></label>)}</div></details>}
         </fieldset>
 
+        {flow === 'automatic' && <div className="web-ai-auto-controls">
+          <div className="web-ai-auto-status"><span className={busy && !paused ? 'is-running' : ''} /><strong>{busy ? paused ? '已暂停' : '自动答题进行中' : state.canRetry ? '等待重试' : state.phase === 'completed' ? '已全部填回' : '当前页面 · 全部题目'}</strong><small>不提交</small></div>
+          <div className="web-ai-actions">
+            {!busy && <button className="web-ai-primary" disabled={mode !== 'internal' || !settings.allowRealPageAutomation} onClick={() => void webAIController.startAutomatic()}><Play size={16} />开始自动答题</button>}
+            {!busy && state.canRetry && <button className="web-ai-secondary" onClick={() => void webAIController.retry()}><RotateCcw size={15} />重试失败步骤</button>}
+            {busy && <button className="web-ai-secondary" onClick={webAIController.togglePause}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? '继续' : '暂停'}</button>}
+            {busy && <button className="web-ai-danger" onClick={stop}><Square size={15} />停止</button>}
+          </div>
+          {mode === 'external' && <p className="web-ai-message">自动答题需要切换到应用内浏览器。</p>}
+          {!settings.allowRealPageAutomation && <p className="web-ai-message">请先在设置中启用真实 WebView。</p>}
+        </div>}
+
         {/* 步骤式操作流程 */}
-        <div className="web-ai-steps">
+        {flow === 'manual' && <div className="web-ai-steps">
           {/* 步骤 1：开始抓题 */}
           <div className={`web-ai-step ${hasQuestions ? 'web-ai-step-done' : 'web-ai-step-active'}`}>
             <div className="web-ai-step-header">
@@ -402,17 +149,16 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
                 <ExternalLink size={15} />
                 {hasAITab ? `重新打开 ${selectedProvider.name}` : `打开 ${selectedProvider.name}`}
               </button>
-              {!hasAITab && hasBatch && <small className="web-ai-step-hint">打开后若未登录，请先登录再返回此处</small>}
             </div>
           </div>
 
-          {/* 步骤 3：填入提示词（等待登录后） */}
+          {/* 步骤 3：填入提示词 */}
           <div className={`web-ai-step ${attemptedRequest === batch?.requestId ? 'web-ai-step-done' : canSend ? 'web-ai-step-active' : 'web-ai-step-disabled'}`}>
             <div className="web-ai-step-header">
               <span className="web-ai-step-num">③</span>
               <span className="web-ai-step-title">填入提示词</span>
               <span className="web-ai-step-status">
-                {attemptedRequest === batch?.requestId ? '提示词已发送' : hasAITab ? '登录后点击发送' : '请先打开网页 AI'}
+                {attemptedRequest === batch?.requestId ? state.canRetry ? '等待重试或检查回答' : '已尝试发送' : hasAITab ? '可以发送提示词' : '请先打开网页 AI'}
               </span>
             </div>
             <div className="web-ai-step-body">
@@ -429,9 +175,6 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
                 <button className="web-ai-secondary" disabled={busy || !hasBatch || Boolean(promptError)} onClick={() => void copy()}>
                   <Copy size={15} />复制提示词（手动粘贴）
                 </button>
-              )}
-              {mode === 'internal' && hasAITab && !canSend && !attemptedRequest && (
-                <small className="web-ai-step-hint">⚠️ 若 AI 页面未登录，请先登录后再点击发送</small>
               )}
             </div>
           </div>
@@ -479,23 +222,26 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
 
           {/* 步骤 6：开始填入 */}
           {mode === 'internal' && (
-            <div className={`web-ai-step ${sourceRef.current && completedItems.length > 0 && (imported || !batch) ? 'web-ai-step-active' : 'web-ai-step-disabled'}`}>
+            <div className={`web-ai-step ${source && completedItems.length > 0 && (imported || !batch) ? 'web-ai-step-active' : 'web-ai-step-disabled'}`}>
               <div className="web-ai-step-header">
                 <span className="web-ai-step-num">⑥</span>
                 <span className="web-ai-step-title">开始填入</span>
                 <span className="web-ai-step-status">{completedItems.length > 0 ? `${completedItems.length} 题等待填入原页面` : '录入题库后可填入'}</span>
               </div>
               <div className="web-ai-step-body">
-                <button className="web-ai-primary" disabled={busy || !sourceRef.current || completedItems.length === 0} onClick={() => void approveFill()}>
+                <button className="web-ai-primary" disabled={busy || !source || completedItems.length === 0} onClick={() => void approveFill()}>
                   <Play size={15} />确认填入 {completedItems.length} 题到原页面
                 </button>
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* 停止按钮 */}
-        {busy && <div className="web-ai-actions"><button className="web-ai-danger" onClick={stop}><Square size={15} />停止当前操作</button></div>}
+        {busy && flow === 'manual' && <div className="web-ai-actions"><button className="web-ai-danger" onClick={stop}><Square size={15} />停止当前操作</button></div>}
+        {!busy && flow === 'manual' && state.canRetry && <div className="web-ai-actions"><button className="web-ai-secondary" onClick={() => void webAIController.retry()}><RotateCcw size={15} />重试失败步骤</button></div>}
+
+        {state.phase === 'needs_review' && <div className="web-ai-actions"><button className="web-ai-secondary" onClick={() => webAIController.edit({ flow: 'manual' })}><ListChecks size={15} />核对并手动处理</button></div>}
 
         {message && <p className="web-ai-message" role="status">{message}</p>}
         {skipped.length > 0 && <details className="web-ai-skipped">
@@ -512,7 +258,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
           {promptError && <p className="web-ai-error" role="alert">{promptError}</p>}
           <a href={selectedProvider.url} target="_blank" rel="noreferrer">{selectedProvider.name}<ExternalLink size={12} /></a>
           <h3>AI 回答</h3>
-          <textarea aria-label="粘贴 AI 回答" placeholder="粘贴完整 AI 回答" rows={8} value={reply} disabled={busy} onChange={event => { setReply(event.target.value); setImported(false); }} />
+          <textarea aria-label="粘贴 AI 回答" placeholder="粘贴完整 AI 回答" rows={8} value={reply} disabled={busy} onChange={event => setReply(event.target.value)} />
           {preview && <section className="web-ai-preview" aria-label="答案导入预览">
             {preview.errors.map((error, index) => <p className="web-ai-error" key={index}>{error}</p>)}
             {preview.items.map((item, index) => <article key={`${item.question.hash}-${index}`}><strong>{item.question.question}</strong><p>{item.answer.choiceLabels.join('、')} {item.answer.answer}</p>{item.answer.analysis && <p>{item.answer.analysis}</p>}<small>置信度 {Math.round(item.answer.confidence * 100)}%{item.answer.warnings.length ? ` · ${item.answer.warnings.join('；')}` : ''}</small></article>)}
@@ -540,6 +286,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
     {!visible && (busy || canUseTab) && <div className="web-ai-task" role="status">
       <Globe size={16} /><span>{message}</span>
       <div className="web-ai-task-actions">
+        {!busy && state.canRetry && <button className="web-ai-secondary" onClick={() => void webAIController.retry()}><RotateCcw size={15} />重试失败步骤</button>}
         <button className="web-ai-primary" onClick={() => void send()} disabled={!canSend}><Send size={15} />发送提示词</button>
         <button className="web-ai-secondary" onClick={() => void read()} disabled={busy || !canUseTab}><ClipboardPaste size={15} />提取答案</button>
         <button className="web-ai-ghost" onClick={() => setVisible(true)}>查看</button>
