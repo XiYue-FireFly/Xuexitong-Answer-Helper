@@ -82,6 +82,47 @@ describe('Web page monitor', () => {
     expect(test.now()).toBeGreaterThanOrEqual(6000);
   });
 
+  it('returns a finished stable malformed response only for automatic recovery', async () => {
+    const test = clock();
+    const truncated = '{"requestId":"current","answers":[';
+    const text = await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true, baseline: 'old answer',
+      inspect: async () => ({ ...ready, text: truncated, generationState: 'finished' }) });
+    expect(text).toBe(truncated);
+    expect(test.now()).toBe(3000);
+  });
+
+  it.each(['running', 'unknown'] as const)('does not recover malformed output when its state is %s', async generationState => {
+    const test = clock();
+    await expect(waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true, baseline: '', inspect: async () => {
+      if (test.now() > 15000) test.cancel();
+      return { ...ready, text: 'incomplete answer', generationState };
+    } })).rejects.toThrow('stopped');
+  });
+
+  it('does not treat the unchanged previous answer as a malformed new response', async () => {
+    const test = clock();
+    await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true, baseline: 'old answer',
+      inspect: async () => ({ ...ready, text: test.now() < 9000 ? 'old answer' : answer, generationState: 'finished' }) });
+    expect(test.now()).toBe(12000);
+  });
+
+  it.each(['\n', ' altered rendering'])('does not treat the same old message with %j as a new malformed reply', async suffix => {
+    const test = clock();
+    const old = '{"requestId":"old","answers":[]}';
+    await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true, baseline: old, baselineKey: 'old-message',
+      inspect: async () => ({ ...ready, text: test.now() < 9000 ? old + suffix : answer,
+        messageKey: test.now() < 9000 ? 'old-message' : 'new-message', generationState: 'finished' }) });
+    expect(test.now()).toBe(12000);
+  });
+
+  it('preserves manual monitoring behavior for malformed finished output', async () => {
+    const test = clock();
+    await expect(waitForWebAnswer({ ...test, requestId: 'current', inspect: async () => {
+      if (test.now() > 15000) test.cancel();
+      return { ...ready, text: 'incomplete answer', generationState: 'finished' };
+    } })).rejects.toThrow('stopped');
+  });
+
   it('rejects old replies and prompt echoes, then accepts only the current request', async () => {
     const test = clock();
     await waitForWebAnswer({ ...test, requestId: 'current', inspect: async () => ({ ...ready,

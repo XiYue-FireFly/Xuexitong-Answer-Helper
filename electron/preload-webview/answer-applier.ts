@@ -727,12 +727,13 @@ function applyAnswerDirectly(payload: AnswerApplyPayload, targets: QuestionOptio
     }
     option.setAttribute('aria-checked', selected ? 'true' : 'false');
     option.setAttribute('aria-pressed', selected ? 'true' : 'false');
-    const singleMarker = option.querySelector('.num_option') as HTMLElement | null;
-    const multiMarker = option.querySelector('.num_option_dx') as HTMLElement | null;
+    const singleMarker = (option.matches('.num_option') ? option : option.querySelector('.num_option')) as HTMLElement | null;
+    const multiMarker = (option.matches('.num_option_dx') ? option : option.querySelector('.num_option_dx')) as HTMLElement | null;
     if (singleMarker) singleMarker.classList.toggle('check_answer', selected && !isMultiple);
     if (multiMarker) multiMarker.classList.toggle('check_answer_dx', selected);
-    option.classList.toggle('check_answer', selected && !isMultiple);
-    option.classList.toggle('check_answer_dx', selected && Boolean(isMultiple));
+    // These site classes style the letter circle, never the entire option row.
+    if (singleMarker !== option) option.classList.toggle('check_answer', false);
+    if (multiMarker !== option) option.classList.toggle('check_answer_dx', false);
     if (selected && clickSelected) dispatchUserClick(option);
   }
 
@@ -778,7 +779,7 @@ function ensureAppliedAnswerValue(payload: AnswerApplyPayload, targets: Question
 }
 
 function isSingleOptionElement(element: HTMLElement) {
-  if (element.matches('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) return true;
+  if (element.matches('.num_option, .num_option_dx, .answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) return true;
   if (element.querySelector('.num_option, .num_option_dx, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]')) {
     const nestedOptions = element.querySelectorAll('.answerBg, .workTextWrap, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]');
     return nestedOptions.length <= 1;
@@ -883,13 +884,18 @@ function targetElementsFor(target: QuestionOptionTarget) {
 }
 
 function elementMatchesTarget(element: HTMLElement, target: QuestionOptionTarget) {
-  const targetElements = targetElementsFor(target);
-  if (targetElements.some((targetElement) => targetElement === element || targetElement.contains(element) || element.contains(targetElement))) {
-    return true;
-  }
+  const targetElements = targetElementsFor(target).filter(targetElement =>
+    isSingleOptionElement(targetElement) &&
+    targetElement.querySelectorAll('.num_option, .num_option_dx').length <= 1 &&
+    targetElement.querySelectorAll('input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]').length <= 1);
+  if (targetElements.length > 0) return targetElements.some(targetElement =>
+    targetElement === element || targetElement.contains(element) || element.contains(targetElement));
+  const value = optionValueFromElement(element).toUpperCase();
+  const targetValue = cleanText(target.value || (/^[A-H]$/.test(value) ? target.label : '')).toUpperCase();
+  if (value && targetValue && value !== 'ON' && targetValue !== 'ON') return value === targetValue;
   const elementText = normalizeText(element.textContent || '');
   const targetText = normalizeText(target.text || '');
-  return Boolean(targetText && elementText && (elementText === targetText || elementText.includes(targetText)));
+  return Boolean(targetText && elementText && elementText === targetText);
 }
 
 function expandOptionLikeElements(element: HTMLElement) {

@@ -25,6 +25,10 @@ function scenario(items: QuestionItem[] = [question]) {
   let sourceExtractions = 0;
   let missingFocus = 0;
   let confidence = 0.9;
+  let answerRows = (rows: any[], _attempt: number): any[] => rows;
+  let sendCount = 0;
+  let answerText = (value: string, _attempt: number) => value;
+  let pageState = (value: WebPageState, _sent: boolean, _time: number) => value;
   let changed = false;
   let applyResult = { success: true } as { success: boolean; skipped?: number; partial?: boolean; error?: string };
   let afterWait: (() => void | Promise<void>) | undefined;
@@ -49,15 +53,15 @@ function scenario(items: QuestionItem[] = [question]) {
       prepared = JSON.parse(command.prompt!.slice(command.prompt!.lastIndexOf('\n\n{') + 2));
       sent = false;
     }
-    if (command.action === 'send' && sendWorks) sent = true;
-    return {
+    if (command.action === 'send' && sendWorks) { sent = true; sendCount++; }
+    return pageState({
       ready: composerReady, inputEnabled: composerEnabled, authState, busy: false, generationState: 'finished', messageKey: prepared?.requestId || '',
       inputText: sent || asAttachment && prepared ? '' : formatDraft((command.prompt || (prepared ? controller.getSnapshot().prompt : 'draft')).replace(/\r\n?/g, '\n').replace(/[\u200B\uFEFF]/g, '')), attempted: command.action === 'send',
       promptReady: Boolean(asAttachment && prepared && !sent), attachmentState: asAttachment && prepared && !sent ? 'ready' : undefined,
-      text: sent && prepared ? JSON.stringify({ requestId: prepared.requestId, answers: prepared.questions.map(item => ({
+      text: sent && prepared ? answerText(JSON.stringify({ requestId: prepared.requestId, answers: answerRows(prepared.questions.map(item => ({
         id: item.id, answer: 'Apple', choiceLabels: ['A'], matchedOptions: ['Apple'], confidence, analysis: '', warnings: []
-      })) }) : ''
-    };
+      })), sendCount) }), sendCount) : ''
+    }, sent, time);
   };
   controller = new WebAIController({ store, browser, activity, now: () => time,
     wait: async (ms, signal) => { time += ms; await afterWait?.(); if (signal.aborted) throw new Error('stopped'); if (time > 900000) throw new Error('scenario exceeded wait limit'); },
@@ -79,6 +83,9 @@ function scenario(items: QuestionItem[] = [question]) {
     setComposer: (ready: boolean, enabled = ready) => { composerReady = ready; composerEnabled = enabled; },
     setSendWorks: (value: boolean) => { sendWorks = value; },
     setAttachment: () => { asAttachment = true; },
+    setAnswerRows: (transform: typeof answerRows) => { answerRows = transform; },
+    setAnswerText: (transform: typeof answerText) => { answerText = transform; },
+    setPageState: (transform: typeof pageState) => { pageState = transform; },
     setDraftFormat: (format: typeof formatDraft) => { formatDraft = format; },
     failInspections: (count: number) => { inspectFailures = count; },
     sourceExtractions: () => sourceExtractions,
@@ -231,14 +238,117 @@ describe('Web automatic controller', () => {
     expect(test.state().batchRunning).toBe(false);
   });
 
-  it('leaves low confidence answers for review without importing or filling', async () => {
+  it('automatically imports structurally valid low confidence answers without confirmation', async () => {
     const test = scenario(); test.setConfidence(0.4);
     await test.controller.startAutomatic();
-    expect(test.controller.getSnapshot().phase).toBe('needs_review');
+    expect(test.controller.getSnapshot().phase).toBe('completed');
     expect(test.controller.getSnapshot().reply).not.toBe('');
-    expect(test.imported).toEqual([]);
+    expect(test.imported).toEqual(['one']);
+    expect(test.applied).toEqual(['one']);
+  });
+
+  it('imports partial answers immediately, resends only missing questions and fills after collection', async () => {
+    const test = scenario([question, { ...question, id: 'two', hash: 'two', question: 'Choose fruit again' }]);
+    test.setAnswerRows((rows, attempt) => attempt === 1 ? rows.slice(0, 1) : rows);
+    const importedBeforeSend: string[][] = [];
+    const unsubscribe = test.controller.subscribe(() => {
+      if (test.controller.getSnapshot().phase === 'sending') importedBeforeSend.push([...test.imported]);
+    });
+    test.onApply(async () => { expect(test.imported).toEqual(['one', 'two']); });
+    await test.controller.startAutomatic(); unsubscribe();
+    const prompts = test.commands.filter(command => command.action === 'prepare').map(command => JSON.parse(command.prompt!.slice(command.prompt!.lastIndexOf('\n\n{') + 2)));
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1].questions.map((item: any) => item.question)).toEqual(['Choose fruit again']);
+    expect(prompts[1].requestId).not.toBe(prompts[0].requestId);
+    expect(importedBeforeSend).toContainEqual(['one']);
+    expect(test.imported).toEqual(['one', 'two']);
+    expect(test.applied).toEqual(['one', 'two']);
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+  });
+
+  it('resends invalid single-choice rows instead of importing multiple choices', async () => {
+    const test = scenario();
+    test.setAnswerRows((rows, attempt) => attempt === 1 ? rows.map(row => ({ ...row, choiceLabels: ['A', 'B'], matchedOptions: ['Apple', 'Banana'] })) : rows);
+    await test.controller.startAutomatic();
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(2);
+    expect(test.imported).toEqual(['one']);
+    expect(test.applied).toEqual(['one']);
+  });
+
+  it('recovers complete rows from a finished truncated response and resends only the rest', async () => {
+    const test = scenario([question, { ...question, id: 'two', hash: 'two', question: 'Truncated fruit' }]);
+    test.setAnswerText((value, attempt) => attempt === 1 ? value.slice(0, value.indexOf(',{"id":"q2"') + 12) : value);
+    await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+    expect(test.imported).toEqual(['one', 'two']);
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(2);
+    const second = test.commands.filter(command => command.action === 'prepare')[1].prompt!;
+    const payload = JSON.parse(second.slice(second.lastIndexOf('\n\n{') + 2));
+    expect(payload.questions.map((item: any) => item.question)).toEqual(['Truncated fruit']);
+  });
+
+  it('retries a finished malformed response with no recoverable rows instead of waiting forever', async () => {
+    const test = scenario();
+    test.setAnswerText((value, attempt) => attempt === 1 ? '回答格式异常' : value);
+    await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(2);
+    expect(test.imported).toEqual(['one']);
+  });
+
+  it('does not resend while an old assistant message only changes rendering before the new response', async () => {
+    const test = scenario();
+    test.setPageState((state, sent, time) => !sent || time < 9000
+      ? { ...state, text: sent ? 'old assistant answer\n altered rendering' : 'old assistant answer', messageKey: 'old-message' }
+      : state);
+    await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(1);
+    expect(test.imported).toEqual(['one']);
+    expect(test.applied).toEqual(['one']);
+  });
+
+  it('bounds automatic missing-answer retries, retains imports and resumes only unresolved questions', async () => {
+    const test = scenario([question, { ...question, id: 'two', hash: 'two', question: 'Missing fruit' }]);
+    test.setAnswerRows((rows, attempt) => attempt === 1 ? rows.slice(0, 1) : []);
+    await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot()).toMatchObject({ phase: 'failed', canRetry: true, visible: true });
+    expect(test.imported).toEqual(['one']);
     expect(test.applied).toEqual([]);
-    expect(test.activity.getSnapshot().feedback).toEqual([]);
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(4);
+    test.setAnswerRows(rows => rows);
+    await test.controller.retry();
+    expect(test.imported).toEqual(['one', 'two']);
+    expect(test.applied).toEqual(['one', 'two']);
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+  });
+
+  it('keeps valid warnings without requiring manual confirmation', async () => {
+    const test = scenario();
+    test.setAnswerRows(rows => rows.map(row => ({ ...row, warnings: ['请复核'] })));
+    await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot().completedItems[0].answer.warnings).toEqual(['请复核']);
+    expect(test.applied).toEqual(['one']);
+  });
+
+  it('keeps the sidebar closed after normal automatic extraction', async () => {
+    const test = scenario();
+    const visibleDuringImport: boolean[] = [];
+    test.controller.subscribe(() => {
+      if (test.controller.getSnapshot().phase === 'importing') visibleDuringImport.push(test.controller.getSnapshot().visible);
+    });
+    await test.controller.startAutomatic();
+    expect(visibleDuringImport.length).toBeGreaterThan(0);
+    expect(visibleDuringImport.every(value => !value)).toBe(true);
+  });
+
+  it('collapses automatic tasks at startup while preserving the manual extraction dialog', async () => {
+    const automatic = scenario(); automatic.controller.edit({ visible: true });
+    automatic.onExtract(async () => { expect(automatic.controller.getSnapshot().visible).toBe(false); });
+    await automatic.controller.startAutomatic();
+    const manual = scenario(); manual.controller.edit({ flow: 'manual', visible: true });
+    await manual.controller.extractQuestions();
+    expect(manual.controller.getSnapshot().visible).toBe(true);
   });
 
   it('preserves the no-50-question limit in the automatic path', async () => {
@@ -447,7 +557,8 @@ describe('Web automatic controller', () => {
     ]);
     test.onWait(() => { if (test.controller.getSnapshot().position === 2) test.setSendWorks(false); });
     await test.controller.startAutomatic();
-    expect(test.applied).toEqual(['large1']);
+    expect(test.applied).toEqual([]);
+    expect(test.imported).toEqual(['large1']);
     test.onWait(() => undefined); test.setSendWorks(true);
     await test.controller.retry();
     expect(test.applied).toEqual(['large1', 'large2']);
@@ -480,6 +591,7 @@ describe('Web automatic controller', () => {
     await entered;
     expect(test.imported).toEqual([]);
     expect(test.controller.getSnapshot().phase).toBe('paused');
+    expect(test.controller.getSnapshot().visible).toBe(true);
     test.controller.togglePause(); release(); await running;
     expect(test.applied).toEqual(['one']);
     expect(test.commands.filter(command => command.action === 'send')).toHaveLength(1);

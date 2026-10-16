@@ -116,9 +116,17 @@ export function readQuestionTypeHint(root: HTMLElement) {
   };
 }
 
-function inferTypeFromDom(root: HTMLElement, options: string[]): QuestionType {
+export function inferTypeFromDom(root: HTMLElement, options: string[]): QuestionType {
   const hint = readQuestionTypeHint(root);
   const qtype = hint.qtype;
+  // Site metadata is authoritative; shared marker classes are only a fallback.
+  const explicitTypes: Record<string, QuestionType> = { '0': 'single', '1': 'multiple', '21': 'multiple', '2': 'completion', '3': 'judgement', '4': 'essay' };
+  if (explicitTypes[qtype]) return explicitTypes[qtype];
+  if (/判断题/.test(hint.typeName)) return 'judgement';
+  if (/多选题|多项选择/.test(hint.typeName)) return 'multiple';
+  if (/单选题|单项选择/.test(hint.typeName)) return 'single';
+  if (/填空题/.test(hint.typeName)) return 'completion';
+  if (/问答题|简答题|论述题|作文题|资料题|材料题|综合题/.test(hint.typeName)) return 'essay';
   const radios = root.querySelectorAll('input[type="radio"]').length;
   const checkboxes = root.querySelectorAll('input[type="checkbox"]').length;
   const textareas = root.querySelectorAll('textarea').length;
@@ -150,7 +158,7 @@ function inferTypeFromDom(root: HTMLElement, options: string[]): QuestionType {
   if (textEntryElements.length > 0 && hasCompletionCue) return 'completion';
   if (qtype === '4' || /问答题|简答题|论述题|作文题|资料题|材料题|综合题/i.test(typeText)) return 'essay';
   if (qtype === '1' || hasMultipleMarker || checkboxes > 0 || /\u591a\u9009\u9898|\u591a\u9879\u9009\u62e9|\u591a\u9009/.test(typeText)) return 'multiple';
-  if (qtype === '3' || (radios === 2 && /正确|错误|对|错|true|false/i.test(text))) return 'judgement';
+  if (qtype === '3' || /判断题/.test(typeText) || (radios === 2 && /正确|错误|对|错|true|false/i.test(text))) return 'judgement';
   if (qtype === '2' || /\u586b\u7a7a\u9898|\u586b\u7a7a/.test(typeText)) return 'completion';
   if (qtype === '0' || /\u5355\u9009\u9898|\u5355\u9879\u9009\u62e9|\u5355\u9009/.test(typeText) || radios > 0 || hasSingleMarker || options.length >= 2) return 'single';
   if (textareas > 0 || hasRichTextEditor) return 'essay';

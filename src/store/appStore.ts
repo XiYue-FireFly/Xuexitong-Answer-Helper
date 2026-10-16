@@ -98,6 +98,7 @@ export interface QuestionBankEntry {
   questionKey: string;
   question: string;
   options: string[];
+  type?: QuestionType;
   context?: string;
   answer: AIAnswerResult;
   updatedAt: number;
@@ -1294,6 +1295,7 @@ class GlobalStore {
         questionKey: key,
         question,
         options,
+        type: ['single', 'multiple', 'judgement', 'completion', 'essay', 'unknown'].includes(String(item.type)) ? item.type : undefined,
         context,
         answer: {
           questionHash: item.answer.questionHash || this.hashText(`${question}\n${options.join('\n')}`),
@@ -1332,6 +1334,7 @@ class GlobalStore {
         questionKey: key,
         question: question.question,
         options: [...question.options],
+        type: question.type,
         context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),
@@ -1347,16 +1350,19 @@ class GlobalStore {
         existing.question = question.question;
         // 拷贝 options，避免与 questions 状态共享可变引用
         existing.options = [...question.options];
+        existing.type = question.type === 'unknown' ? existing.type : question.type;
         existing.context = question.context;
         existing.answer = normalizedAnswer;
         existing.updatedAt = incomingEntry.updatedAt;
       }
+      if (!existing.type && question.type !== 'unknown') existing.type = question.type;
     } else {
       this.state.questionBank = [{
         id: Math.random().toString(36).slice(2),
         questionKey: key,
         question: question.question,
         options: [...question.options],
+        type: question.type,
         context: question.context,
         answer: normalizedAnswer,
         updatedAt: Date.now(),

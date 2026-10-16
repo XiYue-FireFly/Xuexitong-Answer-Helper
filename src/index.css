@@ -107,6 +107,7 @@ body {
 }
 
 .app-right-drawer {
+  position: relative;
   min-height: 0;
   overflow: hidden;
   border-left: 1px solid var(--border-glass);
@@ -1986,7 +1987,7 @@ select:focus,
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -5px;
+  left: 0;
   z-index: 30;
   width: 10px;
   cursor: col-resize;
@@ -2016,6 +2017,16 @@ body.is-resizing-workbench .workbench-resizer::after {
 
 body.is-resizing-workbench,
 body.is-resizing-workbench * { cursor: col-resize !important; user-select: none !important; }
+
+.workbench-drag-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+body.is-resizing-workbench webview { pointer-events: none !important; }
 
 [data-theme='light'] .app-header { background: rgba(255, 255, 255, 0.82); }
 

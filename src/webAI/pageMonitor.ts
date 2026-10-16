@@ -54,7 +54,7 @@ export async function waitForWebComposer(options: MonitorOptions): Promise<WebPa
   }
 }
 
-export async function waitForWebAnswer(options: MonitorOptions & { requestId: string }): Promise<string> {
+export async function waitForWebAnswer(options: MonitorOptions & { requestId: string; acceptIncomplete?: boolean; baseline?: string; baselineKey?: string }): Promise<string> {
   const now = options.now || Date.now;
   const inspect = reader(options);
   const remind = reminder(options);
@@ -67,7 +67,12 @@ export async function waitForWebAnswer(options: MonitorOptions & { requestId: st
     if (!state) { samples = 0; continue; }
     const complete = hasCompleteWebResponse(state.text, options.requestId);
     const key = state.messageKey || 'assistant';
-    const candidate = complete && !state.busy && state.generationState !== 'running';
+    // Only the automatic collector may recover a new, explicitly finished bad response.
+    // Existing text and streaming output must never trigger a replacement request.
+    const finishedNewReply = options.acceptIncomplete && options.baseline !== undefined &&
+      state.generationState === 'finished' && state.text.trim() && state.text.trim() !== options.baseline.trim() &&
+      (!options.baselineKey || Boolean(state.messageKey && state.messageKey !== options.baselineKey));
+    const candidate = Boolean(complete || finishedNewReply) && !state.busy && state.generationState !== 'running';
     if (!candidate || state.text !== lastText || key !== lastKey) {
       stableSince = now();
       samples = candidate ? 1 : 0;

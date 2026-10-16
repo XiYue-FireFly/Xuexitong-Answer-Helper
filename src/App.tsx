@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AIPanel } from './components/AIPanel';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { BrowserPanel } from './components/BrowserPanel';
@@ -9,6 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { appStore, useAppStore } from './store/appStore';
+import { webAIController } from './webAI/WebAIController';
 import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
 
 type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
@@ -43,6 +44,8 @@ export default function App() {
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [resizingWorkbench, setResizingWorkbench] = useState(false);
+  const webTask = useSyncExternalStore(webAIController.subscribe, webAIController.getSnapshot);
   const workbenchBounds = () => {
     const viewport = window.innerWidth;
     const browserMin = Math.min(500, Math.max(300, Math.round(viewport * 0.46)));
@@ -82,6 +85,18 @@ export default function App() {
   }, []);
 
   useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  useEffect(() => {
+    if (webTask.flow !== 'automatic') return;
+    if (webTask.visible) {
+      resizeCleanupRef.current?.();
+      setActiveTab('automation');
+      setSideCollapsed(false);
+    } else if (webTask.busy && !webTask.paused) {
+      resizeCleanupRef.current?.();
+      setSideCollapsed(true);
+    }
+  }, [webTask.flow, webTask.runId, webTask.busy, webTask.visible, webTask.paused]);
 
   useEffect(() => {
     // The browser deck also paints the document background, so keep the theme
@@ -186,26 +201,39 @@ export default function App() {
   const startWorkbenchResize = (event: React.PointerEvent<HTMLDivElement>) => {
     if (sideCollapsed || event.button !== 0) return;
     event.preventDefault();
+    resizeCleanupRef.current?.();
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
     const startX = event.clientX;
-    const startWidth = workbenchWidth;
+    const startWidth = handle.parentElement!.getBoundingClientRect().width;
+    handle.setPointerCapture(pointerId);
+    setResizingWorkbench(true);
     document.body.classList.add('is-resizing-workbench');
 
     const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
       const { min, max } = workbenchBounds();
       const nextWidth = startWidth + (startX - moveEvent.clientX);
       setWorkbenchWidth(Math.max(min, Math.min(Math.round(nextWidth), max)));
     };
     const handleEnd = () => {
       document.body.classList.remove('is-resizing-workbench');
+      setResizingWorkbench(false);
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('pointercancel', handleEnd);
+      window.removeEventListener('blur', handleEnd);
+      handle.removeEventListener('lostpointercapture', handleEnd);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
       resizeCleanupRef.current = null;
     };
 
-    resizeCleanupRef.current?.();
     resizeCleanupRef.current = handleEnd;
     window.addEventListener('pointermove', handleMove);
     window.addEventListener('pointerup', handleEnd, { once: true });
+    window.addEventListener('pointercancel', handleEnd, { once: true });
+    window.addEventListener('blur', handleEnd, { once: true });
+    handle.addEventListener('lostpointercapture', handleEnd, { once: true });
   };
 
   const statusColor = status === 'error'
@@ -260,7 +288,7 @@ export default function App() {
           display: 'flex',
           flexDirection: 'row',
           background: 'var(--bg-panel)',
-          transition: 'width 180ms ease, min-width 180ms ease'
+          transition: resizingWorkbench ? 'none' : 'width 180ms ease, min-width 180ms ease'
         }}>
           {!sideCollapsed && <div className="workbench-resizer" onPointerDown={startWorkbenchResize} role="separator" aria-orientation="vertical" aria-label="调整右侧工作台宽度" title="拖动调整工作台宽度" />}
           {!sideCollapsed && <div className="app-right-drawer__content assistant-dock__content" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -326,6 +354,7 @@ export default function App() {
             })}
           </nav>
         </aside>
+        {resizingWorkbench && <div className="workbench-drag-shield" aria-hidden="true" />}
       </main>
 
       <footer className="app-shell-bar app-footer">

@@ -104,6 +104,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
             {busy && <button className="web-ai-secondary" onClick={webAIController.togglePause}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? '继续' : '暂停'}</button>}
             {busy && <button className="web-ai-danger" onClick={stop}><Square size={15} />停止</button>}
           </div>
+          <p className="web-ai-message">答案自动录入题库；缺失或无效答案自动补发，收齐后统一填回原页面。</p>
           {mode === 'external' && <p className="web-ai-message">自动答题需要切换到应用内浏览器。</p>}
           {!settings.allowRealPageAutomation && <p className="web-ai-message">请先在设置中启用真实 WebView。</p>}
         </div>}
@@ -261,7 +262,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
           <textarea aria-label="粘贴 AI 回答" placeholder="粘贴完整 AI 回答" rows={8} value={reply} disabled={busy} onChange={event => setReply(event.target.value)} />
           {preview && <section className="web-ai-preview" aria-label="答案导入预览">
             {preview.errors.map((error, index) => <p className="web-ai-error" key={index}>{error}</p>)}
-            {preview.items.map((item, index) => <article key={`${item.question.hash}-${index}`}><strong>{item.question.question}</strong><p>{item.answer.choiceLabels.join('、')} {item.answer.answer}</p>{item.answer.analysis && <p>{item.answer.analysis}</p>}<small>置信度 {Math.round(item.answer.confidence * 100)}%{item.answer.warnings.length ? ` · ${item.answer.warnings.join('；')}` : ''}</small></article>)}
+            {preview.items.map((item, index) => <article key={`${item.question.hash}-${index}`}><strong>{item.question.question}</strong><p>{item.answer.choiceLabels.join('、')} {item.question.type === 'judgement' ? item.answer.answer === 'true' ? '正确' : '错误' : item.answer.answer}</p>{item.answer.analysis && <p>{item.answer.analysis}</p>}<small>置信度 {Math.round(item.answer.confidence * 100)}%{item.answer.warnings.length ? ` · ${item.answer.warnings.join('；')}` : ''}</small></article>)}
           </section>}
         </>}
       </div>

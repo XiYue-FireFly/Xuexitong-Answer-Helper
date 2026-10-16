@@ -741,6 +741,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
+    show: false,
     titleBarStyle: 'hidden', // Premium borderless titlebar
     titleBarOverlay: {
       color: '#080711',
@@ -758,6 +759,11 @@ function createWindow() {
       webviewTag: true // Crucial for embedding the learning webpage in left pane
     },
     icon: path.join(__dirname, '../public/icon.png')
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.maximize();
+    mainWindow?.show();
   });
 
   mainWindow.webContents.on('before-input-event', (_event, input) => {

@@ -137,3 +137,22 @@ describe('题库：演示答案隔离（Bug #12）', () => {
     expect(hit?.answer).toBe('B');
   });
 });
+
+describe('题库题型元数据', () => {
+  it.each(['single', 'multiple', 'judgement', 'completion', 'essay'] as const)('保留 %s 的原始题型并支持导入导出', type => {
+    appStore.addManualQuestionBankItems([{ question: `题型 ${type}`, options: ['A. 对', 'B. 错'], answer: 'A', type }]);
+    const saved = appStore.exportQuestionBank();
+    expect(saved[0].type).toBe(type);
+    appStore.clearQuestionBank();
+    appStore.importQuestionBank(JSON.parse(JSON.stringify(saved)));
+    expect(appStore.exportQuestionBank()[0].type).toBe(type);
+  });
+
+  it('兼容旧条目并忽略非法导入题型', () => {
+    appStore.addManualQuestionBankItems([{ question: '旧题库', options: ['A. 对', 'B. 错'], answer: 'false', type: 'judgement' }]);
+    const [saved] = appStore.exportQuestionBank();
+    appStore.clearQuestionBank();
+    appStore.importQuestionBank([{ ...saved, type: 'invalid' }]);
+    expect(appStore.exportQuestionBank()[0].type).toBeUndefined();
+  });
+});

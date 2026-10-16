@@ -82,14 +82,11 @@ const PAGE_BRIDGE_SOURCE = `
         }
         case 'syncChoice': {
           var cCalled = [];
-          var values = action.values || [];
-          if (typeof window.addMultipleChoice === 'function') {
-            try { window.addMultipleChoice(action.qid, values.join('')); cCalled.push('addMultipleChoice'); } catch (e) {}
-          } else if (typeof window.addChoice === 'function') {
-            try {
-              values.forEach(function (value) { window.addChoice(action.qid, value); });
-              cCalled.push('addChoice');
-            } catch (e) {}
+          // Selection was already applied through click + DOM reconciliation.
+          // addChoice/addMultipleChoice toggle an element; calling them again
+          // with qid strings can switch answers or turn a single into a multi.
+          if (typeof window.loadAnswerSheet === 'function') {
+            try { window.loadAnswerSheet(action.qid); cCalled.push('loadAnswerSheet'); } catch (e) {}
           }
           if (typeof window.answerContentChange === 'function') {
             try { window.answerContentChange(); cCalled.push('answerContentChange'); } catch (e) {}

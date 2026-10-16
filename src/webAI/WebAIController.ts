@@ -22,6 +22,7 @@ type AutomaticRun = {
   items: QuestionItem[]; remaining: QuestionItem[]; first: boolean; answers: AnswerItem[];
   source: BrowserSource | null; progress: AnswerActivity | null;
 };
+const MAX_MISSING_RETRIES = 3;
 type WebStore = Pick<typeof appStore, 'getState' | 'setAutomationRunning' | 'setStatus' | 'addLog' | 'upsertQuestionBank' | 'setAnswerForQuestion'>;
 type Environment = {
   store: WebStore;
@@ -68,8 +69,6 @@ function abortableWait(milliseconds: number, signal: AbortSignal) {
   });
 }
 
-class NeedsReview extends Error {}
-
 export class WebAIController {
   private listeners = new Set<() => void>();
   private env: Environment;
@@ -83,7 +82,7 @@ export class WebAIController {
   private extractionFeedback = new Set<string>();
   private retryAction: ((token: number) => Promise<void>) | null = null;
   private retryPhase: WebRunPhase = 'idle';
-  private sendState: { requestId: string; baseline: string; uncertain: boolean; confirmed: boolean } | null = null;
+  private sendState: { requestId: string; baseline: string; baselineKey?: string; uncertain: boolean; confirmed: boolean } | null = null;
 
   constructor(environment: Partial<Environment> = {}) {
     this.env = { store: appStore, browser: browserCommand, page: requestPage, wait: abortableWait, now: Date.now,
@@ -124,7 +123,7 @@ export class WebAIController {
     this.pausedDuration = 0;
     const token = ++this.token;
     this.ownsLock = true;
-    this.update({ busy: true, paused: false, canRetry: false, phase, runId: `web:${this.env.now()}:${token}` });
+    this.update({ busy: true, paused: false, canRetry: false, ...(this.state.flow === 'automatic' ? { visible: false } : {}), phase, runId: `web:${this.env.now()}:${token}` });
     this.env.store.setAutomationRunning({ batchRunning: true });
     return token;
   }
@@ -156,18 +155,16 @@ export class WebAIController {
     catch (error) {
       if (token !== this.token) return;
       this.retryPhase = this.state.phase;
-      const review = error instanceof NeedsReview;
-      const message = `${(error as Error).message}${review || /重试/.test((error as Error).message) ? '' : ' 请检查页面后点击“重试”。'}`;
-      if (review) this.retryAction = null;
-      this.update({ canRetry: !review, visible: true });
-      this.phase(error instanceof NeedsReview ? 'needs_review' : 'failed', message);
-      this.env.activity.finish(this.state.runId, error instanceof NeedsReview ? 'partial' : 'failed', message);
-      this.env.store.setStatus(error instanceof NeedsReview ? 'idle' : 'error', message);
-      if (!review) this.env.notify('网页 AI 需要重试', message);
+      const message = `${(error as Error).message}${/重试/.test((error as Error).message) ? '' : ' 请检查页面后点击“重试”。'}`;
+      this.update({ canRetry: true, visible: true });
+      this.phase('failed', message);
+      this.env.activity.finish(this.state.runId, 'failed', message);
+      this.env.store.setStatus('error', message);
+      this.env.notify('网页 AI 需要重试', message);
     } finally { this.finish(token); }
   }
   private notice = (message: string) => {
-    this.update({ message });
+    this.update({ message, visible: true });
     this.env.activity.phase(this.state.runId, this.state.phase, message, this.state.paused);
     this.env.store.addLog('warn', message);
     this.env.notify('网页 AI 需要查看', message);
@@ -309,7 +306,7 @@ export class WebAIController {
       this.env.store.setStatus('calling_ai', '网页 AI：发送提示词。');
       const baseline = await this.env.browser({ action: 'prepare', provider: aiTab.provider, tabId: aiTab.id, prompt, isCancelled: () => token !== this.token }) as WebPageState;
       this.check(token);
-      this.sendState = { requestId: batch.requestId, baseline: baseline.text, uncertain: false, confirmed: false };
+      this.sendState = { requestId: batch.requestId, baseline: baseline.text, baselineKey: before.messageKey, uncertain: false, confirmed: false };
       await sendWebPrompt({ ...options, baseline: baseline.text,
         wait: () => this.wait(500, token), onManualSend: this.notice,
         send: async () => {
@@ -331,16 +328,17 @@ export class WebAIController {
     this.check(token);
     this.update({ attemptedRequest: batch.requestId, visible: false });
     this.phase('waiting_answer', '提示词已发送，正在等待并自动提取答案。');
-    const reply = await waitForWebAnswer({ ...options, requestId: batch.requestId });
+    const reply = await waitForWebAnswer({ ...options, requestId: batch.requestId, acceptIncomplete: automatic,
+      baseline: this.sendState?.requestId === batch.requestId ? this.sendState.baseline : before.text,
+      baselineKey: this.sendState?.requestId === batch.requestId ? this.sendState.baselineKey : before.messageKey });
     this.check(token);
-    this.update({ reply, imported: false, visible: true });
+    this.update({ reply, imported: false, visible: !automatic });
     this.phase('validating', '已提取回答，正在核对本批答案。');
-    const preview = parseWebAnswer(reply, batch, `${WEB_AI_PROVIDERS.find(p => p.id === batch.provider)?.name || 'AI'} 网页`);
-    if (preview.automatic) {
+    const preview = parseWebAnswer(reply, batch, `${WEB_AI_PROVIDERS.find(p => p.id === batch.provider)?.name || 'AI'} 网页`, automatic);
+    if (automatic ? preview.items.length > 0 : preview.automatic) {
       this.env.activity.resolved(this.state.runId, preview.items.map(item => item.question.hash));
       this.extracted(batch.requestId);
     }
-    if (automatic && !preview.automatic) throw new NeedsReview('本批答案不完整、置信度不足或存在警告，请核对预览后手动处理。');
     return preview;
   }
   private extracted(requestId: string) {
@@ -432,6 +430,8 @@ export class WebAIController {
     const run: AutomaticRun = { stage: 'extract', items: [], remaining: [], first: true, answers: [], source: null, progress: null };
     const handled = new Set<string>();
     return this.perform('extracting', async token => {
+      // Each explicit retry gets a fresh bounded allowance for unresolved questions.
+      const missingAttempts = new Map<string, number>();
       if (this.state.mode !== 'internal') throw new Error('自动答题需要使用应用内浏览器。');
       await this.checkpoint(token);
       this.check(token);
@@ -457,14 +457,15 @@ export class WebAIController {
             run.stage = 'prepare';
           }
           if (run.stage === 'prepare') {
-            if (!run.remaining.length) break;
-            this.phase('preparing', '正在生成本批提示词。');
-            const next = this.prepare(run.remaining, !run.first);
-            run.first = false;
-            this.env.activity.skip(this.state.runId, next.skipped.map(item => item.questionHash));
-            run.remaining = next.remaining;
-            if (!next.batch) break;
-            run.stage = 'open';
+            if (!run.remaining.length) run.stage = 'fill';
+            else {
+              this.phase('preparing', '正在生成本批提示词。');
+              const next = this.prepare(run.remaining, !run.first);
+              run.first = false;
+              this.env.activity.skip(this.state.runId, next.skipped.map(item => item.questionHash));
+              run.remaining = next.remaining;
+              run.stage = next.batch ? 'open' : 'fill';
+            }
           }
           if (run.stage === 'open') {
             this.phase('opening', '正在打开网页 AI。');
@@ -480,16 +481,31 @@ export class WebAIController {
           this.check(token);
           if (run.stage === 'import') {
             this.phase('importing', '正在录入已校验答案。');
-            this.importItems(run.answers);
-            run.stage = 'fill';
+            if (run.answers.length) this.importItems(run.answers);
+            const answered = new Set(run.answers.map(item => item.question.hash));
+            const missing = this.state.batch!.questions.filter(question => !answered.has(question.hash));
+            run.remaining = [...missing, ...run.remaining];
+            this.update({ remaining: run.remaining });
+            run.stage = 'prepare';
+            if (missing.length) {
+              const exceeded = missing.some(question => {
+                const count = (missingAttempts.get(question.hash) || 0) + 1;
+                missingAttempts.set(question.hash, count);
+                return count > MAX_MISSING_RETRIES;
+              });
+              if (exceeded) throw new Error(`仍有 ${missing.length} 题未获得有效答案，已自动补发 ${MAX_MISSING_RETRIES} 轮。已录入答案保留，请点击“重试失败步骤”继续补齐。`);
+              const message = `本批已录入 ${run.answers.length}/${this.state.batch!.questions.length} 题，正在自动补发 ${missing.length} 道未录入题目。`;
+              this.update({ message });
+              this.env.store.addLog('info', message);
+            }
           }
           if (run.stage === 'fill') {
-            await this.fill(run.answers, token, handled);
+            if (this.state.completedItems.length) await this.fill(this.state.completedItems, token, handled);
             run.stage = 'next';
           }
           await this.checkpoint(token);
           this.check(token);
-          run.stage = 'prepare';
+          if (run.stage === 'next') break;
         }
       } catch (error) {
         run.progress = this.env.activity.getSnapshot().task;
@@ -498,6 +514,7 @@ export class WebAIController {
       const task = this.env.activity.getSnapshot().task!;
       const complete = task.targets.length > 0 && task.applied.length === task.targets.length && !task.skipped.length;
       const message = complete ? `全部 ${run.items.length} 道题已完成并填回，未提交。` : `已填入 ${task.applied.length}/${run.items.length} 题，${task.skipped.length} 题已跳过，请查看。`;
+      this.update({ visible: !complete });
       this.phase(complete ? 'completed' : 'partial', message);
       this.env.activity.finish(this.state.runId, complete ? 'completed' : 'partial', message);
       this.env.store.setStatus('done', message);
@@ -513,11 +530,11 @@ export class WebAIController {
     if (this.state.paused) {
       if (this.pausedAt !== null) this.pausedDuration += this.env.now() - this.pausedAt;
       this.pausedAt = null;
-      this.update({ paused: false }); this.phase(this.resumePhase, '已继续自动答题。');
+      this.update({ paused: false, visible: false }); this.phase(this.resumePhase, '已继续自动答题。');
     } else {
       this.pausedAt = this.env.now();
       this.resumePhase = this.state.phase;
-      this.update({ paused: true }); this.phase('paused', '任务已暂停，继续后将从当前步骤恢复。');
+      this.update({ paused: true, visible: true }); this.phase('paused', '任务已暂停，继续后将从当前步骤恢复。');
     }
   };
   stop = () => {

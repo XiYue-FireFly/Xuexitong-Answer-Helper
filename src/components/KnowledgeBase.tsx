@@ -3,6 +3,7 @@ import { Check, Copy, Database, Download, FileSearch, Plus, Search, Trash2, Uplo
 import { appStore, ManualQuestionBankInput, QuestionType, useAppStore } from '../store/appStore';
 import { openWebAI } from '../webAI/WebAIWorkflow';
 import { ClipboardPaste } from 'lucide-react';
+import { getEntryType, isCorrectOption, judgementAnswerText } from './knowledgeAnswer';
 
 function cleanLine(line: string) {
   return line.replace(/^\s*(题目|问题|选项|答案|正确答案|解析|分析)\s*[:：]\s*/i, '').trim();
@@ -157,14 +158,6 @@ export function KnowledgeBase() {
     appStore.addManualQuestionBankItems(items);
   };
 
-  const getEntryType = (entry: typeof questionBank[number]): QuestionType => {
-    const text = `${entry.question}\n${entry.options.join('\n')}`;
-    if (/判断题|正确|错误/.test(text) && entry.options.length <= 2) return 'judgement';
-    if (/填空题|填空/.test(text) || entry.options.length === 0) return 'completion';
-    if (/多选题|多选/.test(text) || entry.answer.choiceLabels.length > 1) return 'multiple';
-    return 'single';
-  };
-
   const typeLabels: Record<QuestionType, string> = {
     single: '单选题',
     multiple: '多选题',
@@ -316,7 +309,6 @@ export function KnowledgeBase() {
           <div className="kb-empty-state"><FileSearch size={30} /><strong>{questionBank.length ? '没有符合条件的题目' : '本地题库还是空的'}</strong><span>{questionBank.length ? '试试修改搜索词或题型筛选。' : '导入题库文件，或使用“录入新题”建立你的第一条题目。'}</span></div>
         ) : filteredEntries.slice(0, 80).map((entry, index) => {
           const type = getEntryType(entry);
-          const labels = entry.answer.choiceLabels.map((label) => label.toUpperCase());
           return (
             <article key={entry.id} className="kb-question-card kb-jelly-surface" {...jellyMotion}>
               <div className="kb-question-card__meta">
@@ -328,11 +320,12 @@ export function KnowledgeBase() {
                 <div className={`kb-option-list${type === 'judgement' ? ' kb-option-list--judgement' : ''}`}>
                   {entry.options.map((option, optionIndex) => {
                     const label = option.match(/^\s*([A-H])\s*[.\s:：、。)]/i)?.[1]?.toUpperCase() || String.fromCharCode(65 + optionIndex);
-                    const correct = labels.includes(label) || new RegExp(`(^|[^A-Z])${label}([^A-Z]|$)`, 'i').test(entry.answer.answer);
+                    const correct = isCorrectOption(entry, option, optionIndex);
                     return <div key={`${entry.id}-${optionIndex}`} className={`kb-option${correct ? ' is-correct' : ''}`}><span>{label}</span><div>{option.replace(/^\s*[A-H]\s*[.\s:：、。)]\s*/i, '')}</div>{correct && <em><Check size={12} />正确答案</em>}</div>;
                   })}
                 </div>
-              ) : <div className="kb-answer-line"><Check size={15} /><span>答案</span><strong>{entry.answer.answer}</strong></div>}
+              ) : type !== 'judgement' && <div className="kb-answer-line"><Check size={15} /><span>答案</span><strong>{entry.answer.answer}</strong></div>}
+              {type === 'judgement' && <div className="kb-answer-line"><Check size={15} /><span>答案</span><strong>{judgementAnswerText(entry.answer.answer)}</strong></div>}
               {entry.answer.analysis && <div className="kb-analysis"><div><span>解析</span><small>{entry.answer.provider || '本地题库'}</small></div><p>{entry.answer.analysis}</p></div>}
               <div className="kb-question-card__source">更新：{Number.isFinite(entry.updatedAt) ? new Date(entry.updatedAt).toLocaleString() : '未知'} · 来源：{entry.answer.provider || '未知'}</div>
             </article>
