@@ -26,6 +26,32 @@ export interface QuestionOptionTarget {
   value?: string;
 }
 
+export interface WebReference {
+  pageTitle: string;
+  chapterTitle?: string;
+  sectionTitle?: string;
+  groupKey: string;
+  sourceQuestionId: string;
+  material?: string;
+  filledValues: string[];
+}
+
+export interface QuestionMedia {
+  id: string;
+  role: 'stem' | 'option' | 'material';
+  optionLabel?: string;
+  sourceUrl?: string;
+  alt: string;
+  caption?: string;
+  width?: number;
+  height?: number;
+  status: 'discovered' | 'ready' | 'unavailable';
+  reason?: string;
+  contentDigest?: string;
+  mime?: string;
+  selector?: string;
+}
+
 export interface QuestionPayload {
   hash: string;
   question: string;
@@ -35,6 +61,8 @@ export interface QuestionPayload {
   selector?: string;
   index?: number;
   context?: string;
+  webReference?: WebReference;
+  media?: QuestionMedia[];
 }
 
 export interface AnswerApplyPayload {

@@ -3,11 +3,18 @@ import { ClipboardPaste, Copy, ExternalLink, Globe, ListChecks, Pause, Play, Rot
 import { useAppStore } from '../store/appStore';
 import { parseWebAnswer, validateWebPrompt, WEB_AI_PROMPT_LIMIT, WEB_AI_PROVIDERS } from './protocol';
 import type { WebProvider } from './protocol';
-import { webAIController } from './WebAIController';
+import { webAISessions } from './WebAISessionManager';
 import './web-ai.css';
 
 const OPEN_REQUEST_KEY = 'studypilot-web-ai-open-request-v1';
 export type WebAIWorkflowProps = { embedded?: boolean };
+
+export function WebQuestionCount() {
+  const { questions } = useAppStore();
+  const sessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot);
+  const session = sessions.sessions.find(item => item.id === sessions.selectedId);
+  return <>{(session?.questions || questions).length} 题</>;
+}
 
 export function openWebAI(importOnly = false) {
   try {
@@ -32,7 +39,11 @@ function takeOpenRequest() {
 }
 
 export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
-  const { questions, settings } = useAppStore();
+  const { questions: globalQuestions, settings } = useAppStore();
+  const sessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot);
+  const webAIController = sessions.controller;
+  const session = sessions.sessions.find(item => item.id === sessions.selectedId);
+  const questions = session?.questions || globalQuestions;
   const state = useSyncExternalStore(webAIController.subscribe, webAIController.getSnapshot);
   const { provider, mode, flow, selected, batch, prompt, reply, message, busy, imported, position, remaining, skipped, completedItems, aiTab, attemptedRequest, visible, source, paused } = state;
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -62,17 +73,19 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
   useEffect(() => {
     const open = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
-      const current = webAIController.getSnapshot();
-      webAIController.edit({ visible: true, ...(!current.busy ? { flow: 'manual' as const, ...(!detail.importOnly ? { selected: questions.map(q => q.hash) } : {}) } : {}) });
+      webAISessions.selectDefault();
+      const controller = webAISessions.getSnapshot().controller;
+      const current = controller.getSnapshot();
+      controller.edit({ visible: true, ...(!current.busy ? { flow: 'manual' as const, ...(!detail.importOnly ? { selected: globalQuestions.map(q => q.hash) } : {}) } : {}) });
     };
     window.addEventListener('studypilot:open-web-ai', open);
     const pending = takeOpenRequest();
     if (pending) open(new CustomEvent('studypilot:open-web-ai', { detail: pending }));
     return () => window.removeEventListener('studypilot:open-web-ai', open);
-  }, [questions]);
+  }, [globalQuestions]);
   useEffect(() => {
     if (!batch && !busy && !state.canRetry) webAIController.edit({ selected: questions.map(question => question.hash) });
-  }, [batch, busy, questions, state.canRetry]);
+  }, [batch, busy, questions, state.canRetry, webAIController]);
 
   // 计算步骤状态
   const hasQuestions = questions.length > 0;
@@ -84,6 +97,12 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
 
   const workflowBody = (
       <div className="web-ai-body">
+        {sessions.sessions.length > 0 && <label className="web-ai-task-picker">题页任务
+          <select aria-label="选择题页任务" value={sessions.selectedId} onChange={event => event.target.value ? webAISessions.select(event.target.value) : webAISessions.selectDefault()}>
+            <option value="">手动题库工作区</option>
+            {sessions.sessions.map(item => <option key={item.id} value={item.id}>{item.title} · {item.controller.getSnapshot().busy ? '运行中' : item.controller.getSnapshot().canRetry ? '待重试' : '就绪'}</option>)}
+          </select>
+        </label>}
         <div className="web-ai-flow-switch" role="tablist" aria-label="Web 答题方式">
           <button role="tab" aria-selected={flow === 'automatic'} className={flow === 'automatic' ? 'is-active' : ''} disabled={busy} onClick={() => webAIController.edit({ flow: 'automatic' })}><Zap size={15} />自动答题</button>
           <button role="tab" aria-selected={flow === 'manual'} className={flow === 'manual' ? 'is-active' : ''} disabled={busy} onClick={() => webAIController.edit({ flow: 'manual' })}><ListChecks size={15} />手动步骤</button>
@@ -97,14 +116,14 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
         </fieldset>
 
         {flow === 'automatic' && <div className="web-ai-auto-controls">
-          <div className="web-ai-auto-status"><span className={busy && !paused ? 'is-running' : ''} /><strong>{busy ? paused ? '已暂停' : '自动答题进行中' : state.canRetry ? '等待重试' : state.phase === 'completed' ? '已全部填回' : '当前页面 · 全部题目'}</strong><small>不提交</small></div>
+          <div className="web-ai-auto-status"><span className={busy && !paused ? 'is-running' : ''} /><strong>{busy ? paused ? '已暂停' : '自动答题进行中' : state.canRetry ? '等待重试' : state.phase === 'completed' ? '已全部填回' : state.phase === 'needs_review' ? '待核对' : `当前页面 · ${questions.length ? `${questions.length} 道题` : '全部题目'}`}</strong><small>不提交</small></div>
           <div className="web-ai-actions">
             {!busy && <button className="web-ai-primary" disabled={mode !== 'internal' || !settings.allowRealPageAutomation} onClick={() => void webAIController.startAutomatic()}><Play size={16} />开始自动答题</button>}
             {!busy && state.canRetry && <button className="web-ai-secondary" onClick={() => void webAIController.retry()}><RotateCcw size={15} />重试失败步骤</button>}
             {busy && <button className="web-ai-secondary" onClick={webAIController.togglePause}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? '继续' : '暂停'}</button>}
             {busy && <button className="web-ai-danger" onClick={stop}><Square size={15} />停止</button>}
           </div>
-          <p className="web-ai-message">答案自动录入题库；缺失或无效答案自动补发，收齐后统一填回原页面。</p>
+          <p className="web-ai-message">重新提取并作答全部题目，包括已有填写的题目；旧答案仅作上下文参考。缺失或无效答案自动补发，收齐后统一填回原页面。</p>
           {mode === 'external' && <p className="web-ai-message">自动答题需要切换到应用内浏览器。</p>}
           {!settings.allowRealPageAutomation && <p className="web-ai-message">请先在设置中启用真实 WebView。</p>}
         </div>}

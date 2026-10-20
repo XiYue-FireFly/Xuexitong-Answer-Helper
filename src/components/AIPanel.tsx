@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { WebAIWorkflow } from '../webAI/WebAIWorkflow';
+import { WebAIWorkflow, WebQuestionCount } from '../webAI/WebAIWorkflow';
 import { aiChatText } from '../utils/aiRequest';
 import {
   AlertTriangle,
@@ -720,7 +720,7 @@ export function AIPanel() {
               先获取当前页面题目，再解析答案，最后填入页面。答题模式支持 API AI 与真实网页 AI；API 模式可边查题边填入。
             </p>
           </div>
-          <span className="badge badge-primary" style={{ whiteSpace: 'nowrap' }}>{questions.length} 题</span>
+          <span className="badge badge-primary" style={{ whiteSpace: 'nowrap' }}>{answerMethod === 'web' ? <WebQuestionCount /> : `${questions.length} 题`}</span>
         </div>
 
         <div className="answer-mode-switch" role="tablist" aria-label="答题方式">

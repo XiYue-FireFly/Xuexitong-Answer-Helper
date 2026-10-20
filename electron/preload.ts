@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { QuestionMediaRead, WebAITaskLease } from './web-ai-task-resources';
 
 function serializeError(error: any) {
   if (!error) return { message: 'Unknown error' };
@@ -82,6 +83,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openInternalBrowserTab: (url: string) => ipcRenderer.invoke('browser:open-internal-tab', url),
   notify: (title: string, body: string) => ipcRenderer.invoke('app:notify', { title, body }),
   getWebviewSessionState: () => ipcRenderer.invoke('session:get-webview-state'),
+  leaseWebAITask: (payload: WebAITaskLease) => ipcRenderer.invoke('web-ai:lease-task', payload),
+  releaseWebAITask: (sessionId: string) => ipcRenderer.invoke('web-ai:release-task', sessionId),
+  readQuestionMedia: (payload: QuestionMediaRead) => ipcRenderer.invoke('web-ai:read-question-media', payload),
   clearWebviewSession: () => ipcRenderer.invoke('session:clear-webview-login'),
   listCloudQuestionBanks: (source: string) => ipcRenderer.invoke('cloud-bank:list', source),
   downloadCloudQuestionBank: (payload: any) => ipcRenderer.invoke('cloud-bank:download', payload),

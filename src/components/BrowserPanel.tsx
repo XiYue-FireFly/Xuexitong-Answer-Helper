@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { appStore, AutomationPlan, AutomationStep, PageSnapshot, QuestionItem, useAppStore } from '../store/appStore';
 import { useBrowserBridge } from '../webAI/useBrowserBridge';
-import { webAIController } from '../webAI/WebAIController';
+import { applyWebAnswers, webPageRequests } from '../webAI/pageRequests';
+import { webAISessions } from '../webAI/WebAISessionManager';
 import { AnswerActivityLayer } from '../answerActivity/AnswerActivityLayer';
 import { apiActivity } from '../answerActivity/activityStore';
 
@@ -335,6 +336,10 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
     };
 
     const handleLoadStart = () => syncState({ loading: true });
+    const invalidateDocument = (event: any) => {
+      if (event?.isMainFrame === false) return;
+      webPageRequests.cancelTab(tab.id, '原题目页面正在重新加载。');
+    };
     const handleLoadStop = () => syncState({ loading: false });
     const handleFailLoad = (event: any) => {
       syncState({ loading: false });
@@ -342,6 +347,12 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
       appStore.addLog('warn', `页面加载失败：${event?.errorDescription || event?.errorCode || '未知错误'}`);
     };
     const handleNavigate = () => syncState();
+    const handleInPageNavigate = (event: any) => {
+      if (event?.isMainFrame === false) return;
+      webPageRequests.cancelTab(tab.id, '原题目页面正在切换。');
+      webview.send?.('studypilot:web-document-request', true);
+      syncState();
+    };
     const handleTitle = (event: any) => {
       const fallbackUrl = safeWebviewRead(() => webview.getURL?.(), tab.url);
       syncState({ title: event.title || safeWebviewRead(() => webview.getTitle?.(), friendlyTitle(fallbackUrl)) });
@@ -349,24 +360,29 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
     const handleIpc = (event: any) => onIpcMessage(event, tab.id);
     const handleDomReady = () => {
       ready = true;
+      webview.send?.('studypilot:web-document-request');
       syncState();
     };
 
     webview.addEventListener('did-start-loading', handleLoadStart);
+    webview.addEventListener('did-start-navigation', invalidateDocument);
+    webview.addEventListener('render-process-gone', invalidateDocument);
     webview.addEventListener('did-stop-loading', handleLoadStop);
     webview.addEventListener('did-fail-load', handleFailLoad);
     webview.addEventListener('did-navigate', handleNavigate);
-    webview.addEventListener('did-navigate-in-page', handleNavigate);
+    webview.addEventListener('did-navigate-in-page', handleInPageNavigate);
     webview.addEventListener('page-title-updated', handleTitle);
     webview.addEventListener('dom-ready', handleDomReady);
     webview.addEventListener('ipc-message', handleIpc);
 
     return () => {
       webview.removeEventListener('did-start-loading', handleLoadStart);
+      webview.removeEventListener('did-start-navigation', invalidateDocument);
+      webview.removeEventListener('render-process-gone', invalidateDocument);
       webview.removeEventListener('did-stop-loading', handleLoadStop);
       webview.removeEventListener('did-fail-load', handleFailLoad);
       webview.removeEventListener('did-navigate', handleNavigate);
-      webview.removeEventListener('did-navigate-in-page', handleNavigate);
+      webview.removeEventListener('did-navigate-in-page', handleInPageNavigate);
       webview.removeEventListener('page-title-updated', handleTitle);
       webview.removeEventListener('dom-ready', handleDomReady);
       webview.removeEventListener('ipc-message', handleIpc);
@@ -439,13 +455,17 @@ export function BrowserPanel() {
   const forwardDisabled = canUseRealWebview ? !activeTab?.canGoForward : historyIndex === history.length - 1;
   const currentBrowserUrl = canUseRealWebview ? activeTab?.url || initialBrowserUrl : url;
 
-  const openWebAITab = useCallback((targetUrl: string, title: string) => {
+  const sessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot);
+  const openWebAITab = useCallback((targetUrl: string, title: string, background = false) => {
     const tab = createBrowserTab(targetUrl, title);
     setTabs(previous => [...previous, tab]);
-    setActiveTabId(tab.id);
+    if (!background) setActiveTabId(tab.id);
     return tab.id;
   }, []);
   useBrowserBridge(canUseRealWebview, webviewRefs, activeTabId, openWebAITab, setActiveTabId);
+  useEffect(() => {
+    if (canUseRealWebview && activeTab) webAISessions.selectForTab({ tabId: activeTab.id, url: activeTab.url }, activeTab.title);
+  }, [activeTabId, activeTab?.url, canUseRealWebview]);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -492,7 +512,7 @@ export function BrowserPanel() {
 
   const registerWebview = useCallback((tabId: string, webview: WebviewElement | null) => {
     if (webview) webviewRefs.current[tabId] = webview;
-    else delete webviewRefs.current[tabId];
+    else { delete webviewRefs.current[tabId]; webPageRequests.cancelTab(tabId); }
   }, []);
 
   const handleTabStateChange = useCallback((tabId: string, patch: Partial<BrowserTab>) => {
@@ -530,13 +550,14 @@ export function BrowserPanel() {
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
     setAddressText(targetUrl);
-    if (options.openerTabId && shouldCloseOpenerAfterOpen(targetUrl, openerUrl)) {
+    if (options.openerTabId && !webAISessions.runningForTab(options.openerTabId) && shouldCloseOpenerAfterOpen(targetUrl, openerUrl)) {
       window.setTimeout(() => {
         const latestTabs = tabsRef.current;
         if (latestTabs.length <= 1) return;
         const opener = latestTabs.find((item) => item.id === options.openerTabId);
         const opened = latestTabs.find((item) => item.id === tab.id);
         if (!opener || !opened) return;
+        if (webAISessions.runningForTab(opener.id)) return;
         delete webviewRefs.current[opener.id];
         setTabs((prev) => prev.filter((item) => item.id !== opener.id));
         if (activeTabRef.current?.id === opener.id) {
@@ -549,6 +570,14 @@ export function BrowserPanel() {
   }, [initialBrowserUrl]);
 
   const handleWebviewIpc = useCallback((event: any, tabId: string) => {
+    if (event.channel === 'studypilot:web-document') {
+      webPageRequests.setDocument(tabId, String(event.args[0]));
+      return;
+    }
+    if (event.args[0]?.operationId) {
+      webPageRequests.resolve(tabId, event.channel, event.args[0]);
+      return;
+    }
     if (event.channel === 'studypilot:open-tab') {
       const payload = event.args?.[0] || {};
       const targetUrl = typeof payload === 'string' ? payload : payload.url;
@@ -657,6 +686,8 @@ export function BrowserPanel() {
     const webview = webviewRefs.current[tabId];
     if (!webview) return;
     if (safeWebviewRead(() => webview.getURL?.(), '') === targetUrl) return;
+    const task = webAISessions.runningForTab(tabId);
+    if (task?.source.tabId === tabId) { openBrowserTab(targetUrl); return; }
     if (stopCurrent && safeWebviewRead(() => webview.isLoading?.(), false)) {
       safeWebviewRun(() => webview.stop?.(), '停止当前页面失败');
     }
@@ -668,7 +699,7 @@ export function BrowserPanel() {
         appStore.addLog('warn', `页面跳转失败：${error?.message || targetUrl}`);
       });
     }
-  }, [activeTabId, handleTabStateChange]);
+  }, [activeTabId, handleTabStateChange, openBrowserTab]);
 
   useEffect(() => {
     if (isElectron && (window as any).electronAPI) {
@@ -704,6 +735,14 @@ export function BrowserPanel() {
       const detail = (event as CustomEvent).detail || {};
       const onComplete = typeof detail.onComplete === 'function' ? detail.onComplete : null;
       const webview = detail.targetTabId ? webviewRefs.current[detail.targetTabId] : getActiveWebview();
+      if (detail.sessionId) {
+        if (!canUseRealWebview || !webview || webview.getURL?.() !== detail.expectedUrl) {
+          onComplete?.({ success: false, error: '原题目页面已跳转或尚未就绪。' }); return;
+        }
+        void webPageRequests.request(detail.targetTabId, detail.sessionId, 'studypilot:question-result', {},
+          payload => webview.send?.('studypilot:extract-question', payload), detail.isCancelled).then(onComplete);
+        return;
+      }
       if (detail.expectedUrl && webview?.getURL?.() !== detail.expectedUrl) {
         onComplete?.({ success: false, error: '原题目页面已跳转，请重新抓题。' });
         return;
@@ -760,12 +799,27 @@ export function BrowserPanel() {
     let applyQueue: Promise<void> = Promise.resolve();
     const handleApplyAnswers = (event: Event) => {
       const detail = (event as CustomEvent).detail;
+      if (detail?.sessionId) {
+        void webPageRequests.enqueue(detail.targetTabId, async () => {
+          const view = webviewRefs.current[detail.targetTabId];
+          return applyWebAnswers<any>(detail.items || [], async item => {
+            if (!canUseRealWebview || !view || view.getURL?.() !== detail.expectedUrl) return { success: false, error: '原题目页面已跳转或尚未就绪。' };
+            return webPageRequests.request(detail.targetTabId, detail.sessionId, 'studypilot:apply-answer-result', {
+              questionHash: item.question.hash, answer: item.answer.answer, choiceLabels: item.answer.choiceLabels,
+              matchedOptions: item.answer.matchedOptions, question: item.question
+            }, payload => view.send?.('studypilot:apply-answer', payload), detail.isCancelled, 10000,
+              operationId => view.send?.('studypilot:web-cancel-operation', operationId));
+          }, () => Boolean(detail.isCancelled?.()), milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+            item => appStore.addLog('warn', `第 ${item.question.index || '?'} 题填空答案连续两次校验失败，请核对后手动填写。`));
+        }).then(result => detail.onComplete?.(result), error => detail.onComplete?.({ success: false, error: error.message }));
+        return;
+      }
       applyQueue = applyQueue.then(() => processApplyAnswers(detail)).catch(() => undefined);
     };
     const processApplyAnswers = async (detail: any) => {
       const items = detail?.items || [];
       const observeApi = !detail?.targetTabId;
-      if (observeApi) apiActivity.beginApply(Array.isArray(items) ? items.map((item: any) => item.question?.hash).filter(Boolean) : [], webAIController.getSnapshot().busy);
+      if (observeApi) apiActivity.beginApply(Array.isArray(items) ? items.map((item: any) => item.question?.hash).filter(Boolean) : [], webAISessions.getSnapshot().busy);
       const onComplete = (result: any) => {
         if (observeApi) apiActivity.finishApply(result);
         if (typeof detail?.onComplete === 'function') detail.onComplete(result);
@@ -947,6 +1001,16 @@ export function BrowserPanel() {
 
   const moveHistory = (direction: -1 | 1) => {
     if (canUseRealWebview) {
+      const task = webAISessions.runningForTab(activeTabId);
+      if (task?.source.tabId === activeTabId) {
+        const view = getActiveWebview();
+        void view?.executeJavaScript?.('JSON.stringify({referrer:document.referrer})').then((raw: string) => {
+          const referrer = JSON.parse(raw).referrer;
+          if (direction < 0 && /^https?:/.test(referrer)) openBrowserTab(referrer);
+          else appStore.addLog('info', '运行中的题目页已保留；请在新标签页浏览，或结束任务后使用历史导航。');
+        });
+        return;
+      }
       const webview = getActiveWebview();
       if (direction < 0 && webview && safeWebviewRead(() => webview.canGoBack?.(), false)) {
         safeWebviewRun(() => webview.goBack?.(), '后退失败');
@@ -975,6 +1039,11 @@ export function BrowserPanel() {
   const closeBrowserTab = (tabId: string, event?: React.MouseEvent) => {
     event?.stopPropagation();
     setTabContextMenu(null);
+    const task = webAISessions.runningForTab(tabId);
+    if (task) {
+      if (!window.confirm(`此页面属于“${task.title}”的运行任务，关闭将停止该任务。是否继续？`)) return;
+      webAISessions.disposeSession(task.id);
+    }
     delete webviewRefs.current[tabId];
     if (tabs.length <= 1) {
       const replacement = createBrowserTab(DEFAULT_BROWSER_URL, '首页');
@@ -1005,9 +1074,9 @@ export function BrowserPanel() {
     const target = tabs.find((tab) => tab.id === tabId);
     if (!target) return;
     Object.keys(webviewRefs.current).forEach((id) => {
-      if (id !== tabId) delete webviewRefs.current[id];
+      if (id !== tabId && !webAISessions.runningForTab(id)) delete webviewRefs.current[id];
     });
-    setTabs([target]);
+    setTabs(tabs.filter(tab => tab.id === tabId || webAISessions.runningForTab(tab.id)));
     setActiveTabId(tabId);
     setAddressText(target.url);
   };
@@ -1016,8 +1085,8 @@ export function BrowserPanel() {
     setTabContextMenu(null);
     const index = tabs.findIndex((tab) => tab.id === tabId);
     if (index < 0 || index >= tabs.length - 1) return;
-    const nextTabs = tabs.slice(0, index + 1);
-    const removedIds = new Set(tabs.slice(index + 1).map((tab) => tab.id));
+    const nextTabs = tabs.filter((tab, position) => position <= index || webAISessions.runningForTab(tab.id));
+    const removedIds = new Set(tabs.slice(index + 1).filter(tab => !webAISessions.runningForTab(tab.id)).map((tab) => tab.id));
     removedIds.forEach((id) => delete webviewRefs.current[id]);
     setTabs(nextTabs);
     if (removedIds.has(activeTabId)) {
@@ -1187,7 +1256,7 @@ export function BrowserPanel() {
                 className={`browser-tab${active ? ' active' : ''}`}
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>
-                  {tab.loading ? '加载中...' : tab.title || friendlyTitle(tab.url)}
+                  {sessions.tasks.some(item => item.task.outcome === 'running' && (item.session.source.tabId === tab.id || item.session.controller.getSnapshot().aiTab?.id === tab.id)) ? '● ' : ''}{tab.loading ? '加载中...' : tab.title || friendlyTitle(tab.url)}
                 </span>
                 <span
                   role="button"

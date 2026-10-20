@@ -9,7 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { appStore, useAppStore } from './store/appStore';
-import { webAIController } from './webAI/WebAIController';
+import { webAISessions } from './webAI/WebAISessionManager';
 import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
 
 type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
@@ -45,7 +45,8 @@ export default function App() {
   const [showNotice, setShowNotice] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [resizingWorkbench, setResizingWorkbench] = useState(false);
-  const webTask = useSyncExternalStore(webAIController.subscribe, webAIController.getSnapshot);
+  const webSessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot);
+  const webTask = useSyncExternalStore(webSessions.controller.subscribe, webSessions.controller.getSnapshot);
   const workbenchBounds = () => {
     const viewport = window.innerWidth;
     const browserMin = Math.min(500, Math.max(300, Math.round(viewport * 0.46)));

@@ -31,11 +31,25 @@ export function judgementAnswerText(answer: string) {
 }
 
 export function isCorrectOption(entry: QuestionBankEntry, option: string, index: number) {
-  if (getEntryType(entry) === 'judgement') {
+  const type = getEntryType(entry);
+  if (type === 'judgement') {
     const value = judgementValue(entry.answer.answer);
     if (value !== null) return judgementValue(option) === value;
   }
   const label = option.match(/^\s*([A-H])\s*[.\s:：、。)]/i)?.[1]?.toUpperCase() || String.fromCharCode(65 + index);
-  return entry.answer.choiceLabels.map(value => value.toUpperCase()).includes(label) ||
-    new RegExp(`(^|[^A-Z])${label}([^A-Z]|$)`, 'i').test(entry.answer.answer);
+  const selectedLabels = [...new Set(entry.answer.choiceLabels.map(value => value.trim().toUpperCase()).filter(value => /^[A-H]$/.test(value)))];
+  if (selectedLabels.length) return (type !== 'single' || selectedLabels.length === 1) && selectedLabels.includes(label);
+
+  // Legacy entries may contain only answer text. Match the whole option before
+  // parsing letter-only answers, so units such as b/s and text such as A 级
+  // cannot accidentally select another option.
+  const normalize = (text: string) => text.normalize('NFKC').trim().replace(/\s+/g, ' ');
+  const answer = normalize(entry.answer.answer).replace(/^(?:答案|正确答案)\s*[:：]\s*/, '');
+  const textMatches = entry.options.map((candidate, candidateIndex) =>
+    normalize(candidate) === answer || normalize(candidate.replace(/^\s*[A-H]\s*[.\s:：、。)]\s*/i, '')) === answer ? candidateIndex : -1
+  ).filter(candidateIndex => candidateIndex >= 0);
+  if (textMatches.length) return (type !== 'single' || textMatches.length === 1) && textMatches.includes(index);
+  if (!/^[A-H](?:[\s,，、;；/|]*[A-H])*$/i.test(answer)) return false;
+  const answerLabels = [...new Set(answer.toUpperCase().match(/[A-H]/g) || [])];
+  return (type !== 'single' || answerLabels.length === 1) && answerLabels.includes(label);
 }

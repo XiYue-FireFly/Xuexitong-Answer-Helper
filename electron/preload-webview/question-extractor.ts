@@ -2,6 +2,7 @@ import type { QuestionOptionTarget, QuestionPayload, QuestionType } from './type
 import { parseJudgementValueStable } from './answer-matcher';
 import { cleanText, cssEscape, hashText, isVisible, normalizeText, optionLabel, optionLetter, optionTextCandidate, removeNoise, selectorFor, uniqueBy, visibleText } from './dom-utils';
 import { decodeFontTextSync } from './font-decode';
+import { buildWebReference, cloneVisibleQuestionContent, collectQuestionMedia, isQuestionContentHidden, questionReferenceText, webEnhancedQuestionHash, QUESTION_EDITOR_UI_SELECTOR } from './question-reference';
 
 type ExtractedQuestion = QuestionPayload & {
   id: string;
@@ -698,7 +699,8 @@ function attachReadingContext(questions: ExtractedQuestion[], rawText: string) {
   }));
 }
 
-export function extractQuestions() {
+export function extractQuestions(options?: { webEnhanced?: boolean }) {
+  if (options?.webEnhanced) return extractWebEnhancedQuestions();
   const currentExamRoot = document.querySelector('.singleQuestionDiv') as HTMLElement | null;
   if (currentExamRoot && isVisible(currentExamRoot)) {
     const currentQuestion = questionFromRoot(currentExamRoot, 1);
@@ -756,6 +758,146 @@ export function extractQuestions() {
   return fallback ? applyFontDecode([fallback]) : [];
 }
 
+function enhancedOptionTargets(root: HTMLElement) {
+  const fromElements = (elements: HTMLElement[]) => sortOptionElementsByVisualOrder(elements).map((element, index) => {
+    const target = optionTargetFromElement(element, index);
+    const clickable = nearestClickableOption(element) || element;
+    const ownText = questionReferenceText(clickable);
+    const body = ownText.replace(/^\s*[A-HＡ-Ｈ](?:\s*[.、．):：。]\s*|\s+|$)/i, '').trim();
+    const hasImage = Boolean(clickable.querySelector('img, svg, canvas'));
+    const judgement = parseJudgementValueStable(target.value || '');
+    const text = body || (hasImage ? `[图片选项 ${target.label}]` : judgement === 'true' ? '对' : judgement === 'false' ? '错' : '');
+    return { element: clickable, target: { ...target, text: `${target.label}. ${text}` }, hasContent: Boolean(text) };
+  }).filter((item) => item.hasContent && item.target.text.length <= 1000);
+  const normalized = (elements: HTMLElement[]) => {
+    const items = fromElements(elements.filter(element => !isQuestionContentHidden(element) && !element.closest(QUESTION_EDITOR_UI_SELECTOR + ',[contenteditable="true"]')));
+    const targets = sortOptionTargetsByLabelOrder(uniqueBy(items.map((item) => item.target), (target) => target.label));
+    return targets.map((target) => items.find((item) => item.target === target)!);
+  };
+  const exam = normalized((Array.from(root.querySelectorAll('.answerBg')) as HTMLElement[])
+    .filter((element) => element.querySelector('.num_option, .num_option_dx') && element.querySelector('.answer_p')));
+  if (exam.length >= 2) return exam.slice(0, 12);
+  const inputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="radio"], input[type="checkbox"]'));
+  const inputItems = normalized(inputs.map((input) => {
+    const label = input.closest('label') || (input.id ? root.querySelector(`label[for="${cssEscape(input.id)}"]`) : null);
+    return (label || nearestClickableOption(input) || input) as HTMLElement;
+  }));
+  if (inputItems.length >= 2) return inputItems.slice(0, 12);
+  for (const selector of OPTION_SELECTORS) {
+    const elements = (Array.from(root.querySelectorAll(selector)) as HTMLElement[]).filter((element) =>
+      selector !== 'li' || isLikelyOptionListItem(element) || Boolean(element.querySelector('img, svg, canvas') && element.querySelector('input[type="radio"], input[type="checkbox"]'))
+    );
+    const items = normalized(elements);
+    if (items.length >= 2) return items.slice(0, 12);
+  }
+  return [];
+}
+
+function enhancedQuestionFromRoot(root: HTMLElement, index: number): ExtractedQuestion | null {
+  const items = enhancedOptionTargets(root);
+  const optionTargets = items.map((item) => item.target);
+  const options = optionTargets.map((target) => target.text);
+  const media = collectQuestionMedia(root, items.map((item) => ({ element: item.element, label: item.target.label })));
+  // A sanitized clone keeps live answers out of titles and fallback stems.
+  const clone = cloneVisibleQuestionContent(root);
+  clone.querySelectorAll('textarea, input, [contenteditable="true"], iframe, [hidden], .student-answer, .studentAnswer, .my-answer, .myAnswer, .answer-status, .upload-status, [data-answer-value], [data-upload-status]').forEach((node) => node.remove());
+  clone.querySelectorAll(QUESTION_EDITOR_UI_SELECTOR).forEach(node => node.remove());
+  let question = findQuestionText(clone, optionTargets);
+  const stemMedia = media.filter((item) => item.role === 'stem');
+  if ((!question || isQuestionMetadataOnly(question) || isQuestionRootTextNoise(question)) && stemMedia.length) {
+    question = `[图片题干 ${stemMedia.map((item) => item.id).join(' ')}]`;
+  }
+  const hint = readQuestionTypeHint(root);
+  const inferredType = inferTypeFromDom(root, options);
+  if (!question || isQuestionRootTextNoise(question) || isQuestionMetadataOnly(question)) return null;
+  if (!options.length && !stemMedia.length && inferredType !== 'completion' && inferredType !== 'essay' && !/[？?]|(单选|多选|判断|填空|问答|题)/.test(question)) return null;
+  const reference = buildWebReference(root, index, hint.qid);
+  return {
+    id: `q_${Date.now()}_${index}`, hash: '', question, options, optionTargets, type: inferredType,
+    source: 'webview', pageUrl: window.location.href,
+    pageTitle: cleanText(document.title) || window.location.href, capturedAt: Date.now(), index,
+    selector: selectorFor(root), webReference: reference, media,
+    ...(reference.material ? { context: reference.material } : {})
+  };
+}
+
+function extractWebEnhancedQuestions(): ExtractedQuestion[] {
+  const candidates = new Set<HTMLElement>();
+  const controls = 'input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"], .num_option, .num_option_dx';
+  const excluded = 'nav, header, footer, .toolbar, [role="navigation"], [hidden], [contenteditable="true"],' + QUESTION_EDITOR_UI_SELECTOR;
+  const answerArea = 'label, [role="radio"], [role="checkbox"], .answer-options, .answerBg, .answerCon, .option, .option-item, .choice, .choice-item, [data-option]';
+  const localTitles = (root: HTMLElement) => Array.from(root.querySelectorAll<HTMLElement>(TITLE_SELECTORS.join(',')))
+    .filter(title => !isQuestionContentHidden(title) && !title.closest(answerArea + ',' + excluded));
+  const hasLocalTitle = (root: HTMLElement) => localTitles(root).length > 0;
+  const hasResponse = (root: HTMLElement) => Boolean(root.querySelector(controls + ',' + TEXT_ENTRY_SELECTORS));
+  const isStemOnly = (root: HTMLElement) => root.matches('.TiMu, .timu') && !hasResponse(root);
+  const supportedType = (root: HTMLElement) => /^(?:0|1|2|3|4|21)$/.test(readQuestionTypeHint(root).qtype);
+  const addRoot = (root: HTMLElement) => {
+    if (!isVisible(root) || isQuestionContentHidden(root) || root.closest(excluded + ',' + answerArea) || isStemOnly(root)) return;
+    const stableText = questionReferenceText(root);
+    if (isQuestionRootTextNoise(stableText) && !root.querySelector('img, svg, canvas')) return;
+    candidates.add(root);
+  };
+  for (const selector of QUESTION_CONTAINER_SELECTORS) {
+    for (const root of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
+      // Older homework pages use TiMu for the stem alone. Its parent owns
+      // the type metadata and answer controls, so never capture only the stem.
+      addRoot(root);
+    }
+  }
+  for (const root of Array.from(document.querySelectorAll<HTMLElement>('[qtype]'))) {
+    if (hasLocalTitle(root) && supportedType(root)) addRoot(root);
+  }
+  const knownBlocks = new Set([...candidates].filter(root => {
+    const local = localTitles(root);
+    const titles = new Set(local);
+    // Count the deepest title markers; a shared content wrapper can contain
+    // several independent questions and must not collapse them into one.
+    for (const title of local) {
+      for (let parent = title.parentElement; parent && parent !== root; parent = parent.parentElement) {
+        titles.delete(parent);
+      }
+    }
+    return titles.size <= 1;
+  }));
+  for (const root of candidates) {
+    for (let parent = root.parentElement; parent && !/^(?:BODY|HTML)$/i.test(parent.tagName); parent = parent.parentElement) knownBlocks.delete(parent);
+  }
+  const insideKnownBlock = (root: HTMLElement) => {
+    for (let parent: HTMLElement | null = root; parent; parent = parent.parentElement) if (knownBlocks.has(parent)) return true;
+    return false;
+  };
+  // Local qtype/type inputs and choice controls are used by all homework
+  // types, not just completion editors. Do not fall back to the entire page.
+  const seeds = new Set(Array.from(document.querySelectorAll<HTMLElement>(
+    controls + ',' + TEXT_ENTRY_SELECTORS + ',input[name^="type"],' + TITLE_SELECTORS.join(',')
+  )));
+  for (const seed of seeds) {
+    if (isQuestionContentHidden(seed) || seed.closest(excluded) || insideKnownBlock(seed)) continue;
+    for (let parent = seed.parentElement, depth = 0; parent && depth < 5 && !/^(?:BODY|HTML)$/i.test(parent.tagName); parent = parent.parentElement, depth += 1) {
+      if (!hasLocalTitle(parent)) continue;
+      const choiceCount = parent.querySelectorAll(controls).length;
+      const hint = readQuestionTypeHint(parent);
+      if (!supportedType(parent) && !(choiceCount >= 2 && inferTypeFromDom(parent, []) !== 'unknown') &&
+        !(hasResponse(parent) && /填空|问答|简答|论述|作文|资料|材料|综合/.test(hint.typeName))) continue;
+      addRoot(parent);
+      break;
+    }
+  }
+  // Prefer concrete question blocks over their section/wrapper. Nested stem
+  // nodes without response areas were excluded above and cannot hide a block.
+  const roots = new Set(candidates);
+  for (const root of candidates) {
+    for (let parent = root.parentElement; parent && !/^(?:BODY|HTML)$/i.test(parent.tagName); parent = parent.parentElement) roots.delete(parent);
+  }
+  const domOrder = new Map(Array.from(document.querySelectorAll<HTMLElement>('*')).map((element, index) => [element, index]));
+  const ordered = [...roots].sort((left, right) => (domOrder.get(left) ?? 0) - (domOrder.get(right) ?? 0));
+  const questions = ordered.map((root, index) => enhancedQuestionFromRoot(root, index + 1)).filter((question): question is ExtractedQuestion => Boolean(question));
+  // Enhanced capture deliberately requires a question container. Whole-page
+  // fallback text cannot safely scope materials, images or existing answers.
+  return applyFontDecode(questions);
+}
+
 // 字体反爬：把选项/题干里的 PUA 私用码位还原成真实字符。
 // 映射表在 preload 启动时异步加载；未就绪时原样返回（已加载后命中）。
 function applyFontDecode(questions: ExtractedQuestion[]): ExtractedQuestion[] {
@@ -771,6 +913,14 @@ function applyFontDecode(questions: ExtractedQuestion[]): ExtractedQuestion[] {
       }));
     }
     if (question.context) question.context = decodeFontTextSync(question.context);
+    if (question.webReference) {
+      if (question.webReference.material) question.webReference.material = decodeFontTextSync(question.webReference.material);
+      if (question.webReference.chapterTitle) question.webReference.chapterTitle = decodeFontTextSync(question.webReference.chapterTitle);
+      if (question.webReference.sectionTitle) question.webReference.sectionTitle = decodeFontTextSync(question.webReference.sectionTitle);
+      question.webReference.filledValues = question.webReference.filledValues.map(decodeFontTextSync);
+      question.hash = webEnhancedQuestionHash(question);
+      continue;
+    }
     // 文本变化后重新计算 hash，保证题库 key 一致
     question.hash = hashText(normalizeText(question.question) + '|' + (question.options || []).map(normalizeText).join('|'));
   }

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, CheckCircle2, CirclePause, CircleStop, TriangleAlert, Volume2, VolumeX } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { appStore } from '../store/appStore';
-import { webAIController } from '../webAI/WebAIController';
+import { webAISessions } from '../webAI/WebAISessionManager';
 import { activityProgress, answerActivity, apiActivity, type ActivityFeedback, type AnswerActivity } from './activityStore';
 import { getFeedbackMuted, listenForFeedbackAudioUnlock, playFeedbackAudio, setFeedbackMuted, subscribeFeedbackMuted, unlockFeedbackAudio } from './feedbackAudio';
 import './answer-activity.css';
@@ -28,8 +28,6 @@ const feedbackQueue: ActivityFeedback[] = [];
 const feedbackListeners = new Set<() => void>();
 let visibleFeedback: VisibleFeedback | null = null;
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
-let hostCount = 0;
-let destructionTimer: ReturnType<typeof setTimeout> | undefined;
 
 function nextFeedback() {
   if (feedbackTimer) clearTimeout(feedbackTimer);
@@ -40,7 +38,7 @@ function nextFeedback() {
 }
 
 function collectFeedback() {
-  answerActivity.getSnapshot().feedback.forEach(event => {
+  [...answerActivity.getSnapshot().feedback, ...webAISessions.getSnapshot().feedback].forEach(event => {
     if (consumedFeedback.has(event.id)) return;
     consumedFeedback.add(event.id);
     feedbackQueue.push(event);
@@ -168,29 +166,27 @@ function Feedback({ event, decorations }: { event: VisibleFeedback; decorations:
 }
 
 export function AnswerActivityLayer() {
-  const { task } = useSyncExternalStore(answerActivity.subscribe, answerActivity.getSnapshot, answerActivity.getSnapshot);
+  const { task: legacyTask } = useSyncExternalStore(answerActivity.subscribe, answerActivity.getSnapshot, answerActivity.getSnapshot);
+  const sessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot, webAISessions.getSnapshot);
+  const selected = sessions.tasks.find(item => item.session.id === sessions.selectedId);
+  const task = selected?.task || sessions.tasks.find(item => item.task.outcome === 'running')?.task || legacyTask;
   const feedback = useSyncExternalStore(subscribeVisibleFeedback, getVisibleFeedback, getVisibleFeedback);
   const { visible, reducedMotion } = useEnvironment();
 
   useEffect(() => {
-    hostCount++;
-    if (destructionTimer) clearTimeout(destructionTimer);
-    const observe = () => apiActivity.observe(appStore.getState(), webAIController.getSnapshot().busy);
+    const observe = () => apiActivity.observe(appStore.getState(), webAISessions.getSnapshot().busy);
     const unsubscribeApp = appStore.subscribe(observe);
-    const unsubscribeWeb = webAIController.subscribe(observe);
+    const unsubscribeWeb = webAISessions.subscribe(() => { observe(); collectFeedback(); });
     const unsubscribeFeedback = answerActivity.subscribe(collectFeedback);
     const removeAudioUnlock = listenForFeedbackAudioUnlock();
     observe();
     collectFeedback();
     return () => {
       unsubscribeApp(); unsubscribeWeb(); unsubscribeFeedback(); removeAudioUnlock();
-      hostCount--;
-      // StrictMode immediately installs the host again; a real destruction leaves no host.
-      destructionTimer = setTimeout(() => { if (!hostCount) webAIController.stop(); }, 0);
     };
   }, []);
 
-  const answering = Boolean(task && task.outcome === 'running' && !task.paused && ANSWERING.has(task.phase));
+  const answering = [legacyTask, ...sessions.tasks.map(item => item.task)].some(item => item && item.outcome === 'running' && !item.paused && ANSWERING.has(item.phase));
   const decorations = visible && !reducedMotion;
   return <>
     <div className={`answer-activity-layer${visible ? '' : ' is-hidden'}`}>

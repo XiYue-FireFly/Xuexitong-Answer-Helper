@@ -110,18 +110,180 @@ function fixture(provider = providers[0], options: { send?: boolean; account?: b
   vi.stubGlobal('window', { getSelection: () => ({ removeAllRanges: () => undefined, addRange: () => undefined }) });
   vi.stubGlobal('HTMLTextAreaElement', TextareaFixture);
   vi.stubGlobal('HTMLElement', ElementFixture);
+  vi.stubGlobal('Element', ElementFixture);
   vi.stubGlobal('getComputedStyle', () => ({ visibility: 'visible', opacity: '1' }));
   const run = new Function(`return (${webPageAction.toString()})`)() as typeof webPageAction;
   const compare = new Function(`return (${composerTextMatches.toString()})`)() as typeof composerTextMatches;
-  const inspect = (action: string, name: string, prompt: string, deadline = 0) => run(action, name, prompt, deadline, compare);
+  const inspect = (action: string, name: string, prompt: string, deadline = 0, attachments: any[] = []) => run(action, name, prompt, deadline, compare, attachments);
   return { root, form, input, insertions: () => insertions, inspect: () => inspect('inspect', provider.id, '') as WebPageState,
     prepare: async (prompt: string) => await inspect('prepare', provider.id, prompt) as WebPageState,
     expired: (action: string) => (inspect as Function)(action, provider.id, 'prompt', Date.now() - 1) as WebPageState,
-    action: (action: string, prompt: string) => inspect(action, provider.id, prompt) as WebPageState };
+    action: (action: string, prompt: string) => inspect(action, provider.id, prompt) as WebPageState,
+    mediaAction: (action: string, prompt: string, attachments: any[]) => inspect(action, provider.id, prompt, 0, attachments) };
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Web AI composer readiness without login checks', () => {
+  it('confirms current outgoing images after the site remounts its textarea without accepting an older request', async () => {
+    const page = fixture();
+    const prompt = 'Return JSON such as {"requestId":"example"}.\n{"requestId":"current","questions":[]}';
+    const files = [{ name: 'diagram.png', mime: 'image/png', bytes: [1] }];
+    page.root.append(element('div', { class: 'ds-message' }, '{"requestId":"old","questions":[]}')
+      .append(element('img', { alt: files[0].name })));
+    expect(await page.mediaAction('inspect', prompt, files)).toMatchObject({ sentReceipt: false });
+    page.root.append(element('div', { class: 'ds-message' }, prompt).append(element('img', { alt: files[0].name })));
+    expect(await page.mediaAction('inspect', prompt, files)).toMatchObject({ sentReceipt: true });
+    expect(page.form.children[1].clicks).toBe(0);
+  });
+
+  it('ignores upload spinners inside transparent DeepSeek overlays but waits when they become visible', async () => {
+    const page = fixture();
+    const card = element('div', { role: 'button' }).append(element('img', { alt: 'ready.png' }));
+    const overlay = element('div', { 'data-opacity': '0' }).append(element('div', { class: 'ds-loading' }, 'Uploading'));
+    card.append(overlay); page.form.append(card);
+    vi.stubGlobal('getComputedStyle', (node: ElementFixture) => ({ display: 'block', visibility: 'visible', opacity: node.getAttribute('data-opacity') || '1' }));
+    const files = [{ name: 'ready.png', mime: 'image/png', bytes: [1] }];
+    const prompt = '{"requestId":"transparent-spinner"}';
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'ready' });
+    overlay.attributes['data-opacity'] = '1';
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: false, attachmentState: 'pending' });
+    expect(page.form.children[1].clicks).toBe(0);
+    overlay.attributes['data-opacity'] = '0';
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: true, attachmentState: 'ready' });
+    expect(page.form.children[1].clicks).toBe(1);
+  });
+
+  it('clicks the unlabelled DeepSeek primary send control instead of falling back to Enter', async () => {
+    const page = fixture(providers[0], { send: false });
+    const attachment = element('div', { role: 'button', class: 'ds-button ds-button--icon' });
+    const send = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle' })
+      .append(element('svg').append(element('path', { d: 'M8.3125 0.980206L9 3.95579V15.0417H7V3.95579Z' })));
+    page.form.append(attachment, send);
+    const outside = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle' });
+    page.root.append(outside);
+    await page.prepare('prompt');
+    expect(page.action('send', 'prompt')).toMatchObject({ attempted: true });
+    expect(send.clicks).toBe(1);
+    expect(attachment.clicks).toBe(0);
+    expect(outside.clicks).toBe(0);
+  });
+
+  it('waits for a class-disabled DeepSeek icon control without pressing Enter', async () => {
+    const page = fixture(providers[0], { send: false });
+    const send = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle ds-button--disabled' });
+    page.form.append(send);
+    await page.prepare('prompt');
+    expect(page.action('send', 'prompt')).toMatchObject({ attempted: false, reason: '正在等待发送按钮启用。' });
+    expect(page.action('send', 'prompt').needsEnter).not.toBe(true);
+    expect(send.clicks).toBe(0);
+  });
+
+  it('recognizes the unlabelled DeepSeek stop icon during extended thinking without clicking it', async () => {
+    const page = fixture(providers[0], { send: false });
+    const stop = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle' })
+      .append(element('svg').append(element('path', { d: 'M2 4.88C2 3.68009 2 3.08013 2.30557 2.65954C2.40426 2.52371 2.52371 2.40426 2.65954 2.30557C3.08013 2 3.68009 2 4.88 2H11.12Z' })));
+    page.form.append(stop);
+    await page.prepare('prompt');
+    expect(page.inspect()).toMatchObject({ busy: true, generationState: 'running' });
+    expect(page.action('send', 'prompt')).toMatchObject({ attempted: false, busy: true });
+    expect(stop.clicks).toBe(0);
+  });
+
+  it('finds a sibling image shelf created by the first upload without reading chat history', async () => {
+    vi.useFakeTimers();
+    const page = fixture();
+    page.form.tagName = 'div';
+    const wrapper = element('div');
+    const shelf = element('div');
+    page.root.children = [];
+    page.root.append(wrapper.append(shelf, page.form));
+    page.root.append(element('div', { class: 'ds-message' }).append(element('img', { alt: 'old.png' })));
+    const upload = element('input', { type: 'file' });
+    Object.assign(upload, { accept: 'image/*', disabled: false, files: null });
+    upload.dispatchEvent = event => {
+      if (event.type === 'change') for (const file of (upload as any).files) {
+        shelf.append(element('div', { role: 'button' }).append(element('img', { alt: file.name })));
+      }
+      return true;
+    };
+    page.form.append(upload);
+    vi.stubGlobal('File', class { constructor(public bytes: unknown, public name: string) {} });
+    vi.stubGlobal('DataTransfer', class { files: any[] = []; items = { add: (file: any) => this.files.push(file) }; });
+    const files = [{ name: 'first.png', mime: 'image/png', bytes: [1, 2, 3] }];
+    const prompt = '{"requestId":"first-upload"}';
+    const prepared = page.mediaAction('prepare', prompt, files);
+    await vi.runAllTimersAsync();
+    expect(await prepared).toMatchObject({ promptReady: true, attachmentState: 'ready' });
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: true });
+    expect(page.form.children[1].clicks).toBe(1);
+  });
+
+  it('recognizes DeepSeek image alt filenames in the shelf beside the composer controls', async () => {
+    const page = fixture();
+    page.form.tagName = 'div';
+    const wrapper = element('div');
+    const shelf = element('div');
+    page.root.children = [];
+    page.root.append(wrapper.append(shelf, page.form));
+    const card = element('div', { role: 'button' }).append(element('img', { alt: 'sp-diagram.png', src: 'blob:diagram' }));
+    const spinner = element('div', { class: 'ds-loading' });
+    card.append(spinner); shelf.append(card);
+    const files = [{ name: 'sp-diagram.png', mime: 'image/png', bytes: [1, 2, 3] }];
+    const prompt = '{"requestId":"shelf-request","questions":[]}';
+    expect(await page.mediaAction('inspect', prompt, files)).toMatchObject({ attachmentState: 'pending' });
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'pending' });
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: false, attachmentState: 'pending' });
+    card.children = card.children.filter(child => child !== spinner);
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'ready' });
+    shelf.children = []; (page.input as TextareaFixture).value = '';
+    page.root.append(element('div', { class: 'ds-message' }, prompt).append(element('img', { alt: files[0].name })));
+    expect(await page.mediaAction('inspect', prompt, files)).toMatchObject({ sentReceipt: true });
+    expect(page.form.children[1].clicks).toBe(0);
+  });
+
+  it.each(providers)('uploads actual images in $id, waits for chips, sends once and confirms outgoing association', async provider => {
+    const page = fixture(provider);
+    const upload = element('input', { type: 'file' });
+    Object.assign(upload, { accept: 'image/*', disabled: false, files: null });
+    upload.dispatchEvent = event => {
+      if (event.type === 'change') for (const file of (upload as any).files) page.form.append(element('div', { 'data-file-name': file.name, 'data-status': 'ready' }, file.name));
+      return true;
+    };
+    page.form.append(upload);
+    vi.stubGlobal('File', class { constructor(public bytes: unknown, public name: string, public options: unknown) {} });
+    vi.stubGlobal('DataTransfer', class { files: any[] = []; items = { add: (file: any) => this.files.push(file) }; });
+    const files = [{ name: 'sp-test-img.png', mime: 'image/png', bytes: [1, 2, 3] }];
+    const prompt = '{"requestId":"image-request","questions":[]}';
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'ready' });
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: true });
+    expect(page.form.children[1].clicks).toBe(1);
+    page.form.children = page.form.children.filter(child => !child.getAttribute('data-file-name'));
+    (page.input as TextareaFixture).value = '';
+    expect((await page.mediaAction('inspect', prompt, files) as WebPageState).sentReceipt).toBe(false);
+    page.root.append(element('div', { 'data-message-author-role': 'user' }, prompt).append(element('span', { title: files[0].name }, files[0].name)));
+    expect((await page.mediaAction('inspect', prompt, files) as WebPageState).sentReceipt).toBe(true);
+  });
+  it('waits for image upload and refuses failed images alongside a TXT', async () => {
+    const page = fixture(providers[2], { editor: { contenteditable: 'true' }, paste: true, pasteAttachment: 'ready' });
+    const upload = element('input', { type: 'file' }); Object.assign(upload, { accept: 'image/*', disabled: false, files: null });
+    upload.dispatchEvent = event => {
+      if (event.type === 'change') page.form.append(element('div', { 'data-file-name': 'img.png', 'data-status': 'pending' }, 'img.png'));
+      return true;
+    }; page.form.append(upload);
+    vi.stubGlobal('File', class { constructor(public bytes: unknown, public name: string) {} });
+    vi.stubGlobal('DataTransfer', class { files: any[] = []; items = { add: (file: any) => this.files.push(file) }; setData() {} getData() { return ''; } });
+    const files = [{ name: 'img.png', mime: 'image/png', bytes: [1] }];
+    const prompt = '{"requestId":"mixed"}';
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'pending' });
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: false, attachmentState: 'pending' });
+    const image = page.form.children.find(child => child.getAttribute('data-file-name') === 'img.png')!;
+    image.attributes['data-status'] = 'failed';
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: false, attachmentState: 'failed' });
+    image.attributes['data-status'] = 'ready';
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: true });
+    expect(page.form.children[1].clicks).toBe(1);
+    expect(page.input.events.filter(type => type === 'paste')).toHaveLength(1);
+  });
   it('does not mutate the page when a queued browser command has already timed out', () => {
     const page = fixture(providers[1]);
     expect(page.expired('prepare').error).toContain('超时');

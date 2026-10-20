@@ -5,9 +5,11 @@ import { buildWebPrompt, hasCompleteWebResponse, parseWebAnswer, prepareWebBatch
 import { sendWebPrompt } from './sendPrompt';
 import { composerTextMatches } from './composerText';
 import { waitForWebAnswer, waitForWebComposer } from './pageMonitor';
+import { buildWebReferences } from './questionContext';
+import { mediaFileName, prepareQuestionMedia, releaseQuestionMedia, type MediaReader, type WebMediaAttachment } from './questionMedia';
 
 const PENDING_KEY = 'studypilot-web-ai-pending-v1';
-export type WebRunPhase = 'idle' | 'extracting' | 'preparing' | 'opening' | 'sending' | 'waiting_answer' | 'validating' | 'importing' | 'checking_source' | 'applying' | 'paused' | 'needs_review' | 'partial' | 'completed' | 'failed' | 'stopped';
+export type WebRunPhase = 'idle' | 'extracting' | 'preparing' | 'opening' | 'sending' | 'waiting_answer' | 'waiting_source' | 'validating' | 'importing' | 'checking_source' | 'applying' | 'paused' | 'needs_review' | 'partial' | 'completed' | 'failed' | 'stopped';
 export type WebAISnapshot = {
   provider: WebProvider; mode: 'internal' | 'external'; flow: 'manual' | 'automatic';
   selected: string[]; batch: WebBatch | null; prompt: string; reply: string; message: string;
@@ -18,13 +20,14 @@ export type WebAISnapshot = {
 };
 type PageResult = { success: boolean; questions?: QuestionItem[]; data?: QuestionItem; skipped?: number; partial?: boolean; error?: string };
 type AutomaticRun = {
-  stage: 'extract' | 'prepare' | 'open' | 'send' | 'import' | 'fill' | 'next';
+  stage: 'extract' | 'media' | 'prepare' | 'open' | 'send' | 'import' | 'fill' | 'next';
   items: QuestionItem[]; remaining: QuestionItem[]; first: boolean; answers: AnswerItem[];
   source: BrowserSource | null; progress: AnswerActivity | null;
+  blocked: QuestionItem[];
 };
 const MAX_MISSING_RETRIES = 3;
 type WebStore = Pick<typeof appStore, 'getState' | 'setAutomationRunning' | 'setStatus' | 'addLog' | 'upsertQuestionBank' | 'setAnswerForQuestion'>;
-type Environment = {
+export type Environment = {
   store: WebStore;
   browser: (command: WebCommand) => Promise<any>;
   page: (channel: string, detail: Record<string, unknown>) => Promise<PageResult>;
@@ -32,11 +35,16 @@ type Environment = {
   now: () => number;
   notify: (title: string, body: string) => void;
   activity: AnswerActivityStore;
+  sessionId: string;
+  initialSource: BrowserSource | null;
+  onQuestions: (questions: QuestionItem[]) => void;
+  readMedia: MediaReader;
+  withConversation: <T>(provider: WebProvider, action: () => Promise<T>) => Promise<T>;
 };
 
-function restorePending() {
+function restorePending(key = PENDING_KEY) {
   try {
-    const value = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
     if (!value) return { batch: null, prompt: '', error: '' };
     if (typeof value.requestId !== 'string' || !value.requestId.trim() || !Array.isArray(value.questions) || !value.questions.length ||
       !value.questions.every((q: any) => q && typeof q.hash === 'string' && typeof q.question === 'string' && typeof q.type === 'string' &&
@@ -83,19 +91,25 @@ export class WebAIController {
   private retryAction: ((token: number) => Promise<void>) | null = null;
   private retryPhase: WebRunPhase = 'idle';
   private sendState: { requestId: string; baseline: string; baselineKey?: string; uncertain: boolean; confirmed: boolean } | null = null;
+  private referenceQuestions: QuestionItem[] = [];
+  private attachments: WebMediaAttachment[] = [];
 
   constructor(environment: Partial<Environment> = {}) {
     this.env = { store: appStore, browser: browserCommand, page: requestPage, wait: abortableWait, now: Date.now,
       notify: (title, body) => { const api = (window as any).electronAPI; if (api?.notify) void api.notify(title, body).catch(() => undefined); },
-      activity: answerActivity, ...environment };
-    const pending = typeof localStorage === 'undefined' ? { batch: null, prompt: '', error: '' } : restorePending();
+      activity: answerActivity, sessionId: '', initialSource: null, onQuestions: () => undefined,
+      readMedia: payload => (globalThis as any).window?.electronAPI?.readQuestionMedia?.(payload) || Promise.resolve({ ok: false, error: '当前环境不能读取题目图片。' }),
+      withConversation: async (_provider, action) => action(), ...environment };
+    const pending = typeof localStorage === 'undefined' ? { batch: null, prompt: '', error: '' } : restorePending(this.pendingKey());
     let provider: WebProvider = 'deepseek';
-    try { const saved = pending.batch?.provider || localStorage.getItem('studypilot-web-ai-provider'); provider = WEB_AI_PROVIDERS.find(item => item.id === saved)?.id || provider; } catch { /* Optional preference. */ }
+    try { const saved = pending.batch?.provider || localStorage.getItem(this.env.sessionId ? `${this.pendingKey()}:provider` : 'studypilot-web-ai-provider'); provider = WEB_AI_PROVIDERS.find(item => item.id === saved)?.id || provider; } catch { /* Optional preference. */ }
     this.state = { provider, mode: 'internal', flow: 'automatic', selected: this.env.store.getState().questions.map(q => q.hash),
       batch: pending.batch, prompt: pending.prompt, message: pending.error, reply: '', busy: false, paused: false,
       imported: false, visible: false, canRetry: false, position: pending.batch ? 1 : 0, remaining: [], skipped: [], completedItems: [],
-      aiTab: null, source: null, attemptedRequest: '', runId: '', phase: 'idle' };
+      aiTab: null, source: this.env.initialSource, attemptedRequest: '', runId: '', phase: 'idle' };
   }
+
+  private pendingKey() { return this.env.sessionId ? `${PENDING_KEY}:${this.env.sessionId}` : PENDING_KEY; }
 
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -123,7 +137,7 @@ export class WebAIController {
     this.pausedDuration = 0;
     const token = ++this.token;
     this.ownsLock = true;
-    this.update({ busy: true, paused: false, canRetry: false, ...(this.state.flow === 'automatic' ? { visible: false } : {}), phase, runId: `web:${this.env.now()}:${token}` });
+    this.update({ busy: true, paused: false, canRetry: false, ...(this.state.flow === 'automatic' ? { visible: false } : {}), phase, runId: `web:${this.env.sessionId}:${this.env.now()}:${token}` });
     this.env.store.setAutomationRunning({ batchRunning: true });
     return token;
   }
@@ -146,12 +160,15 @@ export class WebAIController {
     this.ownsLock = false;
     this.env.store.setAutomationRunning({ batchRunning: false });
     this.update({ busy: false, paused: false });
+    this.attachments = [];
+    releaseQuestionMedia(this.env.sessionId || this.state.runId);
+    if (!this.env.sessionId) void (globalThis as any).window?.electronAPI?.releaseWebAITask?.(this.state.runId)?.catch(() => undefined);
   }
   private async perform(phase: WebRunPhase, action: (token: number) => Promise<void>) {
     const token = this.begin(phase);
     if (token === null) return;
     this.retryAction = action;
-    try { await action(token); if (token === this.token) this.retryAction = null; }
+    try { await action(token); if (token === this.token && !this.state.canRetry) this.retryAction = null; }
     catch (error) {
       if (token !== this.token) return;
       this.retryPhase = this.state.phase;
@@ -172,7 +189,7 @@ export class WebAIController {
   private monitorOptions(token: number) {
     const tab = this.state.aiTab!;
     return {
-      inspect: async (): Promise<WebPageState> => { await this.checkpoint(token); this.check(token); return this.env.browser({ action: 'inspect', provider: tab.provider, tabId: tab.id, prompt: this.state.prompt, isCancelled: () => token !== this.token }); },
+      inspect: async (): Promise<WebPageState> => { await this.checkpoint(token); this.check(token); return this.env.browser({ ...this.mediaBinding(), action: 'inspect', provider: tab.provider, tabId: tab.id, prompt: this.state.prompt, attachments: this.attachments, isCancelled: () => token !== this.token }); },
       wait: (milliseconds: number) => this.wait(milliseconds, token),
       now: () => { const now = this.env.now(); return now - this.pausedDuration - (this.pausedAt === null ? 0 : now - this.pausedAt); },
       checkCancelled: () => this.check(token), onNotice: this.notice
@@ -180,12 +197,12 @@ export class WebAIController {
   }
   private saveBatch() {
     try {
-      if (this.state.batch) localStorage.setItem(PENDING_KEY, JSON.stringify(this.state.batch)); else localStorage.removeItem(PENDING_KEY);
-      localStorage.setItem('studypilot-web-ai-provider', this.state.provider);
+      if (this.state.batch) localStorage.setItem(this.pendingKey(), JSON.stringify(this.state.batch)); else localStorage.removeItem(this.pendingKey());
+      localStorage.setItem(this.env.sessionId ? `${this.pendingKey()}:provider` : 'studypilot-web-ai-provider', this.state.provider);
     } catch { /* The in-memory workflow can continue without draft storage. */ }
   }
   private prepare(items: QuestionItem[], nextBatch: boolean) {
-    const next = prepareWebBatch(items, this.state.provider);
+    const next = prepareWebBatch(items, this.state.provider, buildWebReferences(this.referenceQuestions.length ? this.referenceQuestions : this.env.store.getState().questions, this.state.completedItems));
     this.update({ batch: next.batch, prompt: next.prompt, remaining: next.remaining, reply: '', imported: false, attemptedRequest: '',
       skipped: nextBatch ? [...this.state.skipped, ...next.skipped.filter(item => !this.state.skipped.some(old => old.questionHash === item.questionHash))] : next.skipped,
       position: nextBatch ? this.state.position + (next.batch ? 1 : 0) : next.batch ? 1 : 0 });
@@ -206,11 +223,12 @@ export class WebAIController {
   private async extract(source: BrowserSource, token: number, reset = false) {
     await this.checkpoint(token);
     this.check(token);
-    const result = await this.env.page('studypilot:extract-question-request', { targetTabId: source.tabId, expectedUrl: source.url, resetProgress: reset, isCancelled: () => token !== this.token });
+    const result = await this.env.page('studypilot:extract-question-request', { sessionId: this.env.sessionId || undefined, targetTabId: source.tabId, expectedUrl: source.url, resetProgress: reset, isCancelled: () => token !== this.token });
     this.check(token);
     if (!result.success) throw new Error(result.error || '题目抓取失败。');
     const items = (Array.isArray(result.questions) ? result.questions : result.data ? [result.data] : []).filter(Boolean);
     if (!items.length) throw new Error('当前页面未识别到可用题目。');
+    if (reset) { this.env.onQuestions(items); this.referenceQuestions = items; }
     return items;
   }
   extractQuestions = () => this.perform('extracting', async token => {
@@ -232,7 +250,7 @@ export class WebAIController {
     let created = false;
     try {
       if (this.state.aiTab?.provider !== this.state.provider) throw new Error('new tab');
-      opened = await this.env.browser({ action: 'focus', tabId: this.state.aiTab.id });
+      opened = await this.env.browser({ action: this.env.sessionId ? 'source' : 'focus', provider: this.state.provider, tabId: this.state.aiTab.id });
     } catch {
       this.check(token);
       opened = await this.env.browser({ action: 'open', provider: this.state.provider });
@@ -246,7 +264,7 @@ export class WebAIController {
         await this.checkpoint(token);
         this.check(token);
         try {
-          await this.env.browser({ action: 'focus', tabId: opened.tabId, isCancelled: () => token !== this.token });
+          await this.env.browser({ action: this.env.sessionId ? 'source' : 'focus', provider: this.state.provider, tabId: opened.tabId, isCancelled: () => token !== this.token });
           this.check(token);
           break;
         } catch (error) {
@@ -279,12 +297,44 @@ export class WebAIController {
     this.phase('idle', '网站已打开，可以发送提示词。');
   });
   private async sendAndRead(token: number, automatic: boolean) {
-    const { batch, prompt, aiTab } = this.state;
+    this.phase('preparing', '等待网站会话发送资源；其他题页任务继续运行。');
+    return this.env.withConversation(this.state.provider, () => this.sendAndReadInConversation(token, automatic));
+  }
+  private mediaBinding(): Partial<WebCommand> {
+    return this.state.batch?.questions.some(question => question.media?.length) && this.state.source
+      ? { sessionId: this.env.sessionId || this.state.runId, resourceSource: this.state.source } : {};
+  }
+  private async sendAndReadInConversation(token: number, automatic: boolean) {
+    this.check(token);
+    let { batch, prompt } = this.state;
+    const { aiTab } = this.state;
     if (!batch || !aiTab || aiTab.provider !== this.state.provider || this.state.mode !== 'internal') throw new Error('请先打开本批所选 AI 网站。');
     validateWebPrompt(prompt, batch);
     await this.checkpoint(token);
     this.check(token);
-    await this.env.browser({ action: 'focus', tabId: aiTab.id });
+    if (batch.questions.some(question => question.media?.length)) {
+      if (!this.state.source) throw new Error('含图题需要绑定原题目页面，请重新抓题。');
+      await this.env.browser({ ...this.mediaBinding(), action: 'source', tabId: this.state.source.tabId });
+      const media = await prepareQuestionMedia(this.env.sessionId || this.state.runId, batch.questions, this.env.readMedia, () => token !== this.token);
+      this.check(token);
+      if (media.failures.length) throw new Error(`第 ${media.failures[0].question.index || '?'} 题图片尚未就绪：${media.failures[0].reason}`);
+      this.attachments = media.attachments;
+      // Manual drafts can be generated before the original MIME is known.
+      // Update only attachment names, preserving any user edits in the text.
+      for (let index = 0; index < batch.questions.length; index++) {
+        const question = batch.questions[index];
+        question.media?.forEach((image, imageIndex) => {
+          const previous = mediaFileName(question, image);
+          const current = mediaFileName(media.ready[index], media.ready[index].media![imageIndex]);
+          if (previous !== current) prompt = prompt.split(previous).join(current);
+        });
+      }
+      batch = { ...batch, questions: media.ready };
+      validateWebPrompt(prompt, batch);
+      this.update({ batch, prompt });
+      this.saveBatch();
+    } else this.attachments = [];
+    if (!this.env.sessionId) await this.env.browser({ action: 'focus', tabId: aiTab.id });
     this.check(token);
     this.phase('preparing', '正在检查 AI 网页输入区。');
     this.env.store.setStatus('idle', '正在检查 AI 网页输入区。');
@@ -304,16 +354,16 @@ export class WebAIController {
     if (shouldSend) {
       this.phase('sending', '正在发送提示词。');
       this.env.store.setStatus('calling_ai', '网页 AI：发送提示词。');
-      const baseline = await this.env.browser({ action: 'prepare', provider: aiTab.provider, tabId: aiTab.id, prompt, isCancelled: () => token !== this.token }) as WebPageState;
+      const baseline = await this.env.browser({ ...this.mediaBinding(), action: 'prepare', provider: aiTab.provider, tabId: aiTab.id, prompt, attachments: this.attachments, isCancelled: () => token !== this.token }) as WebPageState;
       this.check(token);
       this.sendState = { requestId: batch.requestId, baseline: baseline.text, baselineKey: before.messageKey, uncertain: false, confirmed: false };
-      await sendWebPrompt({ ...options, baseline: baseline.text,
+      await sendWebPrompt({ ...options, baseline: baseline.text, requireAttachmentReceipt: this.attachments.length > 0,
         wait: () => this.wait(500, token), onManualSend: this.notice,
         send: async () => {
           await this.checkpoint(token);
           this.check(token);
           try {
-            const result = await this.env.browser({ action: 'send', provider: aiTab.provider, tabId: aiTab.id, prompt, isCancelled: () => token !== this.token }) as WebPageState;
+            const result = await this.env.browser({ ...this.mediaBinding(), action: 'send', provider: aiTab.provider, tabId: aiTab.id, prompt, attachments: this.attachments, isCancelled: () => token !== this.token }) as WebPageState;
             this.check(token);
             if (result.attempted) this.update({ attemptedRequest: batch.requestId });
             return result;
@@ -383,9 +433,22 @@ export class WebAIController {
     await this.checkpoint(token);
     this.check(token);
     this.phase('checking_source', '正在核对原题目页面。');
-    await this.env.browser({ action: 'focus', tabId: source.tabId });
+    if (!this.env.sessionId) await this.env.browser({ action: 'focus', tabId: source.tabId });
     this.check(token);
-    const actual = await this.extract(source, token);
+    let actual: QuestionItem[];
+    for (;;) {
+      await this.checkpoint(token);
+      try {
+        actual = await this.extract(source, token);
+        if (!sameQuestions(items.map(item => item.question), actual)) throw new Error('原题目页面身份已变化，等待原题恢复。');
+        break;
+      } catch (error) {
+        if (!this.env.sessionId || !/原题目页面|原标签|尚未就绪|重新加载|未.*识别到.*题目/.test((error as Error).message)) throw error;
+        if (this.state.phase !== 'waiting_source') this.notice('答案已准备，等待原题目页面恢复；其他页面任务继续运行。');
+        this.phase('waiting_source', '答案已准备，等待原题目页面恢复。');
+        await this.wait(1500, token);
+      }
+    }
     this.check(token);
     if (!sameQuestions(items.map(item => item.question), actual)) throw new Error('原页面题目或选项已变化，已停止填入；答案保留在题库。');
     for (const item of items) {
@@ -394,7 +457,13 @@ export class WebAIController {
       this.check(token);
       this.phase('applying', `正在填入第 ${item.question.index || actual.findIndex(q => q.hash === item.question.hash) + 1} 题。`);
       const question = actual.find(candidate => candidate.hash === item.question.hash)!;
-      const result = await this.env.page('studypilot:apply-answers', { items: [{ ...item, question }], targetTabId: source.tabId, expectedUrl: source.url, isCancelled: () => token !== this.token });
+      let result: PageResult;
+      try {
+        result = await this.env.page('studypilot:apply-answers', { sessionId: this.env.sessionId || undefined, items: [{ ...item, question }], targetTabId: source.tabId, expectedUrl: source.url, isCancelled: () => token !== this.token });
+      } catch (error) {
+        if (this.env.sessionId && /原题目页面|原标签|尚未就绪|重新加载/.test((error as Error).message)) { await this.fill(items, token, handled); return; }
+        throw error;
+      }
       this.check(token);
       if (!result.success) throw new Error(result.error || '答案填入失败。');
       if (result.partial || result.skipped) this.env.activity.skip(this.state.runId, [question.hash]);
@@ -427,7 +496,7 @@ export class WebAIController {
     });
   };
   startAutomatic = () => {
-    const run: AutomaticRun = { stage: 'extract', items: [], remaining: [], first: true, answers: [], source: null, progress: null };
+    const run: AutomaticRun = { stage: 'extract', items: [], remaining: [], first: true, answers: [], source: null, progress: null, blocked: [] };
     const handled = new Set<string>();
     return this.perform('extracting', async token => {
       // Each explicit retry gets a fresh bounded allowance for unresolved questions.
@@ -438,7 +507,6 @@ export class WebAIController {
       if (run.progress) this.beginActivity('web-auto', run.progress.targets, run.progress);
       else {
         this.update({ flow: 'automatic', completedItems: [], skipped: [], position: 0, reply: '', imported: false, batch: null, prompt: '', attemptedRequest: '' });
-        this.beginActivity('web-auto', []);
       }
       try {
         for (;;) {
@@ -449,11 +517,22 @@ export class WebAIController {
             run.source ||= await this.env.browser({ action: 'source' }) as BrowserSource;
             this.check(token);
             this.update({ source: run.source });
-            run.items = await this.extract(run.source, token, true);
+            const captured = await this.extract(run.source, token, true);
+            run.items = captured;
             this.check(token);
-            this.update({ selected: run.items.map(q => q.hash) });
-            this.env.activity.addTargets(this.state.runId, run.items.map(q => q.hash));
+            this.update({ selected: captured.map(q => q.hash) });
+            this.beginActivity('web-auto', run.items.map(q => q.hash));
             run.remaining = run.items;
+            run.stage = 'media';
+          }
+          if (run.stage === 'media') {
+            this.phase('preparing', '正在准备题目图片。');
+            await this.env.browser({ action: 'source', tabId: run.source!.tabId, sessionId: this.env.sessionId || this.state.runId, resourceSource: run.source! });
+            const media = await prepareQuestionMedia(this.env.sessionId || this.state.runId, run.remaining, this.env.readMedia, () => token !== this.token);
+            this.check(token);
+            run.blocked = media.failures.map(item => item.question);
+            media.failures.forEach(item => this.env.store.addLog('warn', `第 ${item.question.index || '?'} 题图片待处理：${item.reason}`));
+            run.remaining = media.ready;
             run.stage = 'prepare';
           }
           if (run.stage === 'prepare') {
@@ -473,9 +552,27 @@ export class WebAIController {
             run.stage = 'send';
           }
           if (run.stage === 'send') {
-            const preview = await this.sendAndRead(token, true);
-            run.answers = preview!.items;
-            run.stage = 'import';
+            try {
+              const preview = await this.sendAndRead(token, true);
+              const unsafeImages = preview.items.filter(item => item.question.media?.length && item.answer.warnings.length > 0);
+              run.blocked.push(...unsafeImages.map(item => item.question));
+              run.answers = preview.items.filter(item => !unsafeImages.includes(item));
+              run.stage = 'import';
+            } catch (error) {
+              // A rejected upload has not sent a message. Defer these image
+              // questions and continue the remaining valid text questions.
+              const media = this.state.batch!.questions.filter(question => question.media?.length);
+              if (!media.length || this.state.attemptedRequest === this.state.batch!.requestId || !/图片|附件|上传/.test((error as Error).message)) throw error;
+              run.blocked.push(...media);
+              run.remaining = [...this.state.batch!.questions.filter(question => !question.media?.length), ...run.remaining];
+              // Keep the failed draft available for inspection, and use a new
+              // conversation for unrelated valid questions.
+              this.update({ aiTab: null });
+              this.sendState = null;
+              this.env.store.addLog('warn', `本批含图题等待处理：${(error as Error).message}`);
+              run.stage = 'prepare';
+              continue;
+            }
           }
           await this.checkpoint(token);
           this.check(token);
@@ -483,7 +580,7 @@ export class WebAIController {
             this.phase('importing', '正在录入已校验答案。');
             if (run.answers.length) this.importItems(run.answers);
             const answered = new Set(run.answers.map(item => item.question.hash));
-            const missing = this.state.batch!.questions.filter(question => !answered.has(question.hash));
+            const missing = this.state.batch!.questions.filter(question => !answered.has(question.hash) && !run.blocked.some(item => item.hash === question.hash));
             run.remaining = [...missing, ...run.remaining];
             this.update({ remaining: run.remaining });
             run.stage = 'prepare';
@@ -508,12 +605,24 @@ export class WebAIController {
           if (run.stage === 'next') break;
         }
       } catch (error) {
-        run.progress = this.env.activity.getSnapshot().task;
+        const progress = this.env.activity.getSnapshot().task;
+        run.progress = progress?.id === this.state.runId ? progress : null;
         throw error;
       }
       const task = this.env.activity.getSnapshot().task!;
       const complete = task.targets.length > 0 && task.applied.length === task.targets.length && !task.skipped.length;
       const message = complete ? `全部 ${run.items.length} 道题已完成并填回，未提交。` : `已填入 ${task.applied.length}/${run.items.length} 题，${task.skipped.length} 题已跳过，请查看。`;
+      if (run.blocked.length) {
+        run.remaining = run.blocked;
+        run.stage = 'media';
+        run.progress = task;
+        const message = `已填入 ${task.applied.length}/${run.items.length} 题；${run.blocked.length} 道含图题等待处理，点击重试只补齐待处理题。`;
+        this.update({ visible: true, canRetry: true });
+        this.phase('partial', message);
+        this.env.activity.finish(this.state.runId, 'partial', message);
+        this.env.store.setStatus('done', message);
+        return;
+      }
       this.update({ visible: !complete });
       this.phase(complete ? 'completed' : 'partial', message);
       this.env.activity.finish(this.state.runId, complete ? 'completed' : 'partial', message);
@@ -543,6 +652,9 @@ export class WebAIController {
     this.token++;
     this.retryAction = null;
     this.abort.abort();
+    releaseQuestionMedia(this.env.sessionId || id);
+    if (!this.env.sessionId) void (globalThis as any).window?.electronAPI?.releaseWebAITask?.(id)?.catch(() => undefined);
+    this.attachments = [];
     if (this.ownsLock) {
       this.ownsLock = false;
       this.env.store.setStatus('idle', '网页 AI 操作已停止。');

@@ -85,16 +85,31 @@ ipcRenderer.on('studypilot:snapshot', () => {
   }
 });
 
-ipcRenderer.on('studypilot:extract-question', () => {
+let webDocumentId = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+ipcRenderer.on('studypilot:web-document-request', (_, renew?: boolean) => {
+  if (renew) webDocumentId = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  ipcRenderer.sendToHost('studypilot:web-document', webDocumentId);
+});
+let webApplyQueue: Promise<unknown> = Promise.resolve();
+const cancelledWebOperations = new Set<string>();
+ipcRenderer.on('studypilot:web-cancel-operation', (_, operationId: string) => {
+  cancelledWebOperations.add(operationId);
+  setTimeout(() => cancelledWebOperations.delete(operationId), 60000);
+});
+function webReply(payload: any, result: Record<string, unknown>) {
+  return payload?.operationId ? { ...result, sessionId: payload.sessionId, operationId: payload.operationId, targetTabId: payload.targetTabId, documentId: webDocumentId } : result;
+}
+ipcRenderer.on('studypilot:extract-question', (_, payload?: any) => {
   try {
-    const questions = extractQuestions();
+    if (payload?.operationId && payload.documentId !== webDocumentId) throw new Error('原题目页面已重新加载。');
+    const questions = extractQuestions(payload?.sessionId ? { webEnhanced: true } : undefined);
     if (questions.length === 0) {
-      ipcRenderer.sendToHost('studypilot:question-result', { success: false, error: '未在当前页面识别到题目。' });
+      ipcRenderer.sendToHost('studypilot:question-result', webReply(payload, { success: false, error: '未在当前页面识别到题目。' }));
       return;
     }
-    ipcRenderer.sendToHost('studypilot:question-result', { success: true, data: questions[0], questions });
+    ipcRenderer.sendToHost('studypilot:question-result', webReply(payload, { success: true, data: questions[0], questions }));
   } catch (error: any) {
-    ipcRenderer.sendToHost('studypilot:question-result', { success: false, error: error.message });
+    ipcRenderer.sendToHost('studypilot:question-result', webReply(payload, { success: false, error: error.message }));
   }
 });
 
@@ -103,13 +118,22 @@ ipcRenderer.on('studypilot:execute-plan', async (_, plan: AutomationPlan) => {
   ipcRenderer.sendToHost('studypilot:execute-result', result);
 });
 
-ipcRenderer.on('studypilot:apply-answer', async (_, payload: AnswerApplyPayload) => {
+ipcRenderer.on('studypilot:apply-answer', (_, payload: AnswerApplyPayload & { operationId?: string; documentId?: string; expiresAt?: number }) => {
+  const apply = async () => {
   try {
+    if (payload?.operationId && payload.documentId !== webDocumentId) throw new Error('原题目页面已重新加载。');
+    if (payload.operationId && (cancelledWebOperations.has(payload.operationId) || Date.now() >= (payload.expiresAt || Infinity))) throw new Error('填入操作已取消或超时。');
     const result = await applyAnswerV2(payload);
-    ipcRenderer.sendToHost('studypilot:apply-answer-result', result);
+    ipcRenderer.sendToHost('studypilot:apply-answer-result', webReply(payload, result));
   } catch (error: any) {
-    ipcRenderer.sendToHost('studypilot:apply-answer-result', { success: false, error: error?.message || 'unknown' });
+    ipcRenderer.sendToHost('studypilot:apply-answer-result', webReply(payload, { success: false, error: error?.message || 'unknown' }));
   }
+  finally { if (payload.operationId) cancelledWebOperations.delete(payload.operationId); }
+  };
+  // A cancelled host request may finish before the page editor finishes. Keep
+  // this page-side barrier until the underlying write has actually settled.
+  if (payload.operationId) webApplyQueue = webApplyQueue.catch(() => undefined).then(apply);
+  else void apply();
 });
 
 ipcRenderer.on('studypilot:exam-next-question', async () => {

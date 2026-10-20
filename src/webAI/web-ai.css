@@ -154,3 +154,5 @@
   :is(.web-ai-inline, .web-ai-dialog, .web-ai-task) button:not(:disabled):is(:hover, :active) { transform: none; transition: none; }
 }
 
+.web-ai-task-picker { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.web-ai-task-picker select { width: 100%; padding: 8px; color: var(--text-primary); background: var(--bg-panel-solid); border: 1px solid var(--border-glass); border-radius: 8px; }

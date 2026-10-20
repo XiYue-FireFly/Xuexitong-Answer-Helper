@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { WebAIController } from '../src/webAI/WebAIController';
+import { WebAIController, type Environment } from '../src/webAI/WebAIController';
 import { AnswerActivityStore } from '../src/answerActivity/activityStore';
 import { appStore, type QuestionItem } from '../src/store/appStore';
 import type { WebCommand, WebPageState } from '../src/webAI/browserBridge';
 
 const question: QuestionItem = { id: 'one', hash: 'one', question: 'Choose apple', options: ['A. Apple', 'B. Banana'], type: 'single', source: 'webview', pageUrl: 'https://school.test/work', capturedAt: 0 };
 
-function scenario(items: QuestionItem[] = [question]) {
+function scenario(items: QuestionItem[] = [question], environment: Partial<Environment> = {}) {
   let state = { ...appStore.getState(), questions: items, settings: { ...appStore.getState().settings, allowRealPageAutomation: true }, batchRunning: false, liveRunning: false, status: 'idle' as ReturnType<typeof appStore.getState>['status'] };
   let time = 0;
   let prepared: { requestId: string; questions: { id: string }[] } | null = null;
@@ -30,6 +30,7 @@ function scenario(items: QuestionItem[] = [question]) {
   let answerText = (value: string, _attempt: number) => value;
   let pageState = (value: WebPageState, _sent: boolean, _time: number) => value;
   let changed = false;
+  let rejectUpload = false;
   let applyResult = { success: true } as { success: boolean; skipped?: number; partial?: boolean; error?: string };
   let afterWait: (() => void | Promise<void>) | undefined;
   let beforeExtract: (() => Promise<void>) | undefined;
@@ -50,6 +51,7 @@ function scenario(items: QuestionItem[] = [question]) {
     if (command.action === 'source') return { tabId: 'source', url: question.pageUrl };
     if (command.action === 'open' || command.action === 'focus') return { tabId: command.tabId || 'ai', url: command.tabId === 'source' ? question.pageUrl : 'https://chat.deepseek.com/' };
     if (command.action === 'prepare') {
+      if (rejectUpload && command.attachments?.length) throw new Error('图片附件上传失败');
       prepared = JSON.parse(command.prompt!.slice(command.prompt!.lastIndexOf('\n\n{') + 2));
       sent = false;
     }
@@ -58,6 +60,7 @@ function scenario(items: QuestionItem[] = [question]) {
       ready: composerReady, inputEnabled: composerEnabled, authState, busy: false, generationState: 'finished', messageKey: prepared?.requestId || '',
       inputText: sent || asAttachment && prepared ? '' : formatDraft((command.prompt || (prepared ? controller.getSnapshot().prompt : 'draft')).replace(/\r\n?/g, '\n').replace(/[\u200B\uFEFF]/g, '')), attempted: command.action === 'send',
       promptReady: Boolean(asAttachment && prepared && !sent), attachmentState: asAttachment && prepared && !sent ? 'ready' : undefined,
+      sentReceipt: sent,
       text: sent && prepared ? answerText(JSON.stringify({ requestId: prepared.requestId, answers: answerRows(prepared.questions.map(item => ({
         id: item.id, answer: 'Apple', choiceLabels: ['A'], matchedOptions: ['Apple'], confidence, analysis: '', warnings: []
       })), sendCount) }), sendCount) : ''
@@ -75,7 +78,7 @@ function scenario(items: QuestionItem[] = [question]) {
       await beforeApply?.();
       for (const item of detail.items as { question: QuestionItem }[]) applied.push(item.question.hash);
       return applyResult;
-    }
+    }, ...environment
   });
   return { controller, activity, commands, applied, imported,
     setLogin: (value: boolean) => { authState = value ? 'ready' : 'required'; }, setConfidence: (value: number) => { confidence = value; },
@@ -97,10 +100,111 @@ function scenario(items: QuestionItem[] = [question]) {
     onApply: (callback: () => Promise<void>) => { beforeApply = callback; },
     setApplyResult: (result: typeof applyResult) => { applyResult = result; },
     setExternalBatchRunning: () => { state = { ...state, batchRunning: true }; }
+    , rejectUpload: (value: boolean) => { rejectUpload = value; }
   };
 }
 
 describe('Web automatic controller', () => {
+  it('sends every mixed-type question again despite old answers and a previous manual subset', async () => {
+    const types = ['single', 'multiple', 'judgement', 'completion', 'essay'] as const;
+    const items = types.map((type, index) => ({ ...question, id: `item-${index}`, hash: `item-${index}`, index: index + 1,
+      question: `真实题干 ${index + 1}`, type, options: index < 2 ? question.options : [],
+      webReference: { pageTitle: '已作答的混合作业', groupKey: 'one', sourceQuestionId: `source-${index}`, filledValues: ['旧填写'] } }));
+    const test = scenario(items);
+    test.controller.edit({ selected: [items[4].hash] });
+    test.setAnswerRows(rows => rows.map((row, index) => ({ ...row, answer: index === 2 ? 'true' : index >= 3 ? `新答案 ${index + 1}` : 'Apple',
+      choiceLabels: index < 2 ? ['A'] : [], matchedOptions: index < 2 ? ['Apple'] : [] })));
+    await test.controller.startAutomatic();
+    const command = test.commands.find(command => command.action === 'prepare')!;
+    const sent = JSON.parse(command.prompt!.slice(command.prompt!.lastIndexOf('\n\n{') + 2));
+    expect(sent.questions.map((row: any) => [row.type, row.question])).toEqual(items.map(item => [item.type, item.question]));
+    expect(test.imported).toEqual(items.map(item => item.hash));
+    expect(test.applied).toEqual(items.map(item => item.hash));
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+  });
+  it('preserves manual prompt edits while updating actual JPEG attachment names before one send', async () => {
+    const image = { ...question, media: [{ id: 'one', role: 'stem' as const, sourceUrl: 'https://school.test/image', alt: '', selector: '#image', status: 'discovered' as const }] };
+    const test = scenario([image], { readMedia: async () => ({ ok: true, bytes: [1, 2], mime: 'image/jpeg', digest: 'jpeg' }) });
+    test.controller.edit({ flow: 'manual' });
+    await test.controller.extractQuestions(); test.controller.generate();
+    test.controller.edit({ prompt: '请结合实验材料认真分析。\n' + test.controller.getSnapshot().prompt });
+    await test.controller.openWebsite(); await test.controller.send();
+    const prepared = test.commands.find(command => command.action === 'prepare')!;
+    expect(prepared.prompt).toContain('请结合实验材料认真分析。');
+    expect(prepared.prompt).toContain('sp-one-one.jpg');
+    expect(prepared.attachments?.[0]).toMatchObject({ name: 'sp-one-one.jpg', mime: 'image/jpeg' });
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(1);
+    expect(test.applied).toEqual([]);
+  });
+  it('does not exclude choice questions because of text metadata captured alongside selected options', async () => {
+    const selectedChoice = { ...question, webReference: { pageTitle: '作业', groupKey: 'one', sourceQuestionId: 'first', filledValues: ['C'] } };
+    const test = scenario([selectedChoice]); await test.controller.startAutomatic();
+    expect(test.applied).toEqual(['one']);
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+  });
+  it.each(['completion', 'essay'] as const)('reextracts and reanswers every already filled %s question without clearing it first', async type => {
+    const filled = { ...question, type, webReference: { pageTitle: '报告', groupKey: 'one', sourceQuestionId: 'first', filledValues: ['已有结论'] } };
+    const test = scenario([filled]); await test.controller.startAutomatic();
+    expect(test.controller.getSnapshot()).toMatchObject({ phase: 'completed', busy: false, selected: ['one'] });
+    expect(test.controller.getSnapshot().message).not.toContain('0/0');
+    expect(test.activity.getSnapshot().task).toMatchObject({ targets: ['one'], applied: ['one'], skipped: [], outcome: 'completed' });
+    expect(test.applied).toEqual(['one']); expect(test.imported).toEqual(['one']);
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(1);
+  });
+  it('reextracts and reanswers filled questions on retry without restoring the previous run progress', async () => {
+    const items = [{ ...question }];
+    const test = scenario(items); await test.controller.startAutomatic();
+    let fail = true;
+    test.onExtract(async () => { if (fail) { fail = false; throw new Error('抓题暂不可用'); } });
+    await test.controller.startAutomatic();
+    items.splice(0, 1, { ...question, type: 'essay', webReference: { pageTitle: '报告', groupKey: 'one', sourceQuestionId: 'first', filledValues: ['已有结论'] } } as typeof items[number]);
+    await test.controller.retry();
+    expect(test.controller.getSnapshot()).toMatchObject({ phase: 'completed', busy: false });
+    expect(test.activity.getSnapshot().task).toMatchObject({ targets: ['one'], applied: ['one'], skipped: [], outcome: 'completed' });
+    expect(test.applied).toEqual(['one', 'one']);
+  });
+  it('reanswers both filled and unfilled report questions while retaining old answers as context', async () => {
+    const filled = { ...question, type: 'completion' as const, webReference: { pageTitle: '报告', groupKey: 'one', sourceQuestionId: 'first', filledValues: ['568B'] } };
+    const next = { ...question, hash: 'conclusion', webReference: { ...filled.webReference, sourceQuestionId: 'second', filledValues: [] } };
+    const test = scenario([filled, next]); await test.controller.startAutomatic();
+    expect(test.applied).toEqual(['one', 'conclusion']); expect(test.commands.find(command => command.action === 'prepare')?.prompt).toContain('568B');
+    expect(test.activity.getSnapshot().task?.targets).toEqual(['one', 'conclusion']);
+    expect(test.controller.getSnapshot().selected).toEqual(['one', 'conclusion']);
+  });
+  it('manual extraction includes filled questions and writes new answers when the user approves filling', async () => {
+    const filled = { ...question, type: 'essay' as const, webReference: { pageTitle: '报告', groupKey: 'one', sourceQuestionId: 'first', filledValues: ['已有结论'] } };
+    const test = scenario([filled]); test.controller.edit({ flow: 'manual' });
+    await test.controller.extractQuestions(); test.controller.generate();
+    expect(test.controller.getSnapshot().selected).toEqual(['one']);
+    expect(test.controller.getSnapshot().batch?.questions.map(item => item.hash)).toEqual(['one']);
+    await test.controller.openWebsite(); await test.controller.send(); await test.controller.read();
+    expect(test.applied).toEqual([]);
+    test.controller.importPreview();
+    await test.controller.approveFill();
+    expect(test.applied).toEqual(['one']);
+    expect(test.activity.getSnapshot().task).toMatchObject({ targets: ['one'], applied: ['one'], skipped: [], outcome: 'completed' });
+  });
+  it('fills valid text, keeps a failed image pending, and retries only that image question', async () => {
+    let readable = false;
+    const image = { ...question, hash: 'image', media: [{ id: 'one', role: 'stem' as const, sourceUrl: 'https://school.test/image', alt: '', selector: '#image', status: 'discovered' as const }] };
+    const test = scenario([image, question], { readMedia: async () => readable ? { ok: true, bytes: [1], mime: 'image/png', digest: 'one' } : { ok: false, error: '403' } });
+    await test.controller.startAutomatic();
+    expect(test.applied).toEqual(['one']); expect(test.controller.getSnapshot()).toMatchObject({ phase: 'partial', canRetry: true });
+    readable = true; await test.controller.retry();
+    expect(test.applied, test.controller.getSnapshot().message).toEqual(['one', 'image']); expect(test.commands.filter(command => command.action === 'send')).toHaveLength(2);
+    expect(test.controller.getSnapshot().phase).toBe('completed');
+    const source = test.commands.find(command => command.action === 'source' && command.resourceSource);
+    expect(source?.sessionId).toBeTruthy();
+  });
+  it('abandons failed upload draft and completes text questions before image retry', async () => {
+    const image = { ...question, hash: 'image', media: [{ id: 'one', role: 'stem' as const, sourceUrl: 'https://school.test/image', alt: '', selector: '#image', status: 'discovered' as const }] };
+    const test = scenario([image, question], { readMedia: async () => ({ ok: true, bytes: [1], mime: 'image/png', digest: 'one' }) });
+    test.rejectUpload(true); await test.controller.startAutomatic();
+    expect(test.applied).toEqual(['one']); expect(test.controller.getSnapshot().phase).toBe('partial');
+    expect(test.commands.filter(command => command.action === 'open')).toHaveLength(2);
+    test.rejectUpload(false); await test.controller.retry();
+    expect(test.applied, test.controller.getSnapshot().message).toEqual(['one', 'image']); expect(test.controller.getSnapshot().phase).toBe('completed');
+  });
   it.each(['deepseek', 'doubao', 'qwen'] as const)('automatically uses a guest %s composer without account confirmation', async provider => {
     const test = scenario(); test.controller.edit({ provider });
     test.setAuthState('unknown');

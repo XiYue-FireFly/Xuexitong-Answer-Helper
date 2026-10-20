@@ -58,4 +58,17 @@ describe('判断题展示', () => {
     expect(getEntryType(item)).toBe('single');
     expect(item.options.map((option, index) => isCorrectOption(item, option, index))).toEqual([false, true]);
   });
+  it('结构化选项字母优先，不把答案单位 b/s 当作 B 选项', () => {
+    const item = entry('4800b/s', ['A. 1200b/s', 'B. 2400b/s', 'C. 3600b/s', 'D. 4800b/s']);
+    item.answer.choiceLabels = ['D'];
+    expect(item.options.map((option, index) => isCorrectOption(item, option, index))).toEqual([false, false, false, true]);
+  });
+  it('旧题库缺少选项字母时按完整答案文本匹配，忽略单位内的字母', () => {
+    const item = entry('4800b/s', ['A. 1200b/s', 'B. 2400b/s', 'C. 3600b/s', 'D. 4800b/s']);
+    expect(item.options.map((option, index) => isCorrectOption(item, option, index))).toEqual([false, false, false, true]);
+  });
+  it('选择题正文中的 A 级不被误认作 A 选项', () => {
+    const item = entry('A 级', ['A. B 级', 'B. A 级']);
+    expect(item.options.map((option, index) => isCorrectOption(item, option, index))).toEqual([false, true]);
+  });
 });

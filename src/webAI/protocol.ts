@@ -1,4 +1,6 @@
 import type { AIAnswerResult, QuestionItem } from '../store/appStore';
+import type { WebPromptReference } from './questionContext';
+import { buildMediaManifest } from './questionMedia';
 
 export const WEB_AI_PROVIDERS = [
   { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com/' },
@@ -6,7 +8,7 @@ export const WEB_AI_PROVIDERS = [
   { id: 'qwen', name: '千问', url: 'https://www.qianwen.com/' }
 ] as const;
 export type WebProvider = typeof WEB_AI_PROVIDERS[number]['id'];
-export type WebBatch = { requestId: string; questions: QuestionItem[]; provider?: WebProvider };
+export type WebBatch = { requestId: string; questions: QuestionItem[]; provider?: WebProvider; references?: Record<string, WebPromptReference> };
 export type AnswerItem = { question: QuestionItem; answer: AIAnswerResult };
 export type AnswerPreview = { items: AnswerItem[]; errors: string[]; automatic: boolean };
 export type SkippedWebQuestion = {
@@ -24,7 +26,7 @@ export type PreparedWebBatch = {
 export const WEB_AI_PROMPT_LIMIT = 300000;
 const PROMPT_JSON_SUFFIX = '\n  ]\n}';
 
-export function prepareWebBatch(questions: QuestionItem[], provider: WebProvider): PreparedWebBatch {
+export function prepareWebBatch(questions: QuestionItem[], provider: WebProvider, references?: Record<string, WebPromptReference>): PreparedWebBatch {
   if (!questions.length) throw new Error('请先抓题并选择题目。');
   const requestId = crypto.randomUUID();
   const accepted: QuestionItem[] = [];
@@ -37,7 +39,7 @@ export function prepareWebBatch(questions: QuestionItem[], provider: WebProvider
     const question = questions[cursor];
     // Serialize each candidate once as q1, so the standalone budget also
     // includes the real context, options, JSON escaping and UTF-16 length.
-    const singleRowLength = prettyPromptQuestion(question, 1).length;
+    const singleRowLength = prettyPromptQuestion(question, 1, references?.[question.hash]).length;
     const standaloneLength = overhead + singleRowLength;
     if (standaloneLength > WEB_AI_PROMPT_LIMIT) {
       skipped.push({ questionHash: question.hash, questionIndex: question.index ?? cursor + 1,
@@ -46,6 +48,7 @@ export function prepareWebBatch(questions: QuestionItem[], provider: WebProvider
       continue;
     }
     const count = accepted.length + 1;
+    if (accepted.length && accepted.reduce((sum, item) => sum + (item.media?.length || 0), 0) + (question.media?.length || 0) > 8) break;
     const candidateRowsLength = rowsLength + singleRowLength + String(count).length - 1;
     const candidateLength = overhead + candidateRowsLength + (count - 1) * 2 +
       promptCountInstruction(count).length - singleCountLength;
@@ -56,7 +59,8 @@ export function prepareWebBatch(questions: QuestionItem[], provider: WebProvider
     cursor += 1;
   }
   if (!accepted.length) return { batch: null, prompt: '', remaining: [], skipped };
-  const batch: WebBatch = { requestId, questions: structuredClone(accepted), provider };
+  const batch: WebBatch = { requestId, questions: structuredClone(accepted), provider,
+    ...(references ? { references: Object.fromEntries(accepted.filter(q => references[q.hash]).map(q => [q.hash, references[q.hash]])) } : {}) };
   const prompt = buildWebPrompt(batch);
   validateWebPrompt(prompt, batch);
   return { batch, prompt, remaining: structuredClone(questions.slice(cursor)), skipped };
@@ -105,7 +109,7 @@ function promptJSONPrefix(requestId: string) {
   return `{\n  "requestId": ${JSON.stringify(requestId)},\n  "questions": [\n`;
 }
 
-function prettyPromptQuestion(question: QuestionItem, number: number) {
+function prettyPromptQuestion(question: QuestionItem, number: number, reference?: WebPromptReference) {
   const rules = {
     single: ['单选题', '仅返回唯一一个选项，choiceLabels 和 matchedOptions 数组长度必须都是 1，不得返回多个候选答案。'],
     multiple: ['多选题', '返回所有正确选项，choiceLabels 和 matchedOptions 逐项对应。'],
@@ -117,12 +121,14 @@ function prettyPromptQuestion(question: QuestionItem, number: number) {
   const [typeName, answerRule] = rules[question.type] || rules.unknown;
   return JSON.stringify({
     id: `q${number}`, type: question.type, typeName, answerRule, question: question.question,
-    context: question.context || '', options: optionPairs(question)
+    context: reference ? '' : question.context || '', options: optionPairs(question),
+    ...(reference ? { reference, referenceRule: '仅参考同组上下文；previousAnswers 标明来源，不得编造未知实验观测值。' } : {}),
+    ...(question.media?.length ? { images: buildMediaManifest(question), imageRule: '按文件名关联本消息图片附件，缺图或无法读图时说明 warnings，不猜测。' } : {})
   }, null, 2).split('\n').map(line => `    ${line}`).join('\n');
 }
 
 export function buildWebPrompt(batch: WebBatch) {
-  const rows = batch.questions.map((question, index) => prettyPromptQuestion(question, index + 1));
+  const rows = batch.questions.map((question, index) => prettyPromptQuestion(question, index + 1, batch.references?.[question.hash]));
   const json = rows.length
     ? promptJSONPrefix(batch.requestId) + rows.join(',\n') + PROMPT_JSON_SUFFIX
     : JSON.stringify({ requestId: batch.requestId, questions: [] }, null, 2);

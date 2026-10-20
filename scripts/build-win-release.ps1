@@ -25,8 +25,11 @@ $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
 Push-Location $root
 try {
   npm run build
+  if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
   npm run electron:build
+  if ($LASTEXITCODE -ne 0) { throw "Electron build failed with exit code $LASTEXITCODE." }
   npx electron-builder --win nsis --config.win.signAndEditExecutable=false
+  if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed with exit code $LASTEXITCODE." }
 
   $installer = Get-ChildItem -LiteralPath $releaseDir -Filter "*.exe" |
     Where-Object { $_.Name -like "*Setup*$version*.exe" } |
@@ -42,6 +45,7 @@ try {
   }
 
   $asarList = npx asar list $asarPath
+  if ($LASTEXITCODE -ne 0) { throw "Packaged archive listing failed with exit code $LASTEXITCODE." }
   $requiredEntries = @(
     '\dist\index.html',
     '\dist-electron\main.js',
@@ -56,6 +60,7 @@ try {
   }
 
   node scripts/verify-webview-preload-bundle.mjs $asarPath
+  if ($LASTEXITCODE -ne 0) { throw "Packaged preload verification failed with exit code $LASTEXITCODE." }
 
   $releaseName = "Xuexitong-Answer-Helper-v$version-win-x64-setup.exe"
   $releaseCopyPath = Join-Path $releaseDir $releaseName

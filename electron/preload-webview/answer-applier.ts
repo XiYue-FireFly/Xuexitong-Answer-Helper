@@ -5,6 +5,7 @@ import { reportWebviewError } from './bridge';
 import { cleanText, cssEscape, dispatchInput, isVisible, normalizeText, optionLetter, selectedClassHit, selectorFor, uniqueElements } from './dom-utils';
 import { dispatchUserClick } from './interaction';
 import { callPageHook } from './page-bridge';
+import { QUESTION_EDITOR_CHROME_SELECTOR } from './question-reference';
 import { extractOptionTargets, nearestClickableOption, optionTargetFromElement, readQuestionTypeHint } from './question-extractor';
 
 function fallbackAnswerTargets(payload: AnswerApplyPayload): QuestionOptionTarget[] {
@@ -426,6 +427,7 @@ function fillElementValue(element: HTMLElement, value: string) {
 }
 
 function isCompletionField(element: HTMLElement) {
+  if (element.closest(QUESTION_EDITOR_CHROME_SELECTOR)) return false;
   if (!isVisible(element)) return false;
   if (element instanceof HTMLInputElement) {
     const type = (element.getAttribute('type') || 'text').toLowerCase();
@@ -451,6 +453,12 @@ function cleanCompletionValue(rawValue: string) {
 }
 
 function completionValuesFromPayload(payload: AnswerApplyPayload, fieldCount = 1) {
+  // A prose answer is one value. Semicolons, numbered paragraphs and words
+  // such as "说明" belong to the answer, not to a list of separate blanks.
+  if (fieldCount === 1 || payload.question?.type === 'essay') {
+    const value = String(payload.answer || (payload.matchedOptions || []).join('\n')).replace(/\r\n?/g, '\n');
+    return value.trim() ? [value] : [];
+  }
   const raw = [
     payload.answer,
     ...(payload.matchedOptions || [])

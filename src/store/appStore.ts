@@ -52,6 +52,8 @@ export interface QuestionItem {
   pageUrl?: string;
   pageTitle?: string;
   context?: string;
+  webReference?: import('../../electron/preload-webview/types').WebReference;
+  media?: import('../../electron/preload-webview/types').QuestionMedia[];
   capturedAt: number;
   index?: number;
   selector?: string;
@@ -1324,10 +1326,12 @@ class GlobalStore {
     return { imported, skipped };
   }
 
-  upsertQuestionBank(question: QuestionItem, answer: AIAnswerResult) {
+  upsertQuestionBank(question: QuestionItem, answer: AIAnswerResult, options?: { exactContext?: boolean }) {
     const key = this.normalizeQuestionContentKey(question);
     const normalizedAnswer = { ...answer, questionHash: question.hash };
-    const existing = this.findExactQuestionBankEntry(question);
+    const existing = options?.exactContext
+      ? this.state.questionBank.find(entry => this.questionBankEntryKey(entry) === key && this.questionBankOptionsExact(question, entry))
+      : this.findExactQuestionBankEntry(question);
     if (existing) {
       const incomingEntry: QuestionBankEntry = {
         id: existing.id,
@@ -1371,6 +1375,12 @@ class GlobalStore {
     }
     this.state.questionBank = this.dedupeQuestionBank(this.state.questionBank);
     this.saveQuestionBank(this.state.questionBank);
+    if (options?.exactContext) {
+      // Background Web tasks share history without changing the active API
+      // question, its answer map or current selection.
+      this.state.answerHistory = [{ question, answer: normalizedAnswer }, ...this.state.answerHistory.filter(item => item.question.hash !== question.hash)].slice(0, 120);
+      this.saveAnswerHistory(this.state.answerHistory);
+    }
     this.emit();
   }
 

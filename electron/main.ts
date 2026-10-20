@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
 import { pathToFileURL } from 'url';
+import { registerWebAITaskResources } from './web-ai-task-resources';
 import {
   getErrorLogPath,
   installProcessErrorLogging,
@@ -1545,6 +1546,7 @@ async function fetchJson(url: string): Promise<any> {
 app.whenReady().then(() => {
   pruneOldErrorLogs();
   createWindow();
+  registerWebAITaskResources(() => mainWindow);
 
   const webviewSession = session.fromPartition(WEBVIEW_PARTITION);
   webviewSession.setPermissionRequestHandler((_webContents, permission, callback) => {
