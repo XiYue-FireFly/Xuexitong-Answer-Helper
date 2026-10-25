@@ -105,6 +105,12 @@ function scenario(items: QuestionItem[] = [question], environment: Partial<Envir
 }
 
 describe('Web automatic controller', () => {
+  it('releases the browser resources for a completed source session', async () => {
+    const released: string[] = [];
+    const test = scenario([question], { sessionId: 'android-session', releaseBrowserTask: id => { released.push(id); } });
+    await test.controller.startAutomatic();
+    expect(released).toEqual(['android-session']);
+  });
   it('sends every mixed-type question again despite old answers and a previous manual subset', async () => {
     const types = ['single', 'multiple', 'judgement', 'completion', 'essay'] as const;
     const items = types.map((type, index) => ({ ...question, id: `item-${index}`, hash: `item-${index}`, index: index + 1,
@@ -412,19 +418,27 @@ describe('Web automatic controller', () => {
     expect(test.applied).toEqual(['one']);
   });
 
-  it('bounds automatic missing-answer retries, retains imports and resumes only unresolved questions', async () => {
+  it('skips exhausted missing answers and fills the valid answers without stopping the task', async () => {
     const test = scenario([question, { ...question, id: 'two', hash: 'two', question: 'Missing fruit' }]);
     test.setAnswerRows((rows, attempt) => attempt === 1 ? rows.slice(0, 1) : []);
     await test.controller.startAutomatic();
-    expect(test.controller.getSnapshot()).toMatchObject({ phase: 'failed', canRetry: true, visible: true });
+    expect(test.controller.getSnapshot()).toMatchObject({ phase: 'partial', canRetry: false, visible: true });
     expect(test.imported).toEqual(['one']);
-    expect(test.applied).toEqual([]);
+    expect(test.applied).toEqual(['one']);
     expect(test.commands.filter(command => command.action === 'send')).toHaveLength(4);
-    test.setAnswerRows(rows => rows);
-    await test.controller.retry();
-    expect(test.imported).toEqual(['one', 'two']);
-    expect(test.applied).toEqual(['one', 'two']);
-    expect(test.controller.getSnapshot().phase).toBe('completed');
+    expect(test.activity.getSnapshot().task?.skipped).toEqual(['two']);
+  });
+
+  it('continues into a later batch after an unanswered question exhausts its allowance', async () => {
+    const large = { ...question, question: 'x'.repeat(180000) };
+    const later = { ...question, id: 'two', hash: 'two', question: 'y'.repeat(180000) };
+    const test = scenario([large, later]);
+    test.setAnswerRows((rows, attempt) => attempt <= 4 ? [] : rows);
+    await test.controller.startAutomatic();
+    expect(test.commands.filter(command => command.action === 'send')).toHaveLength(5);
+    expect(test.imported).toEqual(['two']);
+    expect(test.applied).toEqual(['two']);
+    expect(test.activity.getSnapshot().task?.skipped).toEqual(['one']);
   });
 
   it('keeps valid warnings without requiring manual confirmation', async () => {

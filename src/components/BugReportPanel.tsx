@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Bug, Clock, ExternalLink, RefreshCw } from 'lucide-react';
 import { appStore, useAppStore } from '../store/appStore';
+import { getPlatformAPI } from '../platform';
 
 type ErrorReportEntry = {
   timestamp?: string;
@@ -40,7 +41,7 @@ function levelColor(level?: string) {
 }
 
 export function BugReportPanel() {
-  const { isElectron } = useAppStore();
+  const { isElectron, isAndroid } = useAppStore();
   const [result, setResult] = useState<ErrorReportResult>({ entries: [] });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -52,15 +53,21 @@ export function BugReportPanel() {
   }, [entries]);
 
   const refreshReports = async () => {
-    if (!isElectron || !(window as any).electronAPI?.getRecentErrorLogs) {
-      setResult({ success: false, error: '仅 Electron 桌面应用支持错误报告台。', entries: [] });
+    const platform = getPlatformAPI();
+    if (!isElectron && !isAndroid) {
+      setResult({ success: false, error: '仅桌面/移动应用支持错误报告台。', entries: [] });
       return;
     }
     setIsLoading(true);
     try {
-      const response = await (window as any).electronAPI.getRecentErrorLogs(120);
-      setResult(response || { entries: [] });
-      if (response?.success) appStore.addLog('info', `错误报告已刷新：${response.entries?.length || 0} 条。`);
+      const response = await platform.getRecentErrorLogs(120) as any;
+      // Android returns a plain array; Electron returns { success, entries, path }
+      const list: ErrorReportEntry[] = Array.isArray(response) ? response : (response?.entries || []);
+      const normalized: ErrorReportResult = Array.isArray(response)
+        ? { success: true, entries: list }
+        : { success: response?.success, path: response?.path, error: response?.error, entries: list };
+      setResult(normalized);
+      if (normalized.success !== false) appStore.addLog('info', `错误报告已刷新：${list.length} 条。`);
     } catch (error: any) {
       setResult({ success: false, error: error?.message || '读取错误报告失败。', entries: [] });
       appStore.addLog('error', `读取错误报告失败：${error?.message || '未知错误'}`);

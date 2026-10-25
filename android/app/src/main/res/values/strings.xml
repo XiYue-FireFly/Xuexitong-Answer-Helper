@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">学习通答题助手</string>
+    <string name="title_activity_main">学习通答题助手</string>
+    <string name="package_name">com.studypilot.android</string>
+    <string name="custom_url_scheme">com.studypilot.android</string>
+</resources>

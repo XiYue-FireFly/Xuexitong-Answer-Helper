@@ -27,7 +27,8 @@ export async function sendWebPrompt(options: {
     try { state = await options.inspect(); }
     catch (error) { options.checkCancelled(); throw new WebAISendError(`无法确认发送状态：${(error as Error).message}`); }
     options.checkCancelled();
-    if (state.ready && state.inputText?.trim() === '' && !state.attachmentState && (!options.requireAttachmentReceipt || state.sentReceipt === true) && (state.busy || Boolean(state.text && state.text !== options.baseline))) return;
+    if (state.sentReceipt === true || state.ready && state.inputText?.trim() === '' && !state.attachmentState &&
+      !options.requireAttachmentReceipt && (state.busy || Boolean(state.text && state.text !== options.baseline))) return state;
     if (state.attachmentState === 'failed') throw new WebAISendError('附件上传失败，请在网页重试上传后点击“重试”。');
     if (state.attachmentState === 'pending') { if (!attempted) readySince = null; await options.wait(); continue; }
     readySince ??= now();

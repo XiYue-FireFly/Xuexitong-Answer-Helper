@@ -1,0 +1,131 @@
+{
+  "checkedAt": "2026-10-25T05:58:49.231Z",
+  "androidApi": 35,
+  "url": "https://passport2.chaoxing.com/mlogin?fid=&newversion=true&refer=https%3A%2F%2Fi.chaoxing.com",
+  "title": "登录",
+  "width": 412,
+  "height": 684,
+  "inputs": [
+    {
+      "id": "fid",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "pid",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "refer",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "_blank",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "quick",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "showForgetPwd",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "t",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "forbidotherlogin",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "doubleFactorLogin",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "independentId",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "independentNameId",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "otherLoginUrl",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "accounttip",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "pwdtip",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "topTip",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "regurl",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "phone",
+      "type": "text",
+      "placeholder": "手机号/超星号"
+    },
+    {
+      "id": "pwd",
+      "type": "password",
+      "placeholder": "学习通密码"
+    },
+    {
+      "id": "uuid",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "enc",
+      "type": "hidden",
+      "placeholder": ""
+    },
+    {
+      "id": "QRCodeTip",
+      "type": "hidden",
+      "placeholder": ""
+    }
+  ],
+  "loginChoices": [
+    {
+      "id": "",
+      "text": "验证码登录"
+    }
+  ],
+  "scripts": [
+    "https://passport2-static.chaoxing.com/js/common/commonUtil.js?v=20260128",
+    "https://passport2-static.chaoxing.com/js/jquery.min.js",
+    "https://passport2-static.chaoxing.com/js/fanya/mobile/ratio.js",
+    "https://passport2-static.chaoxing.com/js/fanya/mobile/util.js?v=2",
+    "https://passport2-static.chaoxing.com/js/common/jquery.base64.js",
+    "https://passport2-static.chaoxing.com/js/common/crypto-js.min.js",
+    "https://passport2-static.chaoxing.com/js/fanya/mobile/login.js?v=20261016a",
+    "https://passport2-static.chaoxing.com/js/common/setLanguage.js"
+  ]
+}

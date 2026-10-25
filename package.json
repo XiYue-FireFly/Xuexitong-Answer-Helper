@@ -12,7 +12,12 @@
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",
     "pack": "npm run build && npm run electron:build && electron-builder",
     "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=false",
-    "release:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win-release.ps1"
+    "release:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win-release.ps1",
+    "android:sync": "node scripts/build-android-bridge.mjs && npx cap sync android && node -e \"require('fs').cpSync('dist/android-webview-bridge.js','android/app/src/main/assets/android-webview-bridge.js')\"",
+    "android:open": "npm run android:sync && npx cap open android",
+    "android:dev": "npm run build && npx cap run android",
+    "android:build": "npm run build && node scripts/build-android-bridge.mjs && node -e \"require('fs').cpSync('dist/android-webview-bridge.js','android/app/src/main/assets/android-webview-bridge.js')\" && npx cap sync android && cd android && .\\gradlew.bat :app:clean :app:assembleDebug --no-build-cache",
+    "android:release": "npm run build && node scripts/build-android-bridge.mjs && node -e \"require('fs').cpSync('dist/android-webview-bridge.js','android/app/src/main/assets/android-webview-bridge.js')\" && npx cap sync android && cd android && .\\gradlew.bat :app:clean :app:assembleRelease --no-build-cache"
   },
   "build": {
     "appId": "com.studypilot.desktop",
@@ -60,6 +65,11 @@
   "author": "Antigravity",
   "license": "MIT",
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1",
     "blueimp-md5": "^2.19.0",
     "canvas-confetti": "^1.9.3",
     "iconv-lite": "^0.7.2",
@@ -68,6 +78,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@electron/asar": "^3.4.1",
     "@types/canvas-confetti": "^1.6.4",
     "@types/react": "^18.3.3",

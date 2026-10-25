@@ -105,6 +105,36 @@ describe('Web page monitor', () => {
       inspect: async () => ({ ...ready, text: test.now() < 9000 ? 'old answer' : answer, generationState: 'finished' }) });
     expect(test.now()).toBe(12000);
   });
+  it('recovers repeated identical refusals when they belong to a new finished message', async () => {
+    const test = clock();
+    const text = await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true,
+      baseline: '无法回答', baselineKey: 'old-message', inspect: async () => {
+        if (test.now() > 15000) test.cancel();
+        return { ...ready, text: '无法回答', messageKey: 'new-message', generationState: 'finished' };
+      } });
+    expect(text).toBe('无法回答');
+  });
+  it('recovers a new stable refusal after observed generation ends without a finish attribute', async () => {
+    const test = clock();
+    const text = await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true,
+      baseline: '无法回答', baselineKey: 'old-message', inspect: async () => {
+        if (test.now() > 15000) test.cancel();
+        return { ...ready, text: '无法回答', messageKey: 'new-message',
+          busy: test.now() < 3000, generationState: test.now() < 3000 ? 'running' : 'unknown' };
+      } });
+    expect(text).toBe('无法回答');
+    expect(test.now()).toBeGreaterThanOrEqual(9000);
+  });
+  it('bounds a stable new refusal when the website exposes no generation signals', async () => {
+    const test = clock();
+    const text = await waitForWebAnswer({ ...test, requestId: 'current', acceptIncomplete: true,
+      baseline: 'old reply', baselineKey: 'old-message', inspect: async () => {
+        if (test.now() > 45000) test.cancel();
+        return { ...ready, text: '没有可提供的答案', messageKey: 'new-message' };
+      } });
+    expect(text).toBe('没有可提供的答案');
+    expect(test.now()).toBe(30000);
+  });
 
   it.each(['\n', ' altered rendering'])('does not treat the same old message with %j as a new malformed reply', async suffix => {
     const test = clock();

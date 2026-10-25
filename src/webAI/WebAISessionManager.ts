@@ -82,7 +82,14 @@ export class WebAISessionManager {
       onQuestions: items => { questions = items; const session = this.sessions.get(id); if (session) session.questions = items; this.refresh(); },
       browser: command => (this.overrides.browser || browserCommand)({ ...command, sessionId: id,
         ...(command.action === 'source' && !command.tabId ? { tabId: source.tabId } : {}) }),
-      notify: this.overrides.notify || ((heading, body) => { void (window as any).electronAPI?.notify?.(heading, `${title}：${body}`)?.catch(() => undefined); })
+      notify: this.overrides.notify || ((heading, body) => {
+        const elApi = (window as any).electronAPI;
+        if (elApi?.notify) void elApi.notify(heading, `${title}：${body}`)?.catch(() => undefined);
+        else {
+          void import('../platform').then(({ getPlatformAPI }) =>
+            getPlatformAPI().notify(heading, `${title}：${body}`)).catch(() => undefined);
+        }
+      })
     };
     const controller = new WebAIController(environment);
     const session = { id, source: { ...source }, title, questions, controller, activity };

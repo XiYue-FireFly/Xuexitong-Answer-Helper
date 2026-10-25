@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-25T06:13:38.780Z",
+  "reports": [
+    "portrait: login account/password accept real keyboard input; focus and touch survive IME resize; shell meets IME exactly once and recovers full height.",
+    "landscape: login account/password accept real keyboard input; focus and touch survive IME resize; shell meets IME exactly once and recovers full height.",
+    "New-window tabs preserve the source; independent history and switching pass.",
+    "portrait: overlay retains the browser viewport 412 x 684.",
+    "landscape: overlay retains the browser viewport 866 x 205.",
+    "Rotation 0: a draft survives native input focus and rotation, then submits exactly once using real Enter.",
+    "Rotation 1: a draft survives native input focus and rotation, then submits exactly once using real Enter.",
+    "Shipped automatic UI completes extract -> prompt -> real Enter -> response -> import -> visible source fill.",
+    "Rotation 0: mobile image composer sends a long prompt and all three images exactly once using its icon-only arrow, without removing attachments or inserting an Enter newline.",
+    "Rotation 1: mobile image composer sends a long prompt and all three images exactly once using its icon-only arrow, without removing attachments or inserting an Enter newline.",
+    "Visible new-tab and close controls operate correctly.",
+    "Extraction, source-visible answer filling and tab closing pass.",
+    "Two cross-origin nested frames extract and fill the correct question; a changed child URL rejects stale answers.",
+    "narrow-320: all seven glass tabs switch, retain 44px touch targets, preserve browser size and keep collapse accessible in both themes.",
+    "large-display-font: all seven glass tabs switch, retain 44px touch targets, preserve browser size and keep collapse accessible in both themes."
+  ]
+}

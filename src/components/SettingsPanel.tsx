@@ -247,7 +247,7 @@ function mergeModelOptions(...groups: SelectOption[][]) {
 }
 
 export function SettingsPanel() {
-  const { settings, isElectron } = useAppStore();
+  const { settings, isElectron, isAndroid } = useAppStore();
   const [selectedProviderId, setSelectedProviderId] = useState(settings.activeProviderId);
   const [showKey, setShowKey] = useState(false);
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false);
@@ -340,18 +340,27 @@ export function SettingsPanel() {
   }, [isTestingAI]);
 
   useEffect(() => {
-    if (!isElectron || !(window as any).electronAPI?.getWebviewSessionState) return;
-    (window as any).electronAPI.getWebviewSessionState()
-      .then((result: WebviewSessionState) => setWebviewSessionState(result))
-      .catch((error: Error) => setWebviewSessionState({ success: false, error: error.message }));
-  }, [isElectron]);
+    const api = (window as any).electronAPI;
+    if (api?.getWebviewSessionState) {
+      api.getWebviewSessionState()
+        .then((result: WebviewSessionState) => setWebviewSessionState(result))
+        .catch((error: Error) => setWebviewSessionState({ success: false, error: error.message }));
+    } else if (isAndroid) {
+      // Android native WebView always has a persistent session
+      setWebviewSessionState({ success: true, persistent: true, partition: 'android-native' });
+    }
+  }, [isElectron, isAndroid]);
 
   const syncSettings = (updates: Partial<typeof settings>) => {
     appStore.updateSettings(updates);
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
-      // invoke 失败会产生 unhandledrejection，显式 catch 记录到诊断日志
       Promise.resolve((window as any).electronAPI.setSettings(appStore.getState().settings))
         .catch((error: Error) => appStore.addLog('warn', `设置同步到主进程失败：${error.message}`));
+    } else if (isAndroid) {
+      import('../platform').then(({ getPlatformAPI }) =>
+        void getPlatformAPI().setSettings(appStore.getState().settings)
+          .catch((error: Error) => appStore.addLog('warn', `设置持久化失败：${error.message}`))
+      ).catch(() => undefined);
     }
   };
 
@@ -377,15 +386,19 @@ export function SettingsPanel() {
       };
     appStore.updateProvider(selectedProviderId, normalizedProvider);
     appStore.updateSettings({ activeProviderId: selectedProviderId });
+    const latestSettings = {
+      ...appStore.getState().settings,
+      activeProviderId: selectedProviderId,
+      providers: appStore.getState().settings.providers.map((provider) =>
+        provider.id === selectedProviderId ? normalizedProvider : provider
+      )
+    };
     if (typeof window !== 'undefined' && (window as any).electronAPI) {
-      const latestSettings = {
-        ...appStore.getState().settings,
-        activeProviderId: selectedProviderId,
-        providers: appStore.getState().settings.providers.map((provider) =>
-          provider.id === selectedProviderId ? normalizedProvider : provider
-        )
-      };
       (window as any).electronAPI.setSettings(latestSettings);
+    } else if (isAndroid) {
+      import('../platform').then(({ getPlatformAPI }) =>
+        void getPlatformAPI().setSettings(latestSettings).catch(() => undefined)
+      ).catch(() => undefined);
     }
     appStore.addLog('success', `AI 服务已保存：${normalizedProvider.name}`);
   };
@@ -573,19 +586,38 @@ export function SettingsPanel() {
   };
 
   const clearWebviewSession = async () => {
-    if (!isElectron || !(window as any).electronAPI?.clearWebviewSession) return;
-    setIsClearingSession(true);
-    try {
-      const result = await (window as any).electronAPI.clearWebviewSession();
-      if (result?.success) {
-        appStore.addLog('success', '网页登录状态已清除，下次进入网站需要重新扫码登录。');
-      } else {
-        appStore.addLog('error', result?.error || '清除网页登录状态失败。');
+    const api = (window as any).electronAPI;
+    if (api?.clearWebviewSession) {
+      setIsClearingSession(true);
+      try {
+        const result = await api.clearWebviewSession();
+        if (result?.success) {
+          appStore.addLog('success', '网页登录状态已清除，下次进入网站需要重新扫码登录。');
+        } else {
+          appStore.addLog('error', result?.error || '清除网页登录状态失败。');
+        }
+      } catch (error: any) {
+        appStore.addLog('error', `清除网页登录状态失败：${error.message}`);
+      } finally {
+        setIsClearingSession(false);
       }
-    } catch (error: any) {
-      appStore.addLog('error', `清除网页登录状态失败：${error.message}`);
-    } finally {
-      setIsClearingSession(false);
+      return;
+    }
+    if (isAndroid) {
+      setIsClearingSession(true);
+      try {
+        const { getPlatformAPI } = await import('../platform');
+        const result = await getPlatformAPI().clearWebviewSession();
+        if (result?.success) {
+          appStore.addLog('success', '网页登录状态已清除，下次进入网站需要重新登录。');
+        } else {
+          appStore.addLog('error', (result as any)?.error || '清除网页登录状态失败。');
+        }
+      } catch (error: any) {
+        appStore.addLog('error', `清除网页登录状态失败：${error.message}`);
+      } finally {
+        setIsClearingSession(false);
+      }
     }
   };
 
@@ -616,10 +648,17 @@ export function SettingsPanel() {
   const openUpdateDownload = async () => {
     const targetUrl = updateInfo?.downloadUrl || updateInfo?.releaseUrl || 'https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/latest';
     try {
-      await (window as any).electronAPI?.openExternalUrl?.(targetUrl);
+      const api = (window as any).electronAPI;
+      if (api?.openExternalUrl) {
+        await api.openExternalUrl(targetUrl);
+      } else {
+        const { getPlatformAPI } = await import('../platform');
+        await getPlatformAPI().openExternalUrl(targetUrl);
+      }
       appStore.addLog('info', '已打开最新版下载页面。');
     } catch (error: any) {
-      appStore.addLog('error', `打开下载页面失败：${error?.message || '未知错误'}`);
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      appStore.addLog('warn', `外部打开失败，已尝试在浏览器中打开：${error?.message || '未知错误'}`);
     }
   };
 
@@ -684,9 +723,9 @@ export function SettingsPanel() {
           </div>
           <button
             onClick={checkUpdate}
-            disabled={!isElectron || isCheckingUpdate}
+            disabled={isCheckingUpdate}
             className="btn btn-soft"
-            style={{ opacity: !isElectron || isCheckingUpdate ? 0.55 : 1 }}
+            style={{ opacity: isCheckingUpdate ? 0.55 : 1 }}
           >
             {isCheckingUpdate ? <Loader2 size={15} /> : <RefreshCw size={15} />} 检查更新
           </button>
@@ -725,12 +764,12 @@ export function SettingsPanel() {
           <div>
             <div style={{ color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 700 }}>启用真实 WebView</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', lineHeight: 1.45 }}>
-              {isElectron ? '允许在内嵌浏览器中抓题、扫描和执行已批准计划；网站登录状态会自动保存。' : '仅 Electron 桌面应用可用。'}
+              {isElectron || isAndroid ? '允许在内嵌浏览器中抓题、扫描和执行已批准计划；网站登录状态会自动保存。' : '仅桌面/移动应用可用。'}
             </div>
           </div>
           <button
             onClick={() => syncSettings({ allowRealPageAutomation: !settings.allowRealPageAutomation })}
-            disabled={!isElectron}
+            disabled={!isElectron && !isAndroid}
             style={{ background: 'transparent', color: settings.allowRealPageAutomation ? 'var(--success-color)' : 'var(--text-muted)' }}
           >
             {settings.allowRealPageAutomation ? <ToggleRight size={44} /> : <ToggleLeft size={44} />}
@@ -766,9 +805,9 @@ export function SettingsPanel() {
           </div>
           <button
             onClick={clearWebviewSession}
-            disabled={!isElectron || isClearingSession}
+            disabled={(!isElectron && !isAndroid) || isClearingSession}
             className="btn btn-danger"
-            style={{ color: 'var(--danger-color)', opacity: !isElectron || isClearingSession ? 0.5 : 1 }}
+            style={{ color: 'var(--danger-color)', opacity: ((!isElectron && !isAndroid) || isClearingSession) ? 0.5 : 1 }}
           >
             <Trash2 size={14} /> {isClearingSession ? '清除中' : '清除登录'}
           </button>

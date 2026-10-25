@@ -680,7 +680,8 @@ class GlobalStore {
     batchRunning: false,
     liveRunning: false,
     livePaused: false,
-    isElectron: typeof window !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron')
+    isElectron: typeof window !== 'undefined' && navigator.userAgent.toLowerCase().includes('electron'),
+    isAndroid: typeof window !== 'undefined' && (window as any).Capacitor?.getPlatform?.() === 'android'
   };
 
   setAutomationRunning(patch: { batchRunning?: boolean; liveRunning?: boolean; livePaused?: boolean }) {
@@ -702,7 +703,10 @@ class GlobalStore {
   private buildSnapshot() {
     return {
       ...this.state,
-      currentQuestion: this.state.questions[this.state.currentQuestionIndex] || null
+      currentQuestion: this.state.questions[this.state.currentQuestionIndex] || null,
+      // Unified flag: either Electron webview OR Android native WebView supports real page automation.
+      // Components previously gated on `isElectron` for "real WebView" features should use this instead.
+      canUseRealWebview: this.state.isElectron || this.state.isAndroid
     };
   }
 

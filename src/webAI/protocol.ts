@@ -15,7 +15,7 @@ export type SkippedWebQuestion = {
   questionHash: string;
   questionIndex: number;
   promptLength: number;
-  reason: 'single-question-over-limit';
+  reason: 'single-question-over-limit' | 'no-valid-answer';
 };
 export type PreparedWebBatch = {
   batch: WebBatch | null;

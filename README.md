@@ -1,6 +1,31 @@
-# 学习通答题辅助桌面工具
+# 学习通答题辅助工具（Windows / Android）
 
-基于 Electron、React、TypeScript 和 Vite 构建的桌面应用。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
+Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
+
+## Android v1.0.0
+
+- 浏览器独立标签页保留原题页面，支持新窗口、前进后退和系统返回键。
+- 底部玻璃 Tab 向上展开工具面板，覆盖网页并保持浏览器尺寸；展开后仍可切换工具。
+- 修复 DeepSeek 手机布局中长提示词与多张图片已就绪但无法发送的问题，检查上传状态和发送回执。
+- 无效或缺失答案最多补发三轮，仍无答案时跳过并继续后续题目；回填时切回原题标签。
+- 支持横竖屏、窄屏和系统字号变化，使用蓝色书本图标及 Android 自适应图标。
+
+下载 [Android Release](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.0.0) 中的 APK。该版本提供经过验证的 debug 签名安装包；后续安卓更新请从 Android Release 下载。Windows 最新发布继续使用独立的 `v*` 版本标签。
+
+完整说明见 [Android v1.0.0 发布说明](docs/releases/android-v1.0.0.md)，测试范围见 [安卓适配验收](docs/qa/android-browser/adaptation-audit-20261025.md)。
+
+### 从源码构建 Android
+
+准备 Node.js 22 或更新版本、JDK 21 和 Android SDK。将 `JAVA_HOME` 指向 JDK 21，将 `ANDROID_HOME` 指向 SDK，或在忽略的 `android/local.properties` 中设置 `sdk.dir`。
+
+```powershell
+npm ci
+npm run android:build
+```
+
+可安装 APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`。`npm run android:sync` 会同步原生依赖并生成网页题目桥接脚本；`npm run android:release` 生成的 release APK 需要维护者配置自己的签名后才能安装。
+
+模拟器回归脚本为 `scripts/check-android-browser.mjs`，使用本地夹具。多设备使用 `ANDROID_SERIAL` 指定设备，ADB 路径使用 `ANDROID_ADB` 指定。执行前需安装 `playwright-core`，也可将 `PLAYWRIGHT_MODULE_PATH` 指向已有安装目录。
 
 ## 产品边界
 

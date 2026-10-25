@@ -1,0 +1,338 @@
+/* ── Make the entire React shell transparent ── */
+html, body, #root {
+  background: transparent !important;
+}
+
+/* ── Root shell fills the whole overlay ── */
+.mobile-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  /* Push all content to the bottom so tab bar sits at bottom */
+  position: relative;
+}
+
+/* ── Top browser nav bar — floats at very top ── */
+.mobile-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: rgba(7, 6, 15, 0.92);
+  border-bottom: 1px solid var(--border-glass);
+  padding: 6px 10px;
+  /* The native parent already reserves status-bar and cutout space. */
+  padding-top: 6px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+[data-theme='light'] .mobile-header {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.mobile-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mobile-browser-tabs { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.mobile-browser-tabs__list { display: flex; flex: 1; min-width: 0; overflow-x: auto; gap: 4px; scrollbar-width: none; }
+.mobile-browser-tab { display: flex; flex: 0 0 150px; min-width: 0; border-radius: 9px; border: 1px solid var(--border-glass); }
+.mobile-browser-tab.is-active { background: rgba(99, 102, 241, 0.18); border-color: var(--primary-color); }
+.mobile-browser-tab button { background: transparent; border: 0; color: var(--text-secondary); min-height: 38px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; }
+.mobile-browser-tab button[role='tab'] { flex: 1; min-width: 0; text-align: left; }
+.mobile-browser-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mobile-browser-tab svg { flex: 0 0 auto; }
+.mobile-browser-tab__close { flex: 0 0 32px; justify-content: center; }
+.mobile-browser-tab__close:disabled { opacity: 0.3; }
+.mobile-browser-tab button:focus-visible, .mobile-tab:focus-visible, .mobile-nav-btn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+
+.mobile-nav-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  flex: 0 0 auto;
+}
+.mobile-nav-btn:disabled { opacity: 0.3; }
+.mobile-nav-btn:active { background: rgba(99, 102, 241, 0.14); }
+
+.mobile-url-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 5px 10px;
+  overflow: hidden;
+  cursor: text;
+}
+[data-theme='light'] .mobile-url-bar { background: rgba(0,0,0,0.06); }
+.mobile-url-bar span {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.mobile-url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid var(--primary-color);
+  border-radius: 10px;
+  padding: 5px 10px;
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  outline: none;
+}
+
+.mobile-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* ── Bottom panel area — sits at bottom of flex column ── */
+.mobile-tabs {
+  position: absolute;
+  bottom: 7px;
+  left: 7px;
+  right: 7px;
+  z-index: 300;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 28px;
+  background: linear-gradient(150deg, rgba(71, 77, 109, 0.84), rgba(22, 25, 44, 0.96));
+  border: 1px solid rgba(220, 230, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 5px 18px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  overflow-x: auto;
+  padding-bottom: 0;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+.mobile-tabs::-webkit-scrollbar { display: none; }
+[data-theme='light'] .mobile-tabs {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.98), rgba(226, 235, 253, 0.94));
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: inset 0 1px 0 white, 0 5px 18px rgba(30, 55, 110, 0.16);
+}
+
+.mobile-tab {
+  flex: 1 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 2px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  min-height: 52px;
+  min-width: 44px;
+  white-space: nowrap;
+  border-radius: 23px;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.mobile-tab.is-active {
+  color: #e6efff;
+  background: linear-gradient(145deg, rgba(113, 150, 255, 0.38), rgba(80, 109, 235, 0.22));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), inset 0 0 0 1px rgba(184,206,255,0.18);
+}
+[data-theme='light'] .mobile-tab.is-active { color: #2c54ce; background: linear-gradient(145deg, #e2ecff, #cedeff); }
+.mobile-tab:active { transform: scale(0.94); background-color: rgba(137, 172, 255, 0.16); }
+
+.mobile-tab--toggle {
+  color: var(--text-muted);
+  border-left: 0;
+  flex: 0 0 auto;
+  min-width: 44px;
+  position: sticky;
+  right: 0;
+  background: #272d49;
+}
+[data-theme='light'] .mobile-tab--toggle { background: #e8effb; }
+
+/* ── Diagnostic strip ── */
+.mobile-diag-strip {
+  flex: 0 0 auto;
+  background: rgba(7, 6, 15, 0.88);
+  border-top: 1px solid var(--border-glass);
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px;
+}
+[data-theme='light'] .mobile-diag-strip { background: rgba(255,255,255,0.90); }
+
+/* ── Scrollable panel content ── */
+.mobile-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+  background: transparent;
+}
+
+.mobile-main :is(.glass-panel, .app-right-drawer__content) {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.mobile-shell .app-window-titlebar,
+.mobile-shell .window-controls,
+.mobile-shell .workbench-resizer {
+  display: none !important;
+}
+
+/* ── Logs ── */
+.mobile-logs-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  border-top: 1px solid var(--border-glass);
+  flex: 0 0 auto;
+}
+
+.mobile-logs {
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 130px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.68rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.mobile-logs__row { display: flex; gap: 6px; }
+.mobile-logs__ts { color: var(--text-muted); flex: 0 0 auto; }
+.mobile-logs__lvl { flex: 0 0 auto; text-transform: uppercase; font-weight: 700; }
+.mobile-logs__lvl--error { color: var(--danger-color); }
+.mobile-logs__lvl--success { color: var(--success-color); }
+.mobile-logs__lvl--warn { color: var(--warning-color); }
+.mobile-logs__lvl--info { color: var(--text-secondary); }
+.mobile-logs__msg { color: var(--text-primary); flex: 1 1 auto; word-break: break-word; }
+
+
+/* Both WebViews retain their viewport when the sheet opens. */
+.mobile-sheet {
+  position: absolute;
+  z-index: 250;
+  left: 0;
+  right: 0;
+  bottom: var(--mobile-tab-height, 56px);
+  height: min(70%, calc(100% - var(--mobile-header-height, 50px) - var(--mobile-tab-height, 56px) - 16px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px 22px 0 0;
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.16);
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(30px);
+  opacity: 0;
+  transition: transform 220ms ease, opacity 220ms ease, visibility 220ms;
+}
+.mobile-sheet.is-open {
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  opacity: 1;
+}
+.mobile-sheet__backdrop {
+  position: absolute;
+  left: 0;
+  bottom: calc(-1 * var(--mobile-tab-height, 56px));
+  width: 100%;
+  max-width: none;
+  height: var(--mobile-viewport-height, 100dvh);
+  filter: blur(16px) saturate(1.15);
+  object-fit: fill;
+  pointer-events: none;
+}
+.mobile-sheet__tint {
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 16, 35, 0.80);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+[data-theme='light'] .mobile-sheet__tint { background: rgba(245, 248, 255, 0.76); }
+.mobile-sheet__handle {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 4px;
+  width: 36px;
+  margin: 10px auto 5px;
+  border-radius: 4px;
+  background: var(--text-muted);
+  opacity: 0.35;
+}
+.mobile-main > div { flex: 0 0 auto; min-width: 0; }
+.mobile-main [hidden] { display: none !important; }
+.mobile-main :is(.glass-panel, .ai-section, .knowledge-panel) { background: transparent; }
+.mobile-url-input { min-height: 34px; }
+.mobile-tab { min-height: 54px; }
+@media (max-width: 380px) {
+  .mobile-header { padding-left: 4px; padding-right: 4px; }
+  .mobile-nav-btn { min-width: 30px; padding: 4px; }
+  .mobile-tab { font-size: 10px; gap: 4px; }
+}
+/* A landscape keyboard can leave less than 150px above it. Keep tab switching
+   and tools available in one row each, leaving room for the focused input. */
+@media (max-height: 260px) {
+  .mobile-header { padding: 2px 6px; }
+  .mobile-header:not(.is-editing) .mobile-header__nav { display: none; }
+  .mobile-header.is-editing .mobile-browser-tabs { display: none; }
+  .mobile-browser-tabs { margin-top: 0; }
+  .mobile-browser-tab button, .mobile-nav-btn { min-height: 28px; padding-top: 2px; padding-bottom: 2px; }
+  .mobile-tabs { bottom: 0; left: 2px; right: 2px; padding: 1px; border-radius: 18px; }
+  .mobile-tab { min-height: 32px; flex-direction: row; gap: 4px; padding: 2px; border-radius: 16px; }
+  .mobile-tab svg { width: 16px; height: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-sheet { transition: none; }
+  .mobile-tab { transition: none; }
+}

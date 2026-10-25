@@ -123,7 +123,7 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
             {busy && <button className="web-ai-secondary" onClick={webAIController.togglePause}>{paused ? <Play size={15} /> : <Pause size={15} />}{paused ? '继续' : '暂停'}</button>}
             {busy && <button className="web-ai-danger" onClick={stop}><Square size={15} />停止</button>}
           </div>
-          <p className="web-ai-message">重新提取并作答全部题目，包括已有填写的题目；旧答案仅作上下文参考。缺失或无效答案自动补发，收齐后统一填回原页面。</p>
+          <p className="web-ai-message">重新提取并作答全部题目，包括已有填写的题目；旧答案仅作上下文参考。缺失或无效答案最多补发三轮，仍无有效答案则跳过，继续后续题目并填回已获得的答案。</p>
           {mode === 'external' && <p className="web-ai-message">自动答题需要切换到应用内浏览器。</p>}
           {!settings.allowRealPageAutomation && <p className="web-ai-message">请先在设置中启用真实 WebView。</p>}
         </div>}
@@ -266,8 +266,9 @@ export function WebAIWorkflow({ embedded = false }: WebAIWorkflowProps) {
         {message && <p className="web-ai-message" role="status">{message}</p>}
         {skipped.length > 0 && <details className="web-ai-skipped">
           <summary>已跳过 {skipped.length} 题 · 原题保留</summary>
-          <p>以下题目连同必要模板单独发送仍超过 300000 字符，已从本次提示词跳过。</p>
-          <ul>{skipped.map(item => <li key={`${item.questionHash}-${item.questionIndex}`}>第 {item.questionIndex} 题：单题提示词 {item.promptLength.toLocaleString()} 字符，超过单批上限。</li>)}</ul>
+          <p>跳过的题目保留在原页面，可稍后单独处理。</p>
+          <ul>{skipped.map(item => <li key={`${item.questionHash}-${item.questionIndex}`}>第 {item.questionIndex} 题：{item.reason === 'no-valid-answer'
+            ? '多轮回答仍无有效答案，已继续后续题目。' : `单题提示词 ${item.promptLength.toLocaleString()} 字符，超过单批上限。`}</li>)}</ul>
         </details>}
 
         {/* 提示词与回答区 */}

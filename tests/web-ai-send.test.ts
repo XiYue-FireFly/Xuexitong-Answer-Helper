@@ -126,6 +126,16 @@ describe('Web AI send acknowledgement', () => {
       send: async () => { throw new Error('must not send'); }
     });
   });
+  it('acknowledges an outgoing receipt even when the website retains its draft', async () => {
+    const test = scenario();
+    let attempts = 0;
+    await sendWebPrompt({ ...test.options,
+      inspect: async () => attempts ? { ...draft, sentReceipt: true } : draft,
+      send: async () => { attempts++; return { ...draft, attempted: true }; }
+    });
+    assert.equal(attempts, 1);
+    assert.equal(test.messages.length, 0);
+  });
 
   it('never repeats a send after an uncertain browser acknowledgement', async () => {
     const test = scenario();

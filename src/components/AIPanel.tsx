@@ -65,10 +65,17 @@ function apiFailureHint(message: string) {
 
 function notifyTaskDone(title: string, body: string) {
   const api = (window as any).electronAPI;
-  if (!api?.notify) return;
-  api.notify(title, body).catch((error: Error) => {
-    appStore.addLog('warn', `桌面通知发送失败：${error.message}`);
-  });
+  if (api?.notify) {
+    api.notify(title, body).catch((error: Error) => {
+      appStore.addLog('warn', `桌面通知发送失败：${error.message}`);
+    });
+    return;
+  }
+  // Android: use platform bridge
+  import('../platform').then(({ getPlatformAPI }) => {
+    const platform = getPlatformAPI();
+    if (platform.isAndroid) void platform.notify(title, body).catch(() => undefined);
+  }).catch(() => undefined);
 }
 
 function buildAIHeaders(provider: AIProviderConfig) {
@@ -271,6 +278,9 @@ function demoAnswer(question: QuestionItem): AIAnswerResult {
 export function AIPanel() {
   const [answerMethod, setAnswerMethod] = useState<'api' | 'web'>(() => {
     try {
+      // On Android the Web AI workflow requires BrowserPanel which is absent — default to API.
+      const isAndroid = typeof window !== 'undefined' && (window as any).Capacitor?.getPlatform?.() === 'android';
+      if (isAndroid) return 'api';
       // WebView is the safest default for the real page workflow. Keep an
       // explicit API choice sticky for users who already selected it.
       const pendingWebRequest = JSON.parse(localStorage.getItem('studypilot-web-ai-open-request-v1') || 'null');

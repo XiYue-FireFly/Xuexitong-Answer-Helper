@@ -66,16 +66,24 @@ export function webPageAction(action: string, provider: string, prompt: string, 
   const inputText = () => normalize(input instanceof HTMLTextAreaElement ? input.value : input ? richText(input) : '');
   type Receipt = { prompt: string; files: string[] };
   const composerInput = input as (HTMLElement & { __studyPilotPrompt?: Receipt }) | undefined;
-  let composer = input?.parentElement;
-  for (let depth = 0; composer && depth < 6; depth++) {
-    if (composer.matches('body, html')) { composer = null; break; }
-    if (composer.matches('form') || composer.querySelectorAll('button, [role="button"]').length) break;
-    if (composer.parentElement?.matches('body, html')) break;
-    composer = composer.parentElement;
+  const primarySelector = 'button.ds-button--primary.ds-button--circle, [role="button"].ds-button--primary.ds-button--circle';
+  let composer: HTMLElement | null = null;
+  let fallback: HTMLElement | null = null;
+  for (let candidate = input?.parentElement, depth = 0; candidate && depth < 8; candidate = candidate.parentElement, depth++) {
+    if (candidate.matches('body, html')) break;
+    fallback ??= candidate;
+    // Mobile attachment remove buttons can be beside the textarea, with the
+    // actual send arrow in a sibling footer. Find their shared composer instead
+    // of stopping at the first ancestor that happens to contain any button.
+    if (candidate.matches('form') || candidate.querySelectorAll(adapter.send).length ||
+      provider === 'deepseek' && candidate.querySelectorAll(primarySelector).length) {
+      composer = candidate; break;
+    }
   }
+  composer ??= fallback;
   // DeepSeek's icon-only primary control is shared by send and stop. Keep
   // lookup within this composer so history, upload and sidebar controls cannot match.
-  const primaryControls = provider === 'deepseek' ? Array.from(composer?.querySelectorAll<HTMLElement>('[role="button"].ds-button--primary.ds-button--circle') || []).filter(visible) : [];
+  const primaryControls = provider === 'deepseek' ? Array.from(composer?.querySelectorAll<HTMLElement>(primarySelector) || []).filter(visible) : [];
   const iconControl = primaryControls.length === 1 ? primaryControls[0] : undefined;
   const stopIcon = iconControl && Array.from(iconControl.querySelectorAll('svg path, svg rect')).some(shape => {
     if (shape.tagName.toLowerCase() === 'rect') {
@@ -145,7 +153,7 @@ export function webPageAction(action: string, provider: string, prompt: string, 
   // Sending may remount the textarea, losing its ephemeral preparation receipt.
   // The bound request ID plus every expected outgoing filename remains evidence.
   const expectedFiles = receipt?.prompt === prompt ? receipt.files : attachments.map(file => file.name);
-  const sentReceipt = attachments.length ? Boolean(requestId && Array.from(document.querySelectorAll<HTMLElement>(
+  const sentReceipt = Boolean(requestId && Array.from(document.querySelectorAll<HTMLElement>(
     '[data-message-author-role="user"], [data-testid="send_message"], [data-role="user"], [class*="user-message"], [class*="userMessage"], .ds-message'
   )).some(message => {
     if (!visible(message) || composer?.contains(message)) return false;
@@ -153,7 +161,7 @@ export function webPageAction(action: string, provider: string, prompt: string, 
       node.getAttribute('alt') || node.getAttribute('title') || node.getAttribute('aria-label') || node.getAttribute('data-file-name') || node.getAttribute('data-filename') || '')].join('\n');
     const txt = expectedFiles.filter(name => /\.txt$/i.test(name));
     return (text.includes(requestId) || txt.some(name => text.includes(name))) && expectedFiles.every(name => text.includes(name)) && attachments.every(file => text.includes(file.name));
-  })) : undefined;
+  }));
   const state = { ready: Boolean(input), busy, text: texts[texts.length - 1] || '', inputText: input ? inputText() : undefined,
     sentReceipt,
     attachmentState: attachmentState(), promptReady: Boolean(composerInput?.__studyPilotPrompt &&
@@ -252,7 +260,7 @@ export function webPageAction(action: string, provider: string, prompt: string, 
     if (!matchesPrompt()) return { ...state, attempted: false, reason: '输入框内容已变化，请检查后手动发送。' };
     if (state.attachmentState === 'failed') return { ...state, attempted: false, reason: '附件上传失败，请在网页重试上传。' };
     if (state.attachmentState === 'pending') return { ...state, attempted: false, reason: '正在等待附件上传完成。' };
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(adapter.send)).filter(visible);
+    const candidates = Array.from(composer?.querySelectorAll<HTMLElement>(adapter.send) || []).filter(visible);
     if (!candidates.length && iconControl && !stopIcon) candidates.push(iconControl);
     const disabled = (element: HTMLElement) => element.matches(':disabled, [aria-disabled="true"], [data-disabled="true"], .ds-button--disabled') ||
       Boolean(element.closest('[aria-disabled="true"], [inert]')) || getComputedStyle(element).pointerEvents === 'none';

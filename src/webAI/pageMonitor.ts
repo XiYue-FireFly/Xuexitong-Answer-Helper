@@ -54,7 +54,7 @@ export async function waitForWebComposer(options: MonitorOptions): Promise<WebPa
   }
 }
 
-export async function waitForWebAnswer(options: MonitorOptions & { requestId: string; acceptIncomplete?: boolean; baseline?: string; baselineKey?: string }): Promise<string> {
+export async function waitForWebAnswer(options: MonitorOptions & { requestId: string; acceptIncomplete?: boolean; baseline?: string; baselineKey?: string; generationStarted?: boolean }): Promise<string> {
   const now = options.now || Date.now;
   const inspect = reader(options);
   const remind = reminder(options);
@@ -62,24 +62,26 @@ export async function waitForWebAnswer(options: MonitorOptions & { requestId: st
   let lastKey = '';
   let stableSince = now();
   let samples = 0;
+  let sawRunning = Boolean(options.generationStarted);
   for (;;) {
     const state = await inspect();
     if (!state) { samples = 0; continue; }
+    sawRunning ||= state.busy || state.generationState === 'running';
     const complete = hasCompleteWebResponse(state.text, options.requestId);
     const key = state.messageKey || 'assistant';
-    // Only the automatic collector may recover a new, explicitly finished bad response.
-    // Existing text and streaming output must never trigger a replacement request.
+    // Recover only a new message. A site without generation signals must remain
+    // idle with the same text and identity for a longer window before recovery.
     const finishedNewReply = options.acceptIncomplete && options.baseline !== undefined &&
-      state.generationState === 'finished' && state.text.trim() && state.text.trim() !== options.baseline.trim() &&
-      (!options.baselineKey || Boolean(state.messageKey && state.messageKey !== options.baselineKey));
+      (state.generationState === 'finished' || state.generationState === 'unknown' && Boolean(options.baselineKey)) && state.text.trim() &&
+      (options.baselineKey ? Boolean(state.messageKey && state.messageKey !== options.baselineKey) : state.text.trim() !== options.baseline.trim());
     const candidate = Boolean(complete || finishedNewReply) && !state.busy && state.generationState !== 'running';
-    if (!candidate || state.text !== lastText || key !== lastKey) {
+    if (!candidate || samples === 0 || state.text !== lastText || key !== lastKey) {
       stableSince = now();
       samples = candidate ? 1 : 0;
       lastText = state.text;
       lastKey = key;
     } else samples++;
-    const windowMs = state.generationState === 'finished' ? 3000 : 6000;
+    const windowMs = state.generationState === 'finished' ? 3000 : !complete && !sawRunning ? 30000 : 6000;
     if (candidate && samples >= 3 && now() - stableSince >= windowMs) return state.text;
     remind(state.busy ? 'AI 仍在生成，已等待较长时间，请查看 AI 网页。' : '长时间未获取完整答案，请查看 AI 网页。');
     await options.wait(1500);

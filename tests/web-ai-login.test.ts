@@ -168,6 +168,36 @@ describe('Web AI composer readiness without login checks', () => {
     expect(outside.clicks).toBe(0);
   });
 
+  it('finds the mobile send arrow outside an editor wrapper containing image remove buttons', async () => {
+    const page = fixture(providers[0], { send: false });
+    const files = ['flow.png', 'network.png', 'error.png'].map(name => ({ name, mime: 'image/png', bytes: [1] }));
+    const editor = element('div').append(page.input);
+    const removes = files.map(file => element('div', { role: 'button', class: 'ds-icon-button' }));
+    files.forEach((file, index) => editor.append(element('div', { 'data-file-name': file.name, 'data-status': 'ready' })
+      .append(element('img', { alt: file.name }), removes[index])));
+    const send = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle' })
+      .append(element('svg').append(element('path', { d: 'M8.3125 0.980206L9 3.95579V15.0417H7V3.95579Z' })));
+    page.form.children = [];
+    page.form.append(editor, element('div').append(send));
+    const prompt = 'long prompt '.repeat(1000) + '{"requestId":"mobile-images"}';
+    expect(await page.mediaAction('prepare', prompt, files)).toMatchObject({ promptReady: true, attachmentState: 'ready' });
+    expect(await page.mediaAction('send', prompt, files)).toMatchObject({ attempted: true });
+    expect(send.clicks).toBe(1);
+    expect(removes.map(button => button.clicks)).toEqual([0, 0, 0]);
+  });
+
+  it('ignores an unrelated labelled send button outside the active composer', async () => {
+    const page = fixture(providers[0], { send: false });
+    const send = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle' });
+    const unrelated = element('button', { 'aria-label': '发送' });
+    page.form.append(send);
+    page.root.append(unrelated);
+    await page.prepare('prompt');
+    expect(page.action('send', 'prompt')).toMatchObject({ attempted: true });
+    expect(send.clicks).toBe(1);
+    expect(unrelated.clicks).toBe(0);
+  });
+
   it('waits for a class-disabled DeepSeek icon control without pressing Enter', async () => {
     const page = fixture(providers[0], { send: false });
     const send = element('div', { role: 'button', class: 'ds-button ds-button--primary ds-button--circle ds-button--disabled' });
