@@ -61,10 +61,13 @@ export const NativeWebView = {
   onNavigationChanged(callback: (state: NativeBrowserState) => void): Promise<PluginListenerHandle> {
     return getPlugin().addListener('navigationChanged', callback);
   },
-  setLayout(layout: { headerHeight: number; tabHeight: number; panelTop: number; modalOpen: boolean }): Promise<void> {
+  setLayout(layout: { headerHeight: number; tabHeight: number; panelTop: number; modalOpen: boolean; panelOpen: boolean }): Promise<void> {
     return getPlugin().setLayout(layout);
   },
   captureBackdrop(): Promise<{ dataUrl: string }> { return getPlugin().captureBackdrop(); },
+  captureToolSurface(bounds: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string }> {
+    return getPlugin().captureToolSurface(bounds);
+  },
 
   /** Lease a web-AI task session for image reading. */
   leaseWebAITask(payload: { sessionId: string; sourceUrl: string; sourceTabId?: string }): Promise<{ ok: boolean; sessionId?: string; error?: string }> {

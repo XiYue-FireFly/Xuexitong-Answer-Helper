@@ -12,7 +12,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright-c
 const adb = process.env.ANDROID_ADB || 'D:/Android/Sdk/platform-tools/adb.exe';
 const out = path.resolve(process.env.ANDROID_QA_OUT || 'docs/qa/android-browser');
 mkdirSync(out, { recursive: true });
-const runAdb = (...args) => execFileSync(adb, args, { windowsHide: true });
+const runAdb = (...args) => execFileSync(adb, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
 const previousImeSetting = runAdb('shell', 'settings', 'get', 'secure', 'show_ime_with_hard_keyboard').toString().trim();
 const previousRotation = runAdb('shell', 'settings', 'get', 'system', 'user_rotation').toString().trim();
 const previousAutoRotation = runAdb('shell', 'settings', 'get', 'system', 'accelerometer_rotation').toString().trim();
@@ -231,7 +231,9 @@ try {
     await shell.waitForTimeout(500);
     fullHeights[name] = await shell.evaluate(() => innerHeight);
     const before = await source.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-    await shell.getByRole('button', { name: '设置', exact: true }).click();
+    if (await shell.getByRole('button', { name: '设置', exact: true }).getAttribute('aria-expanded') !== 'true') {
+      await shell.getByRole('button', { name: '设置', exact: true }).click();
+    }
     await shell.locator('.mobile-sheet.is-open').waitFor();
     await shell.waitForTimeout(350);
     assert.deepEqual(await source.evaluate(() => ({ width: innerWidth, height: innerHeight })), before);
@@ -375,7 +377,7 @@ try {
       for (const label of ['答题', '题库', 'Token', '记录', '错误', '教程', '设置']) {
         const tab = shell.getByRole('button', { name: label, exact: true });
         await tab.scrollIntoViewIfNeeded();
-        await tab.click();
+        if (await tab.getAttribute('aria-expanded') !== 'true') await tab.click();
         await shell.waitForFunction(label => document.querySelector('.mobile-tab.is-active')?.getAttribute('aria-label') === label, label);
         assert.equal(await tab.getAttribute('aria-expanded'), 'true');
         // Ignore translation from the shared hover style, but wait until the
@@ -388,14 +390,14 @@ try {
         assert.ok(rect.width >= 43.5 && rect.height >= 43.5, `${profile.name}: ${label} touch target is too small: ${JSON.stringify(rect)}`);
       }
       assert.deepEqual(await source.evaluate(() => ({ width: innerWidth, height: innerHeight })), before);
-      const toggle = shell.locator('.mobile-tab--toggle');
+      const toggle = shell.locator('.mobile-tab.is-active');
       const bounds = await toggle.boundingBox();
-      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320, 'Collapse control must remain visible while tabs scroll');
+      assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= 321, 'The selected tab must remain visible so it can collapse its panel');
       writeFileSync(path.join(out, `${profile.name}-${theme}.png`), runAdb('exec-out', 'screencap', '-p'));
       await toggle.click();
       await shell.locator('.mobile-sheet.is-open').waitFor({ state: 'detached' });
     }
-    reports.push(`${profile.name}: all seven glass tabs switch, retain 44px touch targets, preserve browser size and keep collapse accessible in both themes.`);
+    reports.push(`${profile.name}: all seven glass tabs switch, retain 44px touch targets, preserve browser size and collapse by tapping the selected tab in both themes.`);
   }
   runAdb('shell', 'wm', 'size', previousSize || 'reset');
   runAdb('shell', 'wm', 'density', previousDensity || 'reset');

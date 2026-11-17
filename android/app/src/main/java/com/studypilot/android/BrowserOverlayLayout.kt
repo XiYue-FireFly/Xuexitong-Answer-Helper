@@ -11,11 +11,13 @@ class BrowserOverlayLayout(context: Context) : FrameLayout(context) {
     var headerBottom = 0f
     var panelTop = Float.MAX_VALUE
     var modalOpen = false
+    // Includes the closing transition. Never send an outside dismiss gesture to the page.
+    var panelOpen = false
     private var browserGesture = false
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            browserGesture = !modalOpen && event.y >= headerBottom && event.y < panelTop
+            browserGesture = !modalOpen && !panelOpen && event.y >= headerBottom && event.y < panelTop
         }
         if (!browserGesture) return super.dispatchTouchEvent(event)
         val target = browser ?: return false

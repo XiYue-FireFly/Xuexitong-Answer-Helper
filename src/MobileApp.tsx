@@ -7,27 +7,17 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
+import { MobileToolDock, type MobileToolTab } from './components/MobileToolDock';
+import { useToolDissolve } from './mobile/useToolDissolve';
 import { appStore, useAppStore } from './store/appStore';
 import { getPlatformAPI } from './platform';
 import { startAndroidBrowser } from './platform/androidBrowser';
 import { webAISessions } from './webAI/WebAISessionManager';
 import { NativeWebView, type NativeBrowserState } from './platform/nativeWebViewPlugin';
 import {
-  ArrowLeft, ArrowRight, Bug, ChevronDown, ChevronUp,
-  BookOpen, Coins, Globe, History, LibraryBig, Moon, Plus, RefreshCw, SlidersHorizontal, Sparkles, Sun, X,
+  ArrowLeft, ArrowRight, ChevronDown, ChevronUp,
+  Globe, Moon, Plus, RefreshCw, Sun, X,
 } from 'lucide-react';
-
-type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
-
-const tabs: { id: TabId; label: string; icon: typeof Sparkles }[] = [
-  { id: 'automation', label: '答题', icon: Sparkles },
-  { id: 'snapshot', label: '题库', icon: LibraryBig },
-  { id: 'tokens', label: 'Token', icon: Coins },
-  { id: 'history', label: '记录', icon: History },
-  { id: 'bugs', label: '错误', icon: Bug },
-  { id: 'tutorial', label: '教程', icon: BookOpen },
-  { id: 'settings', label: '设置', icon: SlidersHorizontal },
-];
 
 const HOME_URL = 'https://i.chaoxing.com';
 
@@ -42,8 +32,10 @@ function normalizeUrl(raw: string): string {
 
 export default function MobileApp() {
   const { settings, status, logs } = useAppStore();
-  const [activeTab, setActiveTab] = useState<TabId>('automation');
+  const [activeTab, setActiveTab] = useState<MobileToolTab>('automation');
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelPresent, setPanelPresent] = useState(false);
+  const blockBrowser = panelOpen || panelPresent;
 
   const togglePanel = (open: boolean) => setPanelOpen(open);
   const [backdrop, setBackdrop] = useState('');
@@ -61,7 +53,24 @@ export default function MobileApp() {
   const headerRef = useRef<HTMLElement>(null);
   const tabsRef = useRef<HTMLElement>(null);
   const sheetRef = useRef<HTMLElement>(null);
+  const dissolveCanvas = useRef<HTMLCanvasElement>(null);
+  const toolMotion = useToolDissolve(sheetRef, dissolveCanvas);
+  const dismissPanel = () => {
+    if (toolMotion.dissolving) { toolMotion.cancel(); setPanelOpen(false); }
+    else void toolMotion.run('close', () => setPanelOpen(false));
+  };
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const outsideGesture = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    sheetRef.current?.toggleAttribute('inert', !panelOpen);
+    if (panelOpen) { setPanelPresent(true); return; }
+    sheetRef.current?.classList.remove('is-dissolving');
+    // Keep interception until the visual close finishes, including rapid reversals.
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timer = setTimeout(() => setPanelPresent(false), reduced ? 0 : 300);
+    return () => clearTimeout(timer);
+  }, [panelOpen]);
 
   // Auto-collapse panel when AI answering / automation starts
   const prevStatusRef = useRef(status);
@@ -69,6 +78,7 @@ export default function MobileApp() {
     const wasIdle = !['calling_ai', 'executing'].includes(prevStatusRef.current);
     const isActive = ['calling_ai', 'executing'].includes(status);
     if (wasIdle && isActive && panelOpen) {
+      toolMotion.cancel();
       togglePanel(false);
     }
     prevStatusRef.current = status;
@@ -78,9 +88,11 @@ export default function MobileApp() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     document.body.dataset.theme = settings.theme;
+    document.body.classList.add('mobile-ui');
     return () => {
       delete document.documentElement.dataset.theme;
       delete document.body.dataset.theme;
+      document.body.classList.remove('mobile-ui');
     };
   }, [settings.theme]);
 
@@ -111,11 +123,11 @@ export default function MobileApp() {
   }, []);
 
   useEffect(() => {
-    if (['sending', 'applying'].includes(workflow.phase)) setPanelOpen(false);
+    if (['sending', 'applying'].includes(workflow.phase)) { toolMotion.cancel(); setPanelOpen(false); }
   }, [workflow.phase]);
 
   useEffect(() => {
-    const show = () => { setPanelOpen(false); setUrlEditing(false); };
+    const show = () => { toolMotion.cancel(); setPanelOpen(false); setUrlEditing(false); };
     window.addEventListener('studypilot:show-source', show);
     return () => window.removeEventListener('studypilot:show-source', show);
   }, []);
@@ -131,31 +143,41 @@ export default function MobileApp() {
   useEffect(() => {
     if (!panelOpen) return;
     let cancelled = false;
-    void NativeWebView.captureBackdrop().then(result => {
-      if (!cancelled) setBackdrop(result.dataUrl);
-    }).catch(() => setBackdrop(''));
-    return () => { cancelled = true; };
+    let revision = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const capture = () => {
+      const request = ++revision;
+      void NativeWebView.captureBackdrop().then(result => {
+        if (!cancelled && request === revision) setBackdrop(result.dataUrl);
+      }).catch(() => { if (!cancelled && request === revision) setBackdrop(''); });
+    };
+    const resize = () => { ++revision; clearTimeout(timer); timer = setTimeout(capture, 180); };
+    capture();
+    window.addEventListener('resize', resize);
+    return () => { cancelled = true; clearTimeout(timer); window.removeEventListener('resize', resize); };
   }, [panelOpen, browserUrl, activeBrowserTab]);
 
   useLayoutEffect(() => {
     let frame = 0;
+    const updateLayout = () => {
+      const header = headerRef.current?.getBoundingClientRect();
+      const tabs = tabsRef.current?.getBoundingClientRect();
+      const sheet = sheetRef.current;
+      if (!header || !tabs || !sheet) return;
+      const tabInset = Math.max(0, window.innerHeight - tabs.top);
+      document.documentElement.style.setProperty('--mobile-header-height', `${header.height}px`);
+      document.documentElement.style.setProperty('--mobile-tab-height', `${tabInset}px`);
+      document.documentElement.style.setProperty('--mobile-viewport-height', `${window.innerHeight}px`);
+      void NativeWebView.setLayout({
+        headerHeight: Math.ceil(header.height), tabHeight: Math.ceil(tabInset),
+        panelTop: panelOpen ? sheet.offsetTop : tabs.top,
+        modalOpen: Boolean(document.querySelector('dialog[open]')),
+        panelOpen: blockBrowser,
+      }).catch(() => undefined);
+    };
     const measure = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const header = headerRef.current?.getBoundingClientRect();
-        const tabs = tabsRef.current?.getBoundingClientRect();
-        const sheet = sheetRef.current?.getBoundingClientRect();
-        if (!header || !tabs || !sheet) return;
-        const tabInset = Math.max(0, window.innerHeight - tabs.top);
-        document.documentElement.style.setProperty('--mobile-header-height', `${header.height}px`);
-        document.documentElement.style.setProperty('--mobile-tab-height', `${tabInset}px`);
-        document.documentElement.style.setProperty('--mobile-viewport-height', `${window.innerHeight}px`);
-        void NativeWebView.setLayout({
-          headerHeight: Math.ceil(header.height), tabHeight: Math.ceil(tabInset),
-          panelTop: panelOpen ? sheetRef.current!.offsetTop : tabs.top,
-          modalOpen: Boolean(document.querySelector('dialog[open]')),
-        }).catch(() => undefined);
-      });
+      frame = requestAnimationFrame(updateLayout);
     };
     const observer = new ResizeObserver(measure);
     [headerRef.current, tabsRef.current, sheetRef.current].forEach(el => el && observer.observe(el));
@@ -163,13 +185,13 @@ export default function MobileApp() {
     mutations.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
     window.addEventListener('resize', measure);
     window.visualViewport?.addEventListener('resize', measure);
-    measure();
+    updateLayout();
     return () => {
       cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect();
       window.removeEventListener('resize', measure);
       window.visualViewport?.removeEventListener('resize', measure);
     };
-  }, [panelOpen]);
+  }, [panelOpen, blockBrowser]);
 
   const navigate = (url: string) => {
     const normalized = normalizeUrl(url);
@@ -253,32 +275,37 @@ export default function MobileApp() {
         </nav>
       </header>
 
-      {/* ── Tab bar (always visible) ── */}
-      <nav ref={tabsRef} className="mobile-tabs" aria-label="工具导航">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              aria-label={tab.label}
-              aria-controls="mobile-tool-panel"
-              aria-expanded={panelOpen && active}
-              className={`mobile-tab${active ? ' is-active' : ''}`}
-              onClick={() => { setActiveTab(tab.id); togglePanel(true); }}
-            >
-              <Icon size={21} strokeWidth={1.8} aria-hidden="true" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-        <button className="mobile-tab mobile-tab--toggle" aria-expanded={panelOpen} aria-controls="mobile-tool-panel" onClick={() => togglePanel(!panelOpen)}>
-          {panelOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-          <span>{panelOpen ? '收起' : '展开'}</span>
-        </button>
-      </nav>
+      <button type="button" className={`mobile-dismiss${blockBrowser ? ' is-active' : ''}`}
+        aria-label="收起工具面板" aria-hidden={!blockBrowser} tabIndex={blockBrowser ? 0 : -1}
+        onPointerDown={event => { outsideGesture.current = { x: event.clientX, y: event.clientY, moved: false }; }}
+        onPointerMove={event => {
+          const gesture = outsideGesture.current;
+          if (gesture && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 10) gesture.moved = true;
+        }}
+        onPointerCancel={() => { outsideGesture.current = null; }}
+        onContextMenu={event => event.preventDefault()}
+        onClick={event => {
+          if ((event.detail === 0 || outsideGesture.current?.moved === false) && !document.querySelector('dialog[open]')) dismissPanel();
+          outsideGesture.current = null;
+        }} />
 
-      <aside id="mobile-tool-panel" ref={sheetRef} className={`mobile-sheet${panelOpen ? ' is-open' : ''}`} aria-hidden={!panelOpen}>
+      <MobileToolDock navRef={tabsRef} activeTab={activeTab} panelOpen={panelOpen}
+        onSelect={(tab, gesture) => {
+          if (gesture === 'drag') { toolMotion.cancel(); setActiveTab(tab); setPanelOpen(true); }
+          else if (tab === activeTab && panelOpen) {
+            if (toolMotion.closing) toolMotion.cancel();
+            else dismissPanel();
+          }
+          else if (panelOpen) void toolMotion.run('switch', () => setActiveTab(tab));
+          else { toolMotion.cancel(); setActiveTab(tab); setPanelOpen(true); }
+        }} />
+
+      <canvas ref={dissolveCanvas} className="mobile-dissolve" aria-hidden="true" />
+
+      <aside id="mobile-tool-panel" ref={sheetRef} className={`mobile-sheet${panelOpen ? ' is-open' : ''}`} aria-hidden={!panelOpen}
+        onTransitionEnd={event => {
+          if (event.target === event.currentTarget && event.propertyName === 'transform' && !panelOpen) setPanelPresent(false);
+        }}>
         {backdrop && <img className="mobile-sheet__backdrop" src={backdrop} alt="" aria-hidden="true" />}
         <div className="mobile-sheet__tint" />
         <div className="mobile-sheet__handle" aria-hidden="true" />

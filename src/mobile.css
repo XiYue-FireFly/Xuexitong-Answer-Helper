@@ -5,6 +5,11 @@ html, body, #root {
 
 /* ── Root shell fills the whole overlay ── */
 .mobile-shell {
+  --mobile-glass-fill: linear-gradient(145deg, rgba(103, 133, 174, 0.20), rgba(28, 46, 70, 0.12));
+  --mobile-glass-edge: rgba(219, 239, 255, 0.22);
+  --mobile-glass-highlight: rgba(255, 255, 255, 0.26);
+  --mobile-control-fill: linear-gradient(145deg, rgba(224, 240, 255, 0.15), rgba(129, 176, 228, 0.06));
+  --mobile-popup-fill: rgba(28, 43, 65, 0.88);
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -16,6 +21,13 @@ html, body, #root {
   font-family: var(--font-sans);
   /* Push all content to the bottom so tab bar sits at bottom */
   position: relative;
+}
+[data-theme='light'] .mobile-shell {
+  --mobile-glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.46), rgba(219, 237, 255, 0.22));
+  --mobile-glass-edge: rgba(255, 255, 255, 0.68);
+  --mobile-glass-highlight: rgba(255, 255, 255, 0.85);
+  --mobile-control-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(189, 218, 252, 0.22));
+  --mobile-popup-fill: rgba(242, 249, 255, 0.88);
 }
 
 /* ── Top browser nav bar — floats at very top ── */
@@ -113,7 +125,29 @@ html, body, #root {
   flex: 0 0 auto;
 }
 
-/* ── Bottom panel area — sits at bottom of flex column ── */
+/* The dismiss surface consumes touches above the native page, including closing. */
+.mobile-dismiss {
+  position: absolute;
+  z-index: 210;
+  top: var(--mobile-header-height, 90px);
+  left: 0;
+  right: 0;
+  bottom: var(--mobile-tab-height, 64px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(180deg, transparent, rgba(10, 20, 42, 0.08));
+  visibility: hidden;
+  pointer-events: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.mobile-dismiss.is-active { visibility: visible; pointer-events: auto; }
+.mobile-dismiss:is(:hover, :active) { transform: none; box-shadow: none; }
+.mobile-dismiss:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -3px; }
+
+/* The collapse button stays outside the horizontally scrolling glass tabs. */
 .mobile-tabs {
   position: absolute;
   bottom: 7px;
@@ -122,25 +156,71 @@ html, body, #root {
   z-index: 300;
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: 4px;
   padding: 4px;
   border-radius: 28px;
-  background: linear-gradient(150deg, rgba(71, 77, 109, 0.84), rgba(22, 25, 44, 0.96));
-  border: 1px solid rgba(220, 230, 255, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 5px 18px rgba(15, 23, 42, 0.22);
-  backdrop-filter: blur(24px) saturate(1.35);
-  -webkit-backdrop-filter: blur(24px) saturate(1.35);
-  overflow-x: auto;
+  background: linear-gradient(150deg, rgba(103, 121, 155, 0.56), rgba(25, 34, 55, 0.78));
+  border: 1px solid rgba(223, 236, 255, 0.36);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(255, 255, 255, 0.06), 0 5px 22px rgba(15, 23, 42, 0.20);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  overflow: hidden;
   padding-bottom: 0;
+  isolation: isolate;
+}
+.mobile-tabs__scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
-  touch-action: pan-x;
+  /* Pointer capture supports long-hold dragging; short drags scroll in JS. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 24px;
 }
-.mobile-tabs::-webkit-scrollbar { display: none; }
+.mobile-tabs__scroll::-webkit-scrollbar { display: none; }
+.mobile-tabs__track {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  width: max-content;
+  min-width: 100%;
+}
+.mobile-tabs__selection {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  bottom: 2px;
+  width: var(--dock-active-width, 44px);
+  transform: translateX(var(--dock-active-x, 0px));
+  border-radius: 24px;
+  pointer-events: none;
+  background: linear-gradient(150deg, rgba(173, 208, 255, 0.34), rgba(107, 161, 245, 0.13));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.46), inset 0 0 0 1px rgba(215, 234, 255, 0.24), 0 2px 7px rgba(7, 20, 40, 0.12);
+}
+.mobile-tabs__track[data-ready] .mobile-tabs__selection {
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1.08), width 360ms cubic-bezier(0.22, 1, 0.36, 1.08);
+}
+.mobile-tabs__track[data-dragging] .mobile-tabs__selection {
+  transition: none;
+  transform: translateX(var(--dock-active-x, 0px)) scaleY(1.08);
+  background: radial-gradient(ellipse at var(--dock-drag-light, 50%) 0%, rgba(255,255,255,.55), transparent 65%),
+    linear-gradient(155deg, rgba(185, 218, 255, .5), rgba(111, 167, 246, .16));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.8), inset 0 -2px 4px rgba(121,180,255,.32), 0 4px 14px rgba(8,28,55,.2);
+}
+.mobile-tabs__track[data-dragging] .mobile-tab { color: #d8eaff; }
+[data-theme='light'] .mobile-tabs__track[data-dragging] .mobile-tab { color: #1e5ba6; }
 [data-theme='light'] .mobile-tabs {
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.98), rgba(226, 235, 253, 0.94));
-  border-color: rgba(255, 255, 255, 0.8);
-  box-shadow: inset 0 1px 0 white, 0 5px 18px rgba(30, 55, 110, 0.16);
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.76), rgba(219, 230, 247, 0.60));
+  border-color: rgba(255, 255, 255, 0.90);
+  box-shadow: inset 0 1px 0 white, inset 0 -1px 0 rgba(176, 194, 218, 0.18), 0 5px 22px rgba(30, 55, 110, 0.14);
+}
+[data-theme='light'] .mobile-tabs__selection {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.76), rgba(149, 193, 255, 0.38));
+  box-shadow: inset 0 1px 0 white, inset 0 0 0 1px rgba(255, 255, 255, 0.88), 0 2px 8px rgba(45, 83, 150, 0.14);
 }
 
 .mobile-tab {
@@ -153,32 +233,27 @@ html, body, #root {
   padding: 6px 2px;
   background: transparent;
   border: none;
-  color: var(--text-secondary);
+  color: #c4cedf;
   font-size: 0.62rem;
   min-height: 52px;
   min-width: 44px;
   white-space: nowrap;
   border-radius: 23px;
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  position: relative;
+  z-index: 1;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 180ms ease;
 }
-.mobile-tab.is-active {
-  color: #e6efff;
-  background: linear-gradient(145deg, rgba(113, 150, 255, 0.38), rgba(80, 109, 235, 0.22));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), inset 0 0 0 1px rgba(184,206,255,0.18);
+.mobile-tab:is(:hover, :active) { transform: none; box-shadow: none; }
+.mobile-tab svg { transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1.15); }
+.mobile-tab.is-active { color: #b9dbff; font-weight: 650; }
+[data-theme='light'] .mobile-tab { color: #435873; }
+[data-theme='light'] .mobile-tab.is-active { color: #165dc8; }
+.mobile-tab:active svg { transform: scale(0.85); }
+@media (hover: hover) {
+  .mobile-tab:hover { color: #e0edff; }
+  [data-theme='light'] .mobile-tab:hover { color: #165dc8; }
 }
-[data-theme='light'] .mobile-tab.is-active { color: #2c54ce; background: linear-gradient(145deg, #e2ecff, #cedeff); }
-.mobile-tab:active { transform: scale(0.94); background-color: rgba(137, 172, 255, 0.16); }
-
-.mobile-tab--toggle {
-  color: var(--text-muted);
-  border-left: 0;
-  flex: 0 0 auto;
-  min-width: 44px;
-  position: sticky;
-  right: 0;
-  background: #272d49;
-}
-[data-theme='light'] .mobile-tab--toggle { background: #e8effb; }
 
 /* ── Diagnostic strip ── */
 .mobile-diag-strip {
@@ -259,47 +334,66 @@ html, body, #root {
 .mobile-sheet {
   position: absolute;
   z-index: 250;
-  left: 0;
-  right: 0;
-  bottom: var(--mobile-tab-height, 56px);
-  height: min(70%, calc(100% - var(--mobile-header-height, 50px) - var(--mobile-tab-height, 56px) - 16px));
+  left: 7px;
+  right: 7px;
+  bottom: calc(var(--mobile-tab-height, 64px) + 8px);
+  height: min(70%, calc(100% - var(--mobile-header-height, 90px) - var(--mobile-tab-height, 64px) - 24px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 22px 22px 0 0;
-  border: 1px solid var(--border-glass);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.16);
+  isolation: isolate;
+  border-radius: 26px;
+  border: 1px solid rgba(215, 233, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 10px 36px rgba(6, 19, 38, 0.20);
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(30px);
+  transform: translateY(56px) scale(0.96, 0.98);
+  transform-origin: center bottom;
   opacity: 0;
-  transition: transform 220ms ease, opacity 220ms ease, visibility 220ms;
+  transition: transform 240ms cubic-bezier(0.4, 0, 0.7, 0.2), opacity 180ms ease, visibility 0s 240ms;
 }
 .mobile-sheet.is-open {
   visibility: visible;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   opacity: 1;
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1.08), opacity 200ms ease, visibility 0s;
+}
+.mobile-sheet.is-dissolving { opacity: 0; transition: none; pointer-events: none; }
+.mobile-dissolve {
+  position: absolute;
+  z-index: 275;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+.mobile-sheet::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 0 0 1px rgba(235, 245, 255, 0.07);
 }
 .mobile-sheet__backdrop {
   position: absolute;
-  left: 0;
-  bottom: calc(-1 * var(--mobile-tab-height, 56px));
-  width: 100%;
+  left: -7px;
+  bottom: calc(-1 * (var(--mobile-tab-height, 64px) + 8px));
+  width: 100vw;
   max-width: none;
   height: var(--mobile-viewport-height, 100dvh);
-  filter: blur(16px) saturate(1.15);
+  filter: blur(18px) saturate(1.3);
   object-fit: fill;
   pointer-events: none;
 }
 .mobile-sheet__tint {
   position: absolute;
   inset: 0;
-  background: rgba(18, 16, 35, 0.80);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: linear-gradient(150deg, rgba(31, 43, 64, 0.76), rgba(16, 23, 41, 0.82));
 }
-[data-theme='light'] .mobile-sheet__tint { background: rgba(245, 248, 255, 0.76); }
+[data-theme='light'] .mobile-sheet { border-color: rgba(255, 255, 255, 0.9); }
+[data-theme='light'] .mobile-sheet__tint { background: linear-gradient(150deg, rgba(250, 253, 255, 0.78), rgba(235, 244, 255, 0.70)); }
 .mobile-sheet__handle {
   position: relative;
   z-index: 2;
@@ -312,7 +406,61 @@ html, body, #root {
 }
 .mobile-main > div { flex: 0 0 auto; min-width: 0; }
 .mobile-main [hidden] { display: none !important; }
-.mobile-main :is(.glass-panel, .ai-section, .knowledge-panel) { background: transparent; }
+.mobile-main :is(.glass-panel, .ai-section, .knowledge-panel, .kb-bento-card, .kb-editor-panel, .kb-question-card, .usage-card) {
+  background: var(--mobile-glass-fill) !important;
+  border-color: var(--mobile-glass-edge) !important;
+  border-radius: 20px !important;
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight), 0 4px 14px rgba(8,25,51,.05);
+  /* One frosted page layer is enough; nested backdrop filters can leave stale
+     compositor tiles after an interrupted WebView transform. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.mobile-shell :is(.btn, .kb-action-button, .kb-type-pill, .custom-select__button) {
+  border-radius: 18px;
+  background: var(--mobile-control-fill);
+  border: 1px solid var(--mobile-glass-edge);
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight), 0 2px 8px rgba(8,25,51,.06);
+}
+.mobile-shell :is(.btn-primary, .kb-action-button--primary) {
+  background: linear-gradient(145deg, rgba(47,124,243,.85), rgba(71,106,223,.64));
+  color: white;
+}
+.mobile-shell :is(.btn-success) { color: var(--success-color); }
+.mobile-shell :is(.btn-danger, .kb-action-button--danger) { color: var(--danger-color); }
+.mobile-shell :is(input:not([type='checkbox']):not([type='radio']):not([type='file']), textarea, select) {
+  border-radius: 16px;
+  background: var(--mobile-control-fill);
+  border: 1px solid var(--mobile-glass-edge);
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight);
+  color: var(--text-primary);
+}
+.mobile-shell :is(input, textarea, select, button):focus-visible {
+  outline: 2px solid #4e9aff;
+  outline-offset: 2px;
+}
+.mobile-shell :is(input[type='checkbox'], input[type='radio'], input[type='range']) { accent-color: #4189f6; }
+.mobile-shell .custom-select__menu {
+  border-radius: 18px;
+  background: var(--mobile-popup-fill);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: 1px solid var(--mobile-glass-edge);
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight), 0 8px 24px rgba(5,20,41,.2);
+  animation: mobile-glass-enter 220ms ease-out;
+}
+.mobile-shell .custom-select__option { border-radius: 13px; }
+.mobile-shell .custom-select__option.active { background: rgba(75,145,255,.18); }
+.mobile-shell :is(.mobile-url-bar, .mobile-browser-tab, .mobile-nav-btn) {
+  border-radius: 18px;
+  background: var(--mobile-control-fill);
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight);
+}
+.mobile-shell .mobile-browser-tab.is-active { background: rgba(71,141,244,.20); border-color: rgba(103,168,255,.6); }
+.mobile-shell [role='dialog'] > .glass-panel { border-radius: 26px !important; }
+body.mobile-ui .web-ai-dialog { border-radius: 26px; background: var(--bg-panel); backdrop-filter: blur(24px); }
+body.mobile-ui .web-ai-dialog::backdrop { background: rgba(7,18,36,.30); backdrop-filter: blur(5px); }
+@keyframes mobile-glass-enter { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
 .mobile-url-input { min-height: 34px; }
 .mobile-tab { min-height: 54px; }
 @media (max-width: 380px) {
@@ -331,8 +479,11 @@ html, body, #root {
   .mobile-tabs { bottom: 0; left: 2px; right: 2px; padding: 1px; border-radius: 18px; }
   .mobile-tab { min-height: 32px; flex-direction: row; gap: 4px; padding: 2px; border-radius: 16px; }
   .mobile-tab svg { width: 16px; height: 16px; }
+  .mobile-sheet { left: 3px; right: 3px; border-radius: 18px; }
+  .mobile-sheet__handle { margin-top: 5px; margin-bottom: 2px; }
+  .mobile-tabs__selection { border-radius: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mobile-sheet { transition: none; }
-  .mobile-tab { transition: none; }
+  .mobile-sheet, .mobile-sheet.is-open { transition: none; }
+  .mobile-tab, .mobile-tab svg, .mobile-tabs__track[data-ready] .mobile-tabs__selection { transition: none; }
 }

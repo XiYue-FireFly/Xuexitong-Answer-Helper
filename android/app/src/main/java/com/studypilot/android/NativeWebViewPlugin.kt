@@ -3,11 +3,14 @@ package com.studypilot.android
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect as AndroidRect
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.view.KeyEvent
+import android.view.PixelCopy
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import android.webkit.*
@@ -249,8 +252,50 @@ class NativeWebViewPlugin : Plugin() {
             overlay.headerBottom = headerHeight * density
             overlay.panelTop = (call.getFloat("panelTop") ?: (overlay.height / density - tabHeight)) * density
             overlay.modalOpen = call.getBoolean("modalOpen", false) ?: false
+            overlay.panelOpen = call.getBoolean("panelOpen", false) ?: false
             tabs.values.forEach { view -> view.layoutParams = browserLayout() }
             call.resolve()
+        }
+    }
+
+    @PluginMethod
+    fun captureToolSurface(call: PluginCall) {
+        activity.runOnUiThread {
+            val view = bridge.webView
+            val density = context.resources.displayMetrics.density
+            val x = ((call.getFloat("x") ?: 0f) * density).toInt().coerceIn(0, maxOf(0, view.width - 1))
+            val y = ((call.getFloat("y") ?: 0f) * density).toInt().coerceIn(0, maxOf(0, view.height - 1))
+            val width = ((call.getFloat("width") ?: 0f) * density).toInt().coerceAtMost(view.width - x)
+            val height = ((call.getFloat("height") ?: 0f) * density).toInt().coerceAtMost(view.height - y)
+            if (width <= 0 || height <= 0 || !view.isAttachedToWindow) {
+                call.resolve(JSObject().put("dataUrl", "")); return@runOnUiThread
+            }
+            // Ephemeral, bounded screenshot of app-owned UI. Nothing is persisted.
+            val scale = minOf(1f, 560f / width, 900f / height)
+            val bitmap = Bitmap.createBitmap(maxOf(1, (width * scale).toInt()), maxOf(1, (height * scale).toInt()), Bitmap.Config.ARGB_8888)
+            fun finish(success: Boolean) {
+                try {
+                    if (!success) { call.resolve(JSObject().put("dataUrl", "")); return }
+                    val bytes = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 88, bytes)
+                    call.resolve(JSObject().put("dataUrl", "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP)))
+                } finally { bitmap.recycle() }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val location = IntArray(2)
+                view.getLocationInWindow(location)
+                val rect = AndroidRect(location[0] + x, location[1] + y, location[0] + x + width, location[1] + y + height)
+                try {
+                    PixelCopy.request(activity.window, rect, bitmap,
+                        PixelCopy.OnPixelCopyFinishedListener { result -> finish(result == PixelCopy.SUCCESS) }, handler)
+                } catch (_: IllegalArgumentException) { finish(false) }
+            } else {
+                val canvas = Canvas(bitmap)
+                canvas.scale(scale, scale)
+                canvas.translate(-x.toFloat(), -y.toFloat())
+                view.draw(canvas)
+                finish(true)
+            }
         }
     }
 

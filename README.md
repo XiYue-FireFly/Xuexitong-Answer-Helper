@@ -2,6 +2,15 @@
 
 Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
 
+## Android v1.2.0 更新
+
+- 工具 Tab 点击展开，再次点击当前 Tab 收起，删除独立收起按钮。
+- 长按拖动时玻璃胶囊跟随手指，松手选择工具，窄屏支持边缘自动滚动。
+- 工具页切换与收起加入真实像素的灰化颗粒消散；地址栏、标签页、工具卡片、输入框与弹窗统一玻璃材质。
+- 点击面板外空白仅收起工具并拦截本次手势，保持网页尺寸和工具输入草稿。
+
+本版源码可按下文构建。详见 [Android v1.2.0 更新说明](docs/releases/android-v1.2.0.md) 与 [验证记录](docs/qa/android-browser/liquid-glass-v120-verification.md)。
+
 ## Android v1.0.0
 
 - 浏览器独立标签页保留原题页面，支持新窗口、前进后退和系统返回键。
