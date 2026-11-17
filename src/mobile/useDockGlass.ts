@@ -4,14 +4,16 @@ import { continuousCapture } from './continuousCapture';
 import { createGlassRenderer } from './glassRenderer';
 import { NativeWebView } from '../platform/nativeWebViewPlugin';
 import { TaskStatus } from '../platform/taskStatusPlugin';
+import { lensDisplacement } from './lensDisplacement';
 
 const spring = (value: number): Spring => ({ value, target: value, velocity: 0 });
 export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: RefObject<HTMLDivElement>, navRef: RefObject<HTMLElement>, theme: string) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const motion = useRef({ x: spring(0), width: spring(76), lift: spring(0), stretch: spring(0), pull: spring(0) });
+  const motion = useRef({ x: spring(0), width: spring(44), lift: spring(0), stretch: spring(0), pull: spring(0) });
   const frame = useRef(0), previous = useRef(0), dark = useRef(theme === 'dark'); dark.current = theme === 'dark';
   const renderer = useRef<ReturnType<typeof createGlassRenderer>>(null);
-  const pressedAt = useRef(0), dropTimer = useRef<ReturnType<typeof setTimeout>>();
+  const dropping = useRef(false);
+  const contents = useRef<{ button: HTMLButtonElement; base: HTMLElement | null; magnified: HTMLElement | null; map: Element | null; warp: Element | null; active: boolean }[]>([]);
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   const paint = (now: number) => {
     frame.current = 0;
@@ -19,15 +21,27 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     if (!track || !nav) return;
     const dt = previous.current ? (now - previous.current) / 1000 : 1 / 60; previous.current = now;
     const m = motion.current;
-    m.stretch.target = Math.min(0.18, Math.abs(m.x.velocity) / 3500) * (m.lift.target ? 1 : 0.5);
+    const acceleration = (m.x.target - m.x.value) * 600 - m.x.velocity * 35;
+    const braking = Math.max(0, -acceleration * Math.sign(m.x.velocity));
+    m.stretch.target = .10 * Math.tanh(Math.abs(m.x.velocity) / 400) - .07 * Math.tanh(braking / 2500);
     let moving = false;
     for (const key of ['x', 'width', 'lift', 'stretch', 'pull'] as const) {
       if (reduced()) { m[key].value = m[key].target; m[key].velocity = 0; }
-      else moving = springStep(m[key], dt, key === 'x' && track.dataset.dragging ? 1050 : key === 'stretch' ? 170 : 460,
-        key === 'x' && track.dataset.dragging ? 58 : key === 'stretch' ? 15 : 32) || moving;
+      else moving = springStep(m[key], dt, key === 'x' ? 1024 : key === 'stretch' ? 160 : key === 'lift' ? 400 : 600,
+        key === 'x' ? 60 : key === 'stretch' ? 20 : key === 'lift' ? 28 : 40) || moving;
+    }
+    // Finish rising and reach the released destination before lowering. A
+    // fixed timeout drops a quick flick while its lens is still travelling.
+    if (dropping.current && (reduced() || (m.lift.value >= .975 && Math.abs(m.x.target - m.x.value) < .25))) {
+      dropping.current = false; m.lift.target = 0; m.pull.target = 0; moving = true;
     }
     const lift = Math.max(0, Math.min(1.12, m.lift.value));
-    const offset = track.getBoundingClientRect().left - nav.getBoundingClientRect().left;
+    const navBounds = nav.getBoundingClientRect();
+    const offset = track.getBoundingClientRect().left - navBounds.left;
+    // Read geometry before any style writes. Alternating offset reads with
+    // clip/filter writes forces a new layout for every destination each frame.
+    const geometry = contents.current.map(content => ({ ...content, left: content.button.offsetLeft,
+      width: content.button.offsetWidth, height: content.button.offsetHeight }));
     const lens = fitDockLens(m.x.value + offset + m.pull.value + m.width.value / 2, m.width.value, lift,
       m.stretch.value, nav.clientWidth, nav.clientHeight);
     track.style.setProperty('--dock-active-x', `${lens.x - offset}px`);
@@ -37,46 +51,84 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     track.style.setProperty('--dock-stretch', `${m.stretch.value}`);
     track.style.setProperty('--dock-pull', `${m.pull.value}px`);
     const center = m.x.value + m.width.value / 2;
-    for (const button of track.querySelectorAll<HTMLButtonElement>('.mobile-tab')) {
-      const weight = Math.max(0, 1 - Math.abs(button.offsetLeft + button.offsetWidth / 2 - center) / (m.width.value * 0.65));
-      button.style.setProperty('--dock-magnify', `${1 + lift * 0.16 * weight}`);
+    for (const [index, content] of geometry.entries()) {
+      const { button, base, magnified, map, warp, left: buttonLeft, width: buttonWidth, height: buttonHeight } = content;
+      const weight = Math.max(0, 1 - Math.abs(buttonLeft + buttonWidth / 2 - center) / (m.width.value * 0.65));
+      const intersects = lift > .4 && lens.x - offset < buttonLeft + buttonWidth && lens.x - offset + lens.width > buttonLeft;
+      if (!intersects && !content.active) continue;
+      contents.current[index].active = intersects;
+      button.style.setProperty('--dock-magnify', `${1 + lift * 0.12 * weight}`);
+      if (base && magnified) {
+        const left = lens.x - offset - buttonLeft, top = (buttonHeight - lens.height) / 2;
+        const w = lens.width, h = lens.height, r = Math.min(w, h) / 2;
+        const path = `M${left+r} ${top}H${left+w-r}Q${left+w} ${top} ${left+w} ${top+r}V${top+h-r}Q${left+w} ${top+h} ${left+w-r} ${top+h}H${left+r}Q${left} ${top+h} ${left} ${top+h-r}V${top+r}Q${left} ${top} ${left+r} ${top}Z`;
+        base.style.clipPath = intersects ? `path(evenodd, "M-20 -20H${buttonWidth+20}V${buttonHeight+20}H-20Z ${path}")` : '';
+        magnified.style.clipPath = `path("${path}")`;
+        magnified.style.opacity = intersects ? '1' : '0';
+        if (map) {
+          map.setAttribute('x', String(left)); map.setAttribute('y', String(top));
+          map.setAttribute('width', String(w)); map.setAttribute('height', String(h));
+        }
+        warp?.setAttribute('scale', String(lift * 8));
+      }
     }
     renderer.current?.draw(nav.clientWidth, nav.clientHeight, { x: m.x.value + offset + m.pull.value, width: m.width.value,
-      lift, stretch: m.stretch.value, light: (center / track.offsetWidth - 0.5) * 2, dark: dark.current });
+      lift, stretch: m.stretch.value, light: (center / track.offsetWidth - 0.5) * 2, dark: dark.current,
+      originX: navBounds.x, originY: navBounds.y });
     if (moving) frame.current = requestAnimationFrame(paint); else previous.current = 0;
   };
   const animate = () => { if (!frame.current && !document.hidden) frame.current = requestAnimationFrame(paint); };
   const target = (x: number, width: number, immediate = false) => {
-    const m = motion.current; m.width.target = Math.max(44, width + 6); m.x.target = x + width / 2 - m.width.target / 2;
+    const m = motion.current; m.width.target = Math.max(32, width - 4); m.x.target = x + width / 2 - m.width.target / 2;
     if (immediate) { m.x.value = m.x.target; m.width.value = m.width.target; }
     animate();
   };
   const lift = (value: number) => {
-    clearTimeout(dropTimer.current);
-    if (value) { pressedAt.current = performance.now(); motion.current.lift.target = value; animate(); }
-    else {
-      const drop = () => { motion.current.lift.target = 0; motion.current.pull.target = 0; animate(); };
-      const remaining = 220 - (performance.now() - pressedAt.current);
-      if (!reduced() && remaining > 0) dropTimer.current = setTimeout(drop, remaining); else drop();
-    }
+    if (value) { dropping.current = false; motion.current.lift.target = value; }
+    else if (motion.current.lift.target < .9) { dropping.current = false; motion.current.lift.target = 0; motion.current.pull.target = 0; }
+    else dropping.current = true;
+    animate();
   };
   useLayoutEffect(() => {
     const canvas = canvasRef.current, track = trackRef.current, scroller = scrollRef.current, nav = navRef.current;
     if (!canvas || !track || !scroller || !nav) return;
+    contents.current = Array.from(track.querySelectorAll<HTMLButtonElement>('.mobile-tab')).map(button => ({ button,
+      base: button.querySelector<HTMLElement>('.mobile-tab__content'), magnified: button.querySelector<HTMLElement>('.mobile-tab__lens'),
+      map: nav.querySelector(`[data-warp-map="${button.dataset.tool}"]`), warp: nav.querySelector(`[data-warp-scale="${button.dataset.tool}"]`), active: false }));
+    const field = lensDisplacement(), mapCanvas = document.createElement('canvas');
+    mapCanvas.width = field.width; mapCanvas.height = field.height;
+    const mapContext = mapCanvas.getContext('2d');
+    if (mapContext) {
+      mapContext.putImageData(new ImageData(field.pixels, field.width, field.height), 0, 0);
+      const uri = mapCanvas.toDataURL();
+      nav.querySelectorAll('[data-warp-map]').forEach(map => map.setAttribute('href', uri));
+    }
     let disposed = false, revision = 0, foreground = true;
     const create = () => { renderer.current?.dispose(); renderer.current = createGlassRenderer(canvas); track.dataset.optics = renderer.current ? 'gpu' : 'css'; animate(); };
     const lost = (event: Event) => { event.preventDefault(); renderer.current?.dispose(); renderer.current = null; track.dataset.optics = 'css'; };
     const capture = async () => {
       if (!foreground || document.hidden || !renderer.current) return;
+      // Source drawing and texture uploads share the compositor with the lens.
+      // Keep a live cadence while leaving several frames free during travel.
+      const now = performance.now();
+      const travelling = Math.abs(motion.current.x.velocity) > 20 || Math.abs(motion.current.x.target - motion.current.x.value) > 2;
+      if (travelling && now - lastCapture < 320) return;
+      lastCapture = now;
       const request = ++revision;
       try {
-        const result = await NativeWebView.captureDockBackdrop();
+        const { x, y, width, height } = nav.getBoundingClientRect();
+        const result = await NativeWebView.captureDockBackdrop({ x, y, width, height });
         if (!result.dataUrl || disposed || request !== revision) return;
         const image = new Image(); image.src = result.dataUrl; await image.decode();
-        if (!disposed && foreground && request === revision) { renderer.current?.image(image); animate(); }
+        const current = nav.getBoundingClientRect();
+        if (!disposed && foreground && request === revision && Math.abs(current.x - x) < 1 && Math.abs(current.y - y) < 1
+          && Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1) {
+          renderer.current?.image(image, result.bounds); animate();
+        }
       } catch { /* CSS material remains available without a snapshot. */ }
     };
-    const captures = continuousCapture(capture, reduced() ? 160 : 65);
+    let lastCapture = 0;
+    const captures = continuousCapture(capture, reduced() ? 180 : 90);
     const visible = () => {
       captures.setVisible(foreground && !document.hidden && !!renderer.current);
       if (!foreground || document.hidden) { ++revision; cancelAnimationFrame(frame.current); frame.current = 0; previous.current = 0; }
@@ -96,7 +148,7 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     const restored = () => { create(); visible(); };
     canvas.addEventListener('webglcontextlost', contextLost); canvas.addEventListener('webglcontextrestored', restored);
     document.addEventListener('visibilitychange', visible); scroller.addEventListener('scroll', animate, { passive: true });
-    return () => { disposed = true; ++revision; captures.dispose(); clearTimeout(dropTimer.current); observer.disconnect(); cancelAnimationFrame(frame.current); frame.current = 0;
+    return () => { disposed = true; ++revision; captures.dispose(); observer.disconnect(); cancelAnimationFrame(frame.current); frame.current = 0;
       renderer.current?.dispose(); renderer.current = null;
       void nativeVisibility.then(listener => listener.remove());
       canvas.removeEventListener('webglcontextlost', contextLost); canvas.removeEventListener('webglcontextrestored', restored);

@@ -70,6 +70,16 @@ try {
   }
   assert.ok(source);
   await source.getByRole('heading').waitFor();
+  const floatingLayout = await shell.evaluate(() => {
+    const dock = document.querySelector('.mobile-tabs').getBoundingClientRect();
+    const header = document.querySelector('.mobile-header').getBoundingClientRect();
+    return { height: innerHeight, width: innerWidth, header: header.bottom,
+      dock: { left: dock.left, top: dock.top, right: dock.right, bottom: dock.bottom } };
+  });
+  assert.ok(Math.abs(await source.evaluate(() => innerHeight) - (floatingLayout.height - floatingLayout.header)) <= 2,
+    'The native webpage must extend behind the floating dock to the bottom of the safe area');
+  assert.ok(floatingLayout.dock.left >= 12 && floatingLayout.width - floatingLayout.dock.right >= 12
+    && floatingLayout.height - floatingLayout.dock.bottom >= 10, 'The dock must float with space on all three lower sides');
   const glassPixels = () => shell.evaluate(() => {
     const canvas = document.querySelector('.mobile-tabs__optics'), gl = canvas.getContext('webgl');
     const pixels = new Uint8Array(4);
@@ -95,6 +105,20 @@ try {
   await shell.waitForTimeout(500);
   await source.evaluate(() => { document.body.style.background = ''; });
   reports.push('Refraction follows changing webpage pixels without navigation or a dock press.');
+  await source.evaluate(() => {
+    document.body.style.background = '#ff2020';
+    const section = document.createElement('div'); section.id = 'deep-scroll-color';
+    section.style.cssText = 'position:absolute;top:100vh;left:0;right:0;height:250vh;background:#2040ff;z-index:10';
+    document.body.append(section);
+    scrollTo(0, innerHeight * 1.3);
+  });
+  await source.waitForFunction(() => scrollY > innerHeight);
+  await shell.waitForTimeout(900);
+  const scrolledGlass = await glassPixels();
+  assert.ok(scrolledGlass[2] > scrolledGlass[0] + 70,
+    `Long-page glass must show the currently visible blue section, not red content at the old scroll position: ${scrolledGlass}`);
+  reports.push('After scrolling more than one viewport down a long page, glass samples the visible section rather than the previous document position.');
+  await source.evaluate(() => { document.querySelector('#deep-scroll-color').remove(); document.body.style.background = ''; scrollTo(0, 0); });
   const screenPoint = async point => {
     const entries = await (await fetch('http://127.0.0.1:9222/json/list')).json();
     const dimensions = JSON.parse(entries.find(entry => entry.url.startsWith('https://localhost')).description);
@@ -105,6 +129,40 @@ try {
     const screen = await screenPoint(point);
     runAdb('shell', 'input', 'tap', String(screen.x), String(screen.y));
   };
+  // Observe rendered frames during an actual native tap, not only the final
+  // selected state. This catches snapping, reversal and an oversized lens.
+  await shell.getByRole('button', { name: '答题', exact: true }).dispatchEvent('click');
+  if (await shell.locator('.mobile-sheet.is-open').count()) {
+    await shell.getByRole('button', { name: '答题', exact: true }).dispatchEvent('click');
+  }
+  await shell.waitForTimeout(600);
+  const smoothStart = await shell.locator('.mobile-tabs__selection').boundingBox();
+  const smoothTarget = await shell.getByRole('button', { name: '设置', exact: true }).boundingBox();
+  await shell.evaluate(() => {
+    window.tapFrames = [];
+    document.querySelector('.mobile-tabs').addEventListener('pointerdown', () => {
+      const start = performance.now();
+      const record = now => {
+        const lens = document.querySelector('.mobile-tabs__selection').getBoundingClientRect();
+        window.tapFrames.push({ x: lens.x + lens.width / 2, width: lens.width, time: now - start });
+        if (now - start < 650) requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);
+    }, { once: true });
+  });
+  await tap({ x: smoothTarget.x + smoothTarget.width / 2, y: smoothTarget.y + smoothTarget.height / 2 });
+  await shell.waitForTimeout(750);
+  const tapFrames = await shell.evaluate(() => window.tapFrames);
+  const from = smoothStart.x + smoothStart.width / 2, to = smoothTarget.x + smoothTarget.width / 2;
+  assert.ok(new Set(tapFrames.filter(frame => frame.x > from + 8 && frame.x < to - 8).map(frame => Math.round(frame.x))).size >= 3,
+    `Tap must visibly slide through intermediate positions: ${JSON.stringify(tapFrames)}`);
+  assert.ok(tapFrames.every(frame => frame.width <= smoothTarget.width + 3), 'The held or travelling lens must not reach the neighboring button');
+  const finalFrame = tapFrames.at(-1);
+  assert.ok(Math.abs(finalFrame.x - to) < 2, 'Tap animation must settle promptly at its destination');
+  writeFileSync(path.join(out, 'tap-motion.json'), JSON.stringify({ from, to, frames: tapFrames }, null, 2));
+  await shell.getByRole('button', { name: '设置', exact: true }).click();
+  await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open')); await shell.waitForTimeout(450);
+  reports.push('Native tap slides through distinct intermediate frames and settles at the target; the moving/held lens stays within one button slot.');
   const outside = () => shell.evaluate(() => {
     const header = document.querySelector('.mobile-header').getBoundingClientRect();
     const sheet = document.querySelector('.mobile-sheet').getBoundingClientRect();
@@ -112,11 +170,52 @@ try {
     return { x: innerWidth / 2, y: (header.bottom + sheet.top) / 2 };
   });
   const count = () => source.evaluate(() => ({ clicks: window.clicks, downs: window.downs, scrollY }));
+  const checkFloatingScene = async label => {
+    const layout = await shell.evaluate(() => {
+      const dock = document.querySelector('.mobile-tabs').getBoundingClientRect();
+      return { x: dock.x, y: dock.y, width: dock.width, height: dock.height, header: document.querySelector('.mobile-header').getBoundingClientRect().bottom, shellHeight: innerHeight };
+    });
+    assert.ok(Math.abs(await source.evaluate(() => innerHeight) - (layout.shellHeight - layout.header)) <= 2);
+    // A marker at the same screen coordinate must appear at the same place in
+    // the glass. A uniform color cannot detect stretched or inverted captures.
+    await source.evaluate(({ y, header, height }) => {
+      const marker = document.createElement('div'); marker.id = 'scene-marker';
+      marker.style.cssText = `position:fixed;z-index:999;left:0;right:0;top:${y - header + height * .28 - 5}px;height:10px;background:#ff1010`;
+      document.body.style.background = '#1020ff'; document.body.append(marker);
+    }, layout);
+    await shell.waitForTimeout(850);
+    const samples = await shell.evaluate(() => {
+      const canvas = document.querySelector('.mobile-tabs__optics'), gl = canvas.getContext('webgl');
+      return [.28, .72].map(y => {
+        const pixel = new Uint8Array(4);
+        const barHeight = document.querySelector('.mobile-tabs').clientHeight;
+        const opticalY = (12 + barHeight * y) / (barHeight + 24);
+        gl.readPixels(Math.round(canvas.width * .43), Math.round(canvas.height * (1-opticalY)), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        return Array.from(pixel);
+      });
+    });
+    assert.ok(samples[0][0] > samples[1][0] + 70 && samples[1][2] > samples[0][2] + 70,
+      `${label}: glass must preserve the source marker's actual vertical position: ${JSON.stringify(samples)}`);
+    writeFileSync(path.join(out, `${label}-floating-refraction.png`), runAdb('exec-out', 'screencap', '-p'));
+    await source.evaluate(() => { document.querySelector('#scene-marker').remove(); document.body.style.background = ''; });
+    // Real touches in the left and lower gaps must reach the native webpage.
+    const gapPoints = [{ x: 4, y: layout.y + layout.height / 2 }, { x: layout.x + layout.width / 2, y: layout.shellHeight - 4 }];
+    for (const point of gapPoints) {
+      const before = await count(); await tap(point);
+      await source.waitForFunction(before => window.clicks === before.clicks + 1 && window.downs === before.downs + 1, before);
+      await openTools('设置'); await shell.waitForTimeout(450);
+      const blocked = await count(); await tap(point);
+      await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
+      await shell.waitForTimeout(450); assert.deepEqual(await count(), blocked, 'Floating gaps must dismiss the panel without touching the webpage');
+    }
+    reports.push(`${label}: webpage extends under the floating dock, screen-position marker is aligned, side and bottom gaps reach the page only with tools closed.`);
+  };
   for (const [rotation, label] of [[0, 'portrait'], [1, 'landscape']]) {
     runAdb('shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0');
     runAdb('shell', 'settings', 'put', 'system', 'user_rotation', String(rotation));
     await shell.waitForFunction(rotation => screen.orientation.type.startsWith(rotation === 0 ? 'portrait' : 'landscape'), rotation);
     await shell.waitForTimeout(500);
+    await checkFloatingScene(label);
     const viewport = await source.evaluate(() => ({ width: innerWidth, height: innerHeight }));
     await openTools('设置');
     await shell.waitForTimeout(450);
@@ -213,7 +312,9 @@ try {
     const bar = await shell.locator('.mobile-tabs').boundingBox();
     assert.ok(bounds.x >= bar.x && bounds.x + bounds.width <= bar.x + bar.width,
       'Lifted and stretched lens must stay inside the dock at the edge');
-  } finally { motion('UP', endFinger); }
+    // Horizontal selection must survive a finger leaving the bar vertically.
+    motion('MOVE', { x: endFinger.x, y: endFinger.y - 100 });
+  } finally { motion('UP', { x: endFinger.x, y: endFinger.y - 100 }); }
   await shell.waitForFunction(() => document.querySelector('.mobile-tab.is-active')?.getAttribute('aria-label') === '设置');
   await shell.waitForTimeout(500);
   assert.equal(await finalTab.getAttribute('aria-expanded'), 'true', 'Release must open target exactly once');
@@ -275,7 +376,7 @@ try {
   const dockBounds = await shell.locator('.mobile-tabs').boundingBox();
   const boundedCenter = Math.max(dockBounds.x + 5 + capsule.width / 2,
     Math.min(dockBounds.x + dockBounds.width - 5 - capsule.width / 2, selected.x + selected.width / 2));
-  assert.ok(Math.abs(capsule.x + capsule.width / 2 - boundedCenter) < 1.5 && capsule.width >= selected.width,
+  assert.ok(Math.abs(capsule.x + capsule.width / 2 - boundedCenter) < 1.5 && capsule.width >= selected.width - 6 && capsule.width <= selected.width + 2,
     `Sliding capsule did not settle over the selected tab: ${JSON.stringify({ selected, capsule })}`);
   await tap(await outside());
   await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
@@ -331,6 +432,14 @@ try {
   motion('DOWN', pressPoint);
   try {
     await shell.waitForFunction(() => Number(document.querySelector('.mobile-tabs__track').style.getPropertyValue('--dock-lift')) > 0.95);
+    const raised = await shell.locator('.mobile-tabs__selection').boundingBox();
+    const bar = await shell.locator('.mobile-tabs').boundingBox();
+    assert.ok(raised.height > bar.height && raised.y < bar.y, 'Held lens must rise beyond the bar instead of remaining a flat selection');
+    assert.equal(await firstTab.locator('.mobile-tab__lens').evaluate(element => getComputedStyle(element).opacity), '1');
+    assert.ok(await firstTab.locator('.mobile-tab__content').evaluate(element => getComputedStyle(element).clipPath.startsWith('path(')),
+      'The lens must clip and magnify both icon and label without painting duplicate content');
+    assert.ok(await shell.locator('[data-warp-scale="automation"]').evaluate(element => Number(element.getAttribute('scale'))) > 6,
+      'Held icon and label must have a real rim displacement field');
     const magnify = await firstTab.evaluate(button => Number(button.style.getPropertyValue('--dock-magnify')));
     assert.ok(magnify > 1.1, `Pressed icon should magnify through the lens: ${magnify}`);
     writeFileSync(path.join(out, 'ultra-lens-pressed.png'), runAdb('exec-out', 'screencap', '-p'));

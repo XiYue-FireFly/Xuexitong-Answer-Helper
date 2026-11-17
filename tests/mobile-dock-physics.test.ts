@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { releaseIndex, rubberBand, springStep } from '../src/mobile/dockPhysics';
 describe('dock movement', () => {
+  it('catches up after a delayed frame instead of turning a fast tap into slow motion', () => {
+    const spring = { value: 0, velocity: 0, target: 300 };
+    springStep(spring, .25, 1024, 60);
+    expect(spring.value).toBeGreaterThan(295);
+    expect(spring.value).toBeLessThan(302);
+  });
   it('settles at the target and stops scheduling frames', () => {
     const spring = { value: 0, velocity: 0, target: 240 };
     let moving = true;

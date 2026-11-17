@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-11-17T16:58:40.084Z",
+  "reports": [
+    "Refraction follows changing webpage pixels without navigation or a dock press.",
+    "After scrolling more than one viewport down a long page, glass samples the visible section rather than the previous document position.",
+    "Native tap slides through distinct intermediate frames and settles at the target; the moving/held lens stays within one button slot.",
+    "portrait: webpage extends under the floating dock, screen-position marker is aligned, side and bottom gaps reach the page only with tools closed.",
+    "portrait: outside tap dismisses, zero webpage events; next tap reaches the source; browser viewport unchanged.",
+    "portrait: outside drag and long hold are consumed as whole gestures.",
+    "portrait: rapid reversal settles closed and restores webpage touch.",
+    "portrait: a held gesture across the closing transition never leaks to the source.",
+    "landscape: webpage extends under the floating dock, screen-position marker is aligned, side and bottom gaps reach the page only with tools closed.",
+    "landscape: outside tap dismisses, zero webpage events; next tap reaches the source; browser viewport unchanged.",
+    "landscape: outside drag and long hold are consumed as whole gestures.",
+    "landscape: rapid reversal settles closed and restores webpage touch.",
+    "landscape: a held gesture across the closing transition never leaks to the source.",
+    "Native long hold follows the finger across the dock, release opens the target exactly once; tapping that tab again dissolves and closes, without a separate collapse button.",
+    "Rapid tab selection settles the shared capsule correctly; unsent draft survives tab changes and close/reopen; modal backdrop takes priority.",
+    "GPU glass produces real refracted pixels; a press lifts the lens and magnifies icons; GPU loss retains CSS material and usable tabs, then restores the optical surface.",
+    "dark: internal glass material covers 答题, 题库, Token, 记录, 错误, 教程, 设置.",
+    "light: internal glass material covers 答题, 题库, Token, 记录, 错误, 教程, 设置.",
+    "320px dock: long-drag auto-scrolls to the edge tab; short swipe scrolls without selecting or opening a panel.",
+    "Reduced motion opens and closes without transitions."
+  ]
+}

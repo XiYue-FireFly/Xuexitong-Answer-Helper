@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { useDockGlass } from '../mobile/useDockGlass';
 import { releaseIndex, rubberBand } from '../mobile/dockPhysics';
+import { NativeWebView } from '../platform/nativeWebViewPlugin';
 
 export type MobileToolTab = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
 
@@ -32,9 +33,9 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
   const autoFrame = useRef(0);
   const suppressClick = useRef(false);
 
-  const restore = () => {
+  const restore = (destination?: MobileToolTab) => {
     const track = trackRef.current;
-    const selected = track?.querySelector<HTMLElement>('.is-active');
+    const selected = track?.querySelector<HTMLElement>(destination ? `[data-tool="${destination}"]` : '.is-active');
     if (!track || !selected) return;
     delete track.dataset.dragging;
     delete track.dataset.preview;
@@ -54,6 +55,9 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     glass.target(x - closest.offsetWidth / 2, closest.offsetWidth);
     glass.pull(rubberBand(raw - x, 14));
     track.style.setProperty('--dock-drag-light', `${x / track.offsetWidth * 100}%`);
+    if (gesture.current?.dragging && track.dataset.preview && track.dataset.preview !== closest.dataset.tool) {
+      void NativeWebView.selectionHaptic().catch(() => undefined);
+    }
     track.dataset.preview = closest.dataset.tool;
     return closest.dataset.tool as MobileToolTab;
   };
@@ -72,9 +76,9 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     const current = gesture.current;
     if (!current) return;
     clearTimeout(current.timer); cancelAnimationFrame(autoFrame.current); autoFrame.current = 0;
-    const rect = navRef.current?.getBoundingClientRect();
-    const inside = rect && current.latestY >= rect.top - 30 && current.latestY <= rect.bottom + 30;
-    let selected = current.dragging && inside ? follow(current.latestX) : null;
+    // Captured drags keep following horizontally even when the finger moves
+    // above the glass. Only a real pointer cancellation abandons selection.
+    let selected = current.dragging ? follow(current.latestX) : null;
     if (selected && !cancelled) {
       const items = Array.from(trackRef.current!.querySelectorAll<HTMLButtonElement>('.mobile-tab'));
       const index = items.findIndex(item => item.dataset.tool === selected);
@@ -84,7 +88,8 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     }
     suppressClick.current = current.dragging || current.moved || cancelled;
     gesture.current = null;
-    restore();
+    const committed = !cancelled && selected ? selected : !cancelled && !current.moved ? current.target.dataset.tool as MobileToolTab : undefined;
+    restore(committed);
     if (current.target.hasPointerCapture(current.pointer)) current.target.releasePointerCapture(current.pointer);
     if (!cancelled && selected) onSelect(selected, 'drag');
   };
@@ -94,12 +99,13 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     suppressClick.current = false;
     const target = event.currentTarget;
     trackRef.current!.dataset.pressed = 'true';
-    glass.lift(1); glass.target(target.offsetLeft, target.offsetWidth);
+    glass.lift(.18); glass.target(target.offsetLeft, target.offsetWidth);
     target.setPointerCapture(event.pointerId);
     const timer = setTimeout(() => {
       const current = gesture.current;
       if (!current || current.moved) return;
       current.dragging = true;
+      glass.lift(1);
       trackRef.current!.dataset.dragging = 'true';
       follow(current.latestX);
       autoFrame.current = requestAnimationFrame(autoScroll);
@@ -116,7 +122,7 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     const selected = track.querySelector<HTMLElement>('.is-active');
     if (!selected) return;
     const measure = () => {
-      if (gesture.current?.dragging) return;
+      if (gesture.current) return;
       // Layout offsets exclude press transforms and move with the scrolling track.
       glass.target(selected.offsetLeft, selected.offsetWidth, !track.dataset.ready);
       const left = selected.offsetLeft;
@@ -159,7 +165,7 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
         current.moved = true; clearTimeout(current.timer);
         const scroller = scrollRef.current!;
         if (scroller.scrollWidth <= scroller.clientWidth + 1) {
-          current.dragging = true; trackRef.current!.dataset.dragging = 'true'; follow(event.clientX);
+          current.dragging = true; glass.lift(1); trackRef.current!.dataset.dragging = 'true'; follow(event.clientX);
           autoFrame.current = requestAnimationFrame(autoScroll);
         } else { scroller.scrollLeft = current.scroll - (event.clientX - current.x); glass.lift(0); }
       }
@@ -170,6 +176,12 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
       finish(false);
     }} onPointerCancel={event => { if (gesture.current?.pointer === event.pointerId) finish(true); }}>
     <canvas ref={glass.canvasRef} className="mobile-tabs__optics" aria-hidden="true" />
+    <svg width="0" height="0" aria-hidden="true" className="mobile-tabs__filters"><defs>
+      {tabs.map(({ id }) => <filter key={id} id={`dock-content-${id}`} x="-100%" y="-100%" width="300%" height="300%" colorInterpolationFilters="sRGB">
+        <feImage data-warp-map={id} preserveAspectRatio="none" result="rim" />
+        <feDisplacementMap data-warp-scale={id} in="SourceGraphic" in2="rim" scale="0" xChannelSelector="R" yChannelSelector="G" />
+      </filter>)}
+    </defs></svg>
     <div ref={scrollRef} className="mobile-tabs__scroll">
       <div ref={trackRef} className="mobile-tabs__track">
         <div className="mobile-tabs__selection" aria-hidden="true" />
@@ -181,8 +193,8 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
             if (event.detail !== 0 && suppressClick.current) { event.preventDefault(); suppressClick.current = false; return; }
             onSelect(id);
           }}>
-          <Icon size={21} strokeWidth={1.8} aria-hidden="true" />
-          <span>{label}</span>
+          <span className="mobile-tab__content"><Icon size={21} strokeWidth={1.8} aria-hidden="true" /><span>{label}</span></span>
+          <span className="mobile-tab__lens" aria-hidden="true" style={{ filter: `url(#dock-content-${id})` }}><span className="mobile-tab__magnified"><Icon size={21} strokeWidth={1.8} /><span>{label}</span></span></span>
         </button>)}
       </div>
     </div>

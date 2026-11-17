@@ -55,6 +55,7 @@ class NativeWebViewPlugin : Plugin() {
     private var isLoading = false
     private var headerHeight = 50
     private var tabHeight = 56
+    private var keyboardVisible = false
     private val handler = Handler(Looper.getMainLooper())
     private var foreground = true
     private val captures = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -185,12 +186,14 @@ class NativeWebViewPlugin : Plugin() {
         overlay.browser = studyWebView
         val density = context.resources.displayMetrics.density
         overlay.headerBottom = headerHeight * density
-        overlay.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (overlay.panelTop == Float.MAX_VALUE) overlay.panelTop = overlay.height - tabHeight * density
-        }
         ViewCompat.setOnApplyWindowInsetsListener(overlay) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val typing = ime.bottom > bars.bottom
+            if (keyboardVisible != typing) {
+                keyboardVisible = typing
+                tabs.values.forEach { it.layoutParams = browserLayout() }
+            }
             val lp = view.layoutParams as FrameLayout.LayoutParams
             val bottom = maxOf(bars.bottom, ime.bottom)
             if (lp.topMargin != bars.top || lp.bottomMargin != bottom || lp.leftMargin != bars.left || lp.rightMargin != bars.right) {
@@ -240,7 +243,10 @@ class NativeWebViewPlugin : Plugin() {
     private fun browserLayout() = FrameLayout.LayoutParams(-1, -1).apply {
         val density = context.resources.displayMetrics.density
         topMargin = (headerHeight * density).toInt()
-        bottomMargin = (tabHeight * density).toInt()
+        // The dock floats over the browser; it must never shorten its viewport.
+        // In the very short IME viewport reserve the tool hit area so a
+        // focused login field cannot end up beneath the floating controls.
+        bottomMargin = if (keyboardVisible) (tabHeight * density).toInt() else 0
     }
     private fun state(tabId: String, loading: Boolean? = null): JSObject {
         val view = tabs[tabId]
@@ -267,7 +273,14 @@ class NativeWebViewPlugin : Plugin() {
             tabHeight = call.getInt("tabHeight", 56) ?: 56
             val density = context.resources.displayMetrics.density
             overlay.headerBottom = headerHeight * density
-            overlay.panelTop = (call.getFloat("panelTop") ?: (overlay.height / density - tabHeight)) * density
+            val dock = call.getObject("dockBounds")
+            if (dock != null) {
+                val x = dock.optDouble("x", 0.0).toFloat() * density
+                val y = dock.optDouble("y", 0.0).toFloat() * density
+                val width = dock.optDouble("width", 0.0).toFloat() * density
+                val height = dock.optDouble("height", 0.0).toFloat() * density
+                overlay.dockBounds.set(x, y, x + width, y + height)
+            }
             overlay.modalOpen = call.getBoolean("modalOpen", false) ?: false
             overlay.panelOpen = call.getBoolean("panelOpen", false) ?: false
             tabs.values.forEach { view -> view.layoutParams = browserLayout() }
@@ -320,6 +333,14 @@ class NativeWebViewPlugin : Plugin() {
     fun captureBackdrop(call: PluginCall) = captureBrowser(call, false)
 
     @PluginMethod
+    fun selectionHaptic(call: PluginCall) {
+        activity.runOnUiThread {
+            bridge.webView.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            call.resolve()
+        }
+    }
+
+    @PluginMethod
     fun captureDockBackdrop(call: PluginCall) = captureBrowser(call, true)
 
     private fun captureBrowser(call: PluginCall, dock: Boolean) {
@@ -331,22 +352,32 @@ class NativeWebViewPlugin : Plugin() {
             // Record only the source WebView. Copying the composed window also
             // copies our glass, creating feedback and duplicate text on each tick.
             val overlay = container!!
-            val height = if (dock) minOf(browser.height, (100 * resourcesDensity()).toInt()) else overlay.height
-            val width = if (dock) browser.width else overlay.width
+            val density = resourcesDensity()
+            // Coordinates belong to the transparent shell, not to the source
+            // page's viewport. Include a gutter for rays bent across the rim.
+            val gutter = 24 * density
+            val x = if (dock) (((call.getFloat("x") ?: 0f) * density - gutter).toInt()).coerceIn(0, overlay.width - 1) else 0
+            val y = if (dock) (((call.getFloat("y") ?: 0f) * density - gutter).toInt()).coerceIn(0, overlay.height - 1) else 0
+            val right = if (dock) (((call.getFloat("x") ?: 0f) + (call.getFloat("width") ?: 0f)) * density + gutter).toInt().coerceIn(x + 1, overlay.width) else overlay.width
+            val bottom = if (dock) (((call.getFloat("y") ?: 0f) + (call.getFloat("height") ?: 0f)) * density + gutter).toInt().coerceIn(y + 1, overlay.height) else overlay.height
+            val width = right - x
+            val height = bottom - y
             val scale = minOf(1f, (if (dock) 480f else 320f) / width)
             val bitmap = Bitmap.createBitmap(maxOf(1, (width * scale).toInt()), maxOf(1, (height * scale).toInt()), Bitmap.Config.ARGB_8888)
             try {
                 val canvas = Canvas(bitmap)
                 canvas.drawColor(Color.WHITE); canvas.scale(scale, scale)
-                if (dock) canvas.translate(0f, -(browser.height - height).toFloat())
-                else canvas.translate(browser.left.toFloat(), browser.top.toFloat())
+                // View.draw() bypasses the parent's drawChild scroll transform.
+                // Sample the visible viewport, including document scrolling.
+                canvas.translate((browser.left - x - browser.scrollX).toFloat(), (browser.top - y - browser.scrollY).toFloat())
                 browser.draw(canvas)
                 // Compression never occupies the UI thread. Each JS consumer
                 // waits for its capture+decode before requesting the next frame.
                 captures.execute {
                     try {
                         val bytes = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.JPEG, if (dock) 80 else 72, bytes)
-                        call.resolve(JSObject().put("dataUrl", "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP)))
+                        call.resolve(JSObject().put("dataUrl", "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP))
+                            .put("bounds", JSObject().put("x", x / density).put("y", y / density).put("width", width / density).put("height", height / density)))
                     } finally { bitmap.recycle() }
                 }
             } catch (_: RuntimeException) {
@@ -470,7 +501,7 @@ class NativeWebViewPlugin : Plugin() {
             val report = "Browser: " + state(activeTabId).toString() +
                 "\nBrowser size: " + container?.browser?.width + "x" + container?.browser?.height +
                 "\nOverlay size: " + container?.width + "x" + container?.height +
-                "\nTouch regions: " + container?.headerBottom + ".." + container?.panelTop
+                "\nTouch regions: header=" + container?.headerBottom + ", dock=" + container?.dockBounds
             call.resolve(JSObject().put("report", report))
         }
     }

@@ -1,6 +1,7 @@
 package com.studypilot.android
 
 import android.content.Context
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -9,7 +10,7 @@ import android.widget.FrameLayout
 class BrowserOverlayLayout(context: Context) : FrameLayout(context) {
     var browser: WebView? = null
     var headerBottom = 0f
-    var panelTop = Float.MAX_VALUE
+    val dockBounds = RectF()
     var modalOpen = false
     // Includes the closing transition. Never send an outside dismiss gesture to the page.
     var panelOpen = false
@@ -17,7 +18,14 @@ class BrowserOverlayLayout(context: Context) : FrameLayout(context) {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            browserGesture = !modalOpen && !panelOpen && event.y >= headerBottom && event.y < panelTop
+            // Hit the visible capsule, leaving its sides, rounded corners and
+            // bottom gap available to the webpage underneath.
+            val radius = dockBounds.height() / 2
+            val centerX = event.x.coerceIn(dockBounds.left + radius, dockBounds.right - radius)
+            val dx = event.x - centerX
+            val dy = event.y - dockBounds.centerY()
+            val inDock = !dockBounds.isEmpty && dx * dx + dy * dy <= radius * radius
+            browserGesture = !modalOpen && !panelOpen && event.y >= headerBottom && !inDock
         }
         if (!browserGesture) return super.dispatchTouchEvent(event)
         val target = browser ?: return false

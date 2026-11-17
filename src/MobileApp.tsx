@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AIPanel } from './components/AIPanel';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { BugReportPanel } from './components/BugReportPanel';
@@ -37,6 +37,10 @@ export default function MobileApp() {
   useBackgroundTask();
   const { settings, status, logs } = useAppStore();
   const [activeTab, setActiveTab] = useState<MobileToolTab>('automation');
+  // Keep mounted editors and their subscriptions, without rendering all seven
+  // large trees again for each movement/selection of the floating controls.
+  const toolPages = useMemo(() => ({ automation: <AIPanel />, snapshot: <KnowledgeBase />, tokens: <TokenUsagePanel />,
+    history: <HistoryPanel />, bugs: <BugReportPanel />, tutorial: <TutorialPanel />, settings: <SettingsPanel /> }), []);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelPresent, setPanelPresent] = useState(false);
   const blockBrowser = panelOpen || panelPresent;
@@ -167,7 +171,7 @@ export default function MobileApp() {
         if (!cancelled && request === revision) setBackdrop(result.dataUrl);
       }).catch(() => { if (!cancelled && request === revision) setBackdrop(''); });
     };
-    const captures = continuousCapture(capture, 220);
+    const captures = continuousCapture(capture, 220, 380);
     const visibility = () => { ++revision; captures.setVisible(foreground && !document.hidden); };
     const nativeVisibility = NativeWebView.onVisibilityChanged(state => { foreground = state.visible; visibility(); });
     visibility();
@@ -188,7 +192,7 @@ export default function MobileApp() {
       document.documentElement.style.setProperty('--mobile-viewport-height', `${window.innerHeight}px`);
       void NativeWebView.setLayout({
         headerHeight: Math.ceil(header.height), tabHeight: Math.ceil(tabInset),
-        panelTop: panelOpen ? sheet.offsetTop : tabs.top,
+        dockBounds: { x: tabs.x, y: tabs.y, width: tabs.width, height: tabs.height },
         modalOpen: Boolean(document.querySelector('dialog[open]')),
         panelOpen: blockBrowser,
       }).catch(() => undefined);
@@ -329,13 +333,13 @@ export default function MobileApp() {
         <div className="mobile-sheet__handle" aria-hidden="true" />
         <main className="mobile-main">
           <AnnouncementBanner />
-          <div hidden={activeTab !== 'automation'}><AIPanel /></div>
-          <div hidden={activeTab !== 'snapshot'}><KnowledgeBase /></div>
-          <div hidden={activeTab !== 'tokens'}><TokenUsagePanel /></div>
-          <div hidden={activeTab !== 'history'}><HistoryPanel /></div>
-          <div hidden={activeTab !== 'bugs'}><BugReportPanel /></div>
-          <div hidden={activeTab !== 'tutorial'}><TutorialPanel /></div>
-          <div hidden={activeTab !== 'settings'}><SettingsPanel /></div>
+          <div hidden={activeTab !== 'automation'}>{toolPages.automation}</div>
+          <div hidden={activeTab !== 'snapshot'}>{toolPages.snapshot}</div>
+          <div hidden={activeTab !== 'tokens'}>{toolPages.tokens}</div>
+          <div hidden={activeTab !== 'history'}>{toolPages.history}</div>
+          <div hidden={activeTab !== 'bugs'}>{toolPages.bugs}</div>
+          <div hidden={activeTab !== 'tutorial'}>{toolPages.tutorial}</div>
+          <div hidden={activeTab !== 'settings'}>{toolPages.settings}</div>
 
           <div className="mobile-logs-toggle" onClick={() => setLogsExpanded(v => !v)}>
             <span>{logsExpanded ? '收起日志' : '展开日志'}</span>

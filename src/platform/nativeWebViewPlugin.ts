@@ -12,6 +12,7 @@ export type NativeBrowserState = {
 };
 const plugin = registerPlugin<any>('NativeWebView');
 function getPlugin() { return plugin; }
+export type BrowserBounds = { x: number; y: number; width: number; height: number };
 
 export const NativeWebView = {
   /** Load a URL in the full-screen native WebView. */
@@ -64,11 +65,12 @@ export const NativeWebView = {
   onVisibilityChanged(callback: (state: { visible: boolean }) => void): Promise<PluginListenerHandle> {
     return getPlugin().addListener('visibilityChanged', callback);
   },
-  setLayout(layout: { headerHeight: number; tabHeight: number; panelTop: number; modalOpen: boolean; panelOpen: boolean }): Promise<void> {
+  setLayout(layout: { headerHeight: number; tabHeight: number; dockBounds: BrowserBounds; modalOpen: boolean; panelOpen: boolean }): Promise<void> {
     return getPlugin().setLayout(layout);
   },
   captureBackdrop(): Promise<{ dataUrl: string }> { return getPlugin().captureBackdrop(); },
-  captureDockBackdrop(): Promise<{ dataUrl: string }> { return getPlugin().captureDockBackdrop(); },
+  selectionHaptic(): Promise<void> { return getPlugin().selectionHaptic(); },
+  captureDockBackdrop(bounds: BrowserBounds): Promise<{ dataUrl: string; bounds: BrowserBounds }> { return getPlugin().captureDockBackdrop(bounds); },
   captureToolSurface(bounds: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string }> {
     return getPlugin().captureToolSurface(bounds);
   },
