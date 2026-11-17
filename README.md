@@ -2,6 +2,16 @@
 
 Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
 
+## Windows v1.5.0 更新
+
+- 七个工具 Tab 改为悬浮液态玻璃，实时折射当前网页；长页面滚动后持续更新取样。
+- 点按镜片平滑滑向目标，长按抬起后支持拖动、边缘约束与松手吸附。
+- 工具面板覆盖网页，保持网页完整宽度；同一按钮再次点击收起，外部点击收起并拦截本次操作。
+- 七个工具页的卡片、选项、按钮和输入框统一玻璃材质，切换时保留编辑草稿，并加入渐隐颗粒动画。
+- 支持深浅主题、明亮网页上的图标对比度、窗口缩放、减少动态效果及图形上下文恢复。
+
+下载 [Windows v1.5.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.0)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.0.md) 与 [验证记录](docs/qa/windows-glass/v1.5.0/verification.md)。
+
 ## Android v1.4.1 更新
 
 - 底部七个工具 Tab 悬浮在完整网页上，按实际位置实时折射后方内容，横屏居中限宽。

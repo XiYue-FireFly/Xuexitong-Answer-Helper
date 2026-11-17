@@ -1,12 +1,13 @@
 {
   "name": "study-pilot",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "description": "Windows authorized webpage automation desktop app",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && npx vite build",
     "test": "vitest run",
+    "test:desktop-glass": "node scripts/check-desktop-glass.mjs",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/build-webview-preload.mjs",
     "electron": "npm run electron:build && electron .",
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",
@@ -87,6 +88,7 @@
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.21.5",
+    "playwright-core": "^1.58.2",
     "typescript": "^5.5.4",
     "vite": "^5.4.2",
     "vitest": "^4.1.10"

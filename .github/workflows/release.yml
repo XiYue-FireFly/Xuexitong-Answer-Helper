@@ -43,5 +43,5 @@ jobs:
           replacesArtifacts: true
           makeLatest: true
           artifactErrorsFailBuild: true
-          artifacts: release/Xuexitong-Answer-Helper-*-win-x64-setup.exe
+          artifacts: release/windows/${{ github.ref_name }}/Xuexitong-Answer-Helper-*-win-x64-setup.exe,release/windows/${{ github.ref_name }}/SHA256SUMS.txt
           bodyFile: docs/releases/${{ github.ref_name }}.md

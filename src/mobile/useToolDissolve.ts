@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { NativeWebView } from '../platform/nativeWebViewPlugin';
 import { dissolveSurface } from './dissolve';
 
-export function useToolDissolve(sheet: RefObject<HTMLElement>, canvas: RefObject<HTMLCanvasElement>) {
+export function useToolDissolve(sheet: RefObject<HTMLElement>, canvas: RefObject<HTMLCanvasElement>, capture?: (bounds: DOMRect) => Promise<{ dataUrl: string }>) {
   const revision = useRef(0);
   const cleanup = useRef<() => void>(() => {});
   const [dissolving, setDissolving] = useState(false);
@@ -24,7 +24,7 @@ export function useToolDissolve(sheet: RefObject<HTMLElement>, canvas: RefObject
   const run = useCallback(async (mode: 'close' | 'switch', apply: () => void) => {
     cancel();
     setMode(mode);
-    const target = mode === 'close' ? sheet.current : sheet.current?.querySelector<HTMLElement>('.mobile-main');
+    const target = mode === 'close' ? sheet.current : sheet.current?.querySelector<HTMLElement>('.mobile-main, .desktop-tool-content');
     const layer = canvas.current;
     if (!target || !layer || matchMedia('(prefers-reduced-motion: reduce)').matches) { setMode(null); apply(); return; }
     const request = revision.current;
@@ -34,7 +34,7 @@ export function useToolDissolve(sheet: RefObject<HTMLElement>, canvas: RefObject
       await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
       if (request !== revision.current) return;
       const result = await Promise.race([
-        NativeWebView.captureToolSurface({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }),
+        capture ? capture(bounds) : NativeWebView.captureToolSurface({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }),
         new Promise<{ dataUrl: string }>(resolve => setTimeout(() => resolve({ dataUrl: '' }), 650)),
       ]);
       if (request !== revision.current) return;
@@ -58,6 +58,6 @@ export function useToolDissolve(sheet: RefObject<HTMLElement>, canvas: RefObject
     } catch {
       if (request === revision.current) { cancel(); apply(); }
     }
-  }, [cancel, sheet, canvas]);
+  }, [cancel, sheet, canvas, capture]);
   return { run, cancel, dissolving, closing: mode === 'close' };
 }

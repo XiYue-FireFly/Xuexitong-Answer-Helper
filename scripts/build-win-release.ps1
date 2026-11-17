@@ -1,7 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$releaseDir = Join-Path $root 'release'
 $packageJsonPath = Join-Path $root 'package.json'
 $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = [string]$packageJson.version
@@ -10,15 +9,8 @@ if (-not $version) {
   throw 'package.json version is empty.'
 }
 
-$resolvedReleaseDir = $null
-if (Test-Path -LiteralPath $releaseDir) {
-  $resolvedReleaseDir = (Resolve-Path -LiteralPath $releaseDir).Path
-  $expectedReleaseDir = Join-Path $root 'release'
-  if ($resolvedReleaseDir -ne $expectedReleaseDir) {
-    throw "Unexpected release directory: $resolvedReleaseDir"
-  }
-  Remove-Item -LiteralPath $resolvedReleaseDir -Recurse -Force
-}
+# Keep platform/version outputs separate so a Windows build preserves APKs.
+$releaseDir = Join-Path $root "release\windows\v$version"
 
 $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
 
@@ -28,7 +20,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
   npm run electron:build
   if ($LASTEXITCODE -ne 0) { throw "Electron build failed with exit code $LASTEXITCODE." }
-  npx electron-builder --win nsis --publish never --config.win.signAndEditExecutable=false
+  npx electron-builder --win nsis --publish never --config.win.signAndEditExecutable=false "--config.directories.output=$releaseDir"
   if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed with exit code $LASTEXITCODE." }
 
   $installer = Get-ChildItem -LiteralPath $releaseDir -Filter "*.exe" |
@@ -65,6 +57,11 @@ try {
   $releaseName = "Xuexitong-Answer-Helper-v$version-win-x64-setup.exe"
   $releaseCopyPath = Join-Path $releaseDir $releaseName
   Copy-Item -LiteralPath $installer.FullName -Destination $releaseCopyPath -Force
+  $hashAlgorithm = [Security.Cryptography.SHA256]::Create()
+  $assetStream = [IO.File]::OpenRead($releaseCopyPath)
+  try { $checksum = ([BitConverter]::ToString($hashAlgorithm.ComputeHash($assetStream))).Replace('-', '').ToLowerInvariant() }
+  finally { $assetStream.Dispose(); $hashAlgorithm.Dispose() }
+  [IO.File]::WriteAllText((Join-Path $releaseDir 'SHA256SUMS.txt'), "$checksum  $releaseName`n", (New-Object Text.UTF8Encoding($false)))
 
   Write-Host "Built installer: $($installer.FullName)"
   Write-Host "Release asset copy: $releaseCopyPath"

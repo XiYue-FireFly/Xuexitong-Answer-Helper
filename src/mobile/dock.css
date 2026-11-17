@@ -1,0 +1,123 @@
+/* Fixed layout bounds keep the browser stable while the optical lens lifts. */
+.mobile-tabs {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  width: calc(100% - 32px);
+  max-width: 560px;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 40px;
+  background: linear-gradient(150deg, rgba(103, 121, 155, 0.56), rgba(25, 34, 55, 0.78));
+  border: 1px solid rgba(223, 236, 255, 0.36);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(255, 255, 255, 0.06), 0 5px 22px rgba(15, 23, 42, 0.20);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  overflow: visible;
+  isolation: isolate;
+}
+.mobile-tabs__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  /* Pointer capture supports long-hold dragging; short drags scroll in JS. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 24px;
+  padding-block: 9px;
+  margin-block: -9px;
+}
+.mobile-tabs__optics { position: absolute; left: 0; top: -12px; width: 100%; height: calc(100% + 24px); pointer-events: none; }
+.mobile-tabs:has([data-optics='css']) .mobile-tabs__optics { visibility: hidden; }
+.mobile-tabs__filters { position: absolute; pointer-events: none; }
+.mobile-tabs__scroll::-webkit-scrollbar { display: none; }
+.mobile-tabs__track {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  width: max-content;
+  min-width: 100%;
+}
+.mobile-tabs__selection {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  bottom: 2px;
+  width: var(--dock-active-width, 44px);
+  transform: translateX(var(--dock-active-x, 0px));
+  border-radius: 24px;
+  pointer-events: none;
+  background: linear-gradient(150deg, rgba(173, 208, 255, 0.34), rgba(107, 161, 245, 0.13));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.46), inset 0 0 0 1px rgba(215, 234, 255, 0.24), 0 2px 7px rgba(7, 20, 40, 0.12);
+}
+.mobile-tabs__track[data-ready] .mobile-tabs__selection {
+  transition: none;
+  top: 50%; bottom: auto;
+  height: var(--dock-active-height, 44px);
+  transform: translate(var(--dock-active-x, 0px), -50%);
+}
+.mobile-tabs__track[data-dragging] .mobile-tabs__selection {
+  transition: none;
+  background: radial-gradient(ellipse at var(--dock-drag-light, 50%) 0%, rgba(255,255,255,.55), transparent 65%),
+    linear-gradient(155deg, rgba(185, 218, 255, .5), rgba(111, 167, 246, .16));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.8), inset 0 -2px 4px rgba(121,180,255,.32), 0 4px 14px rgba(8,28,55,.2);
+}
+.mobile-tabs__track[data-dragging] .mobile-tab { color: #d8eaff; }
+[data-theme='light'] .mobile-tabs__track[data-dragging] .mobile-tab { color: #1e5ba6; }
+[data-theme='light'] .mobile-tabs {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.76), rgba(219, 230, 247, 0.60));
+  border-color: rgba(255, 255, 255, 0.90);
+  box-shadow: inset 0 1px 0 white, inset 0 -1px 0 rgba(176, 194, 218, 0.18), 0 5px 22px rgba(30, 55, 110, 0.14);
+}
+[data-theme='light'] .mobile-tabs__selection {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.76), rgba(149, 193, 255, 0.38));
+  box-shadow: inset 0 1px 0 white, inset 0 0 0 1px rgba(255, 255, 255, 0.88), 0 2px 8px rgba(45, 83, 150, 0.14);
+}
+/* The GPU owns both optical surfaces. Keep the geometry proxy for layout,
+   but do not paint a second CSS lens in either theme or while dragging. */
+.mobile-tabs:has([data-optics='gpu']) {
+  background: transparent; border-color: transparent; box-shadow: 0 5px 22px rgba(15,23,42,.16);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.mobile-tabs__track[data-optics='gpu'] .mobile-tabs__selection { opacity: 0; }
+
+.mobile-tab {
+  flex: 1 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 2px;
+  background: transparent;
+  border: none;
+  color: #c4cedf;
+  font-size: 0.62rem;
+  min-height: 52px;
+  min-width: 44px;
+  white-space: nowrap;
+  border-radius: 23px;
+  position: relative;
+  z-index: 1;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 180ms ease;
+}
+.mobile-tab:is(:hover, :active) { transform: none; box-shadow: none; }
+.mobile-tab__content, .mobile-tab__magnified { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; }
+.mobile-tab__lens { position: absolute; inset: 0; pointer-events: none; opacity: 0; color: #daf0ff; }
+[data-theme='light'] .mobile-tab__lens { color: #1457ab; }
+.mobile-tab__magnified { transform: scale(var(--dock-magnify, 1)); }
+.mobile-tab svg { transition: none; }
+.mobile-tab.is-active { color: #b9dbff; font-weight: 650; }
+[data-theme='light'] .mobile-tab { color: #435873; }
+[data-theme='light'] .mobile-tab.is-active { color: #165dc8; }
+.mobile-tab:active svg { transform: none; }

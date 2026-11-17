@@ -7,7 +7,9 @@ import { TaskStatus } from '../platform/taskStatusPlugin';
 import { lensDisplacement } from './lensDisplacement';
 
 const spring = (value: number): Spring => ({ value, target: value, velocity: 0 });
-export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: RefObject<HTMLDivElement>, navRef: RefObject<HTMLElement>, theme: string) {
+export type GlassBackdrop = { dataUrl: string; bounds: { x: number; y: number; width: number; height: number } };
+export type DockGlassSource = { capture: (bounds: DOMRect) => Promise<GlassBackdrop>; available: () => Promise<boolean> };
+export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: RefObject<HTMLDivElement>, navRef: RefObject<HTMLElement>, theme: string, source?: DockGlassSource) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const motion = useRef({ x: spring(0), width: spring(44), lift: spring(0), stretch: spring(0), pull: spring(0) });
   const frame = useRef(0), previous = useRef(0), dark = useRef(theme === 'dark'); dark.current = theme === 'dark';
@@ -104,7 +106,7 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
       nav.querySelectorAll('[data-warp-map]').forEach(map => map.setAttribute('href', uri));
     }
     let disposed = false, revision = 0, foreground = true;
-    const create = () => { renderer.current?.dispose(); renderer.current = createGlassRenderer(canvas); track.dataset.optics = renderer.current ? 'gpu' : 'css'; animate(); };
+    const create = () => { renderer.current?.dispose(); renderer.current = createGlassRenderer(canvas); track.dataset.optics = renderer.current && !source ? 'gpu' : 'css'; animate(); };
     const lost = (event: Event) => { event.preventDefault(); renderer.current?.dispose(); renderer.current = null; track.dataset.optics = 'css'; };
     const capture = async () => {
       if (!foreground || document.hidden || !renderer.current) return;
@@ -117,13 +119,26 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
       const request = ++revision;
       try {
         const { x, y, width, height } = nav.getBoundingClientRect();
-        const result = await NativeWebView.captureDockBackdrop({ x, y, width, height });
-        if (!result.dataUrl || disposed || request !== revision) return;
+        const result = source ? await source.capture(nav.getBoundingClientRect()) : await NativeWebView.captureDockBackdrop({ x, y, width, height });
+        if (disposed || request !== revision) return;
+        if (!result.dataUrl) { if (source) { track.dataset.optics = 'css'; delete nav.dataset.backdropTone; } return; }
         const image = new Image(); image.src = result.dataUrl; await image.decode();
         const current = nav.getBoundingClientRect();
         if (!disposed && foreground && request === revision && Math.abs(current.x - x) < 1 && Math.abs(current.y - y) < 1
           && Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1) {
-          renderer.current?.image(image, result.bounds); animate();
+          renderer.current?.image(image, result.bounds); if (renderer.current) track.dataset.optics = 'gpu';
+          if (source) {
+            const sample = document.createElement('canvas'); sample.width = sample.height = 4;
+            const context = sample.getContext('2d', { willReadFrequently: true });
+            if (context) {
+              context.drawImage(image, 0, 0, 4, 4);
+              const pixels = context.getImageData(0, 0, 4, 4).data;
+              let luminance = 0;
+              for (let i = 0; i < pixels.length; i += 4) luminance += pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722;
+              nav.dataset.backdropTone = luminance / 16 > 155 ? 'light' : 'dark';
+            }
+          }
+          animate();
         }
       } catch { /* CSS material remains available without a snapshot. */ }
     };
@@ -138,19 +153,19 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     // sits above another WebView. Keep the CSS material and spring interaction
     // there, and enable the optical surface only on the newer compositor path.
     track.dataset.optics = 'css';
-    void TaskStatus.getCapabilities().then(capabilities => {
+    void (source ? source.available() : TaskStatus.getCapabilities().then(capabilities => capabilities.api >= 30)).then(available => {
       if (disposed) return;
-      if (capabilities.api >= 30) { create(); visible(); }
+      if (available) { create(); visible(); }
     }).catch(() => { /* Base glass remains usable without native capabilities. */ });
     const observer = new ResizeObserver(animate); observer.observe(scroller);
-    const nativeVisibility = NativeWebView.onVisibilityChanged(state => { foreground = state.visible; visible(); });
+    const nativeVisibility = source ? Promise.resolve(null) : NativeWebView.onVisibilityChanged(state => { foreground = state.visible; visible(); });
     const contextLost = (event: Event) => { lost(event); captures.setVisible(false); ++revision; };
     const restored = () => { create(); visible(); };
     canvas.addEventListener('webglcontextlost', contextLost); canvas.addEventListener('webglcontextrestored', restored);
     document.addEventListener('visibilitychange', visible); scroller.addEventListener('scroll', animate, { passive: true });
     return () => { disposed = true; ++revision; captures.dispose(); observer.disconnect(); cancelAnimationFrame(frame.current); frame.current = 0;
       renderer.current?.dispose(); renderer.current = null;
-      void nativeVisibility.then(listener => listener.remove());
+      void nativeVisibility.then(listener => listener?.remove());
       canvas.removeEventListener('webglcontextlost', contextLost); canvas.removeEventListener('webglcontextrestored', restored);
       document.removeEventListener('visibilitychange', visible); scroller.removeEventListener('scroll', animate); };
   }, []);

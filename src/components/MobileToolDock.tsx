@@ -2,8 +2,9 @@ import { useLayoutEffect, useRef, type PointerEvent, type RefObject } from 'reac
 import {
   BookOpen, Bug, Coins, History, LibraryBig, SlidersHorizontal, Sparkles,
 } from 'lucide-react';
-import { useDockGlass } from '../mobile/useDockGlass';
+import { useDockGlass, type DockGlassSource } from '../mobile/useDockGlass';
 import { releaseIndex, rubberBand } from '../mobile/dockPhysics';
+import '../mobile/dock.css';
 import { NativeWebView } from '../platform/nativeWebViewPlugin';
 
 export type MobileToolTab = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
@@ -18,16 +19,18 @@ const tabs: { id: MobileToolTab; label: string; icon: typeof Sparkles }[] = [
   { id: 'settings', label: '设置', icon: SlidersHorizontal },
 ];
 
-export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme = 'dark' }: {
+export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme = 'dark', glassSource, panelId = 'mobile-tool-panel' }: {
   activeTab: MobileToolTab;
   panelOpen: boolean;
   theme?: string;
   navRef: RefObject<HTMLElement>;
   onSelect: (tab: MobileToolTab, gesture?: 'drag') => void;
+  glassSource?: DockGlassSource;
+  panelId?: string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const glass = useDockGlass(trackRef, scrollRef, navRef, theme);
+  const glass = useDockGlass(trackRef, scrollRef, navRef, theme, glassSource);
   const gesture = useRef<{ pointer: number; x: number; y: number; latestX: number; latestY: number;
     lastX: number; time: number; velocity: number; scroll: number; moved: boolean; dragging: boolean; timer: ReturnType<typeof setTimeout>; target: HTMLButtonElement } | null>(null);
   const autoFrame = useRef(0);
@@ -56,7 +59,7 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
     glass.pull(rubberBand(raw - x, 14));
     track.style.setProperty('--dock-drag-light', `${x / track.offsetWidth * 100}%`);
     if (gesture.current?.dragging && track.dataset.preview && track.dataset.preview !== closest.dataset.tool) {
-      void NativeWebView.selectionHaptic().catch(() => undefined);
+      if (!glassSource) void NativeWebView.selectionHaptic().catch(() => undefined);
     }
     track.dataset.preview = closest.dataset.tool;
     return closest.dataset.tool as MobileToolTab;
@@ -187,7 +190,7 @@ export function MobileToolDock({ activeTab, panelOpen, navRef, onSelect, theme =
         <div className="mobile-tabs__selection" aria-hidden="true" />
         {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button"
           data-tool={id} onPointerDown={down} onLostPointerCapture={event => { if (gesture.current?.pointer === event.pointerId) finish(true); }}
-          aria-label={label} aria-controls="mobile-tool-panel" aria-expanded={panelOpen && activeTab === id}
+          aria-label={label} aria-controls={panelId} aria-expanded={panelOpen && activeTab === id}
           aria-current={activeTab === id ? 'true' : undefined}
           className={`mobile-tab${activeTab === id ? ' is-active' : ''}`} onClick={event => {
             if (event.detail !== 0 && suppressClick.current) { event.preventDefault(); suppressClick.current = false; return; }

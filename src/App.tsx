@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AIPanel } from './components/AIPanel';
 import { AnnouncementBanner } from './components/AnnouncementBanner';
 import { BrowserPanel } from './components/BrowserPanel';
@@ -10,19 +10,13 @@ import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { appStore, useAppStore } from './store/appStore';
 import { webAISessions } from './webAI/WebAISessionManager';
-import { Bell, BookOpen, Brain, Bug, ChartNoAxesCombined, ChevronLeft, ChevronRight, Database, History, Minimize2, Moon, Settings, Square, Sun, Terminal, X } from 'lucide-react';
+import { Bell, Brain, Minimize2, Moon, Square, Sun, Terminal, X } from 'lucide-react';
 
-type TabId = 'automation' | 'snapshot' | 'tokens' | 'history' | 'bugs' | 'tutorial' | 'settings';
-
-const tabs: { id: TabId; label: string; icon: typeof Brain }[] = [
-  { id: 'automation', label: '答题', icon: Brain },
-  { id: 'snapshot', label: '本地题库', icon: Database },
-  { id: 'tokens', label: 'Token', icon: ChartNoAxesCombined },
-  { id: 'history', label: '运行记录', icon: History },
-  { id: 'bugs', label: '错误报告', icon: Bug },
-  { id: 'tutorial', label: '使用教程', icon: BookOpen },
-  { id: 'settings', label: '设置', icon: Settings }
-];
+import { MobileToolDock, type MobileToolTab as TabId } from './components/MobileToolDock';
+import { useToolDissolve } from './mobile/useToolDissolve';
+import { desktopGlassSource, captureDesktopTool } from './desktop/glassSource';
+import { usePanelBackdrop } from './desktop/usePanelBackdrop';
+import './desktop/desktop.css';
 
 const statusLabels: Record<string, string> = {
   idle: '空闲',
@@ -43,21 +37,54 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
-  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [sideCollapsed, setSideCollapsed] = useState(true);
   const [resizingWorkbench, setResizingWorkbench] = useState(false);
   const webSessions = useSyncExternalStore(webAISessions.subscribe, webAISessions.getSnapshot);
   const webTask = useSyncExternalStore(webSessions.controller.subscribe, webSessions.controller.getSnapshot);
   const workbenchBounds = () => {
     const viewport = window.innerWidth;
-    const browserMin = Math.min(500, Math.max(300, Math.round(viewport * 0.46)));
-    const min = Math.min(420, Math.max(340, Math.round(viewport * 0.4)));
-    return { min, max: Math.max(min, viewport - browserMin) };
+    const min = Math.min(360, Math.max(280, viewport - 32));
+    return { min, max: Math.max(min, Math.min(860, viewport - 32)) };
   };
   const [workbenchWidth, setWorkbenchWidth] = useState(() => {
     const bounds = workbenchBounds();
     return Math.min(600, bounds.max);
   });
   const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const tabsRef = useRef<HTMLElement>(null);
+  const sheetRef = useRef<HTMLElement>(null);
+  const dissolveCanvas = useRef<HTMLCanvasElement>(null);
+  const toolMotion = useToolDissolve(sheetRef, dissolveCanvas, captureDesktopTool);
+  const panelBackdrop = usePanelBackdrop(sheetRef, !sideCollapsed);
+  const [panelPresent, setPanelPresent] = useState(false);
+  const [visited, setVisited] = useState<TabId[]>(['automation']);
+  const pages = useMemo(() => ({ automation: <AIPanel />, snapshot: <KnowledgeBase />, tokens: <TokenUsagePanel />,
+    history: <HistoryPanel />, bugs: <BugReportPanel />, tutorial: <TutorialPanel />, settings: <SettingsPanel /> }), []);
+  const blocked = !sideCollapsed || panelPresent;
+  const dismissPanel = () => {
+    if (sideCollapsed) return;
+    if (toolMotion.dissolving) { toolMotion.cancel(); setSideCollapsed(true); }
+    else void toolMotion.run('close', () => setSideCollapsed(true));
+    tabsRef.current?.querySelector<HTMLButtonElement>('.is-active')?.focus({ preventScroll: true });
+  };
+  useEffect(() => {
+    setVisited(previous => previous.includes(activeTab) ? previous : [...previous, activeTab]);
+  }, [activeTab]);
+  useLayoutEffect(() => {
+    sheetRef.current?.toggleAttribute('inert', sideCollapsed);
+    if (!sideCollapsed) { setPanelPresent(true); return; }
+    sheetRef.current?.classList.remove('is-dissolving');
+    const timer = setTimeout(() => setPanelPresent(false), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 260);
+    return () => clearTimeout(timer);
+  }, [sideCollapsed]);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('dialog[open]')) dismissPanel();
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  });
+
 
   useEffect(() => {
     const seen = localStorage.getItem(START_NOTICE_KEY);
@@ -69,6 +96,7 @@ export default function App() {
     // question bank only needs to switch tabs; the embedded workflow consumes
     // the short-lived localStorage request after it mounts.
     const openAnswerTab = () => {
+      toolMotion.cancel();
       setActiveTab('automation');
       setSideCollapsed(false);
     };
@@ -91,11 +119,12 @@ export default function App() {
     if (webTask.flow !== 'automatic') return;
     if (webTask.visible) {
       resizeCleanupRef.current?.();
+      toolMotion.cancel();
       setActiveTab('automation');
       setSideCollapsed(false);
     } else if (webTask.busy && !webTask.paused) {
       resizeCleanupRef.current?.();
-      setSideCollapsed(true);
+      toolMotion.cancel(); setSideCollapsed(true);
     }
   }, [webTask.flow, webTask.runId, webTask.busy, webTask.visible, webTask.paused]);
 
@@ -104,82 +133,15 @@ export default function App() {
     // on the root elements instead of limiting it to the React application.
     document.documentElement.dataset.theme = settings.theme;
     document.body.dataset.theme = settings.theme;
+    document.body.classList.add('desktop-ui');
     (window as any).electronAPI?.setTitlebarTheme?.(settings.theme);
 
     return () => {
       delete document.documentElement.dataset.theme;
       delete document.body.dataset.theme;
+      document.body.classList.remove('desktop-ui');
     };
   }, [settings.theme]);
-
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
-
-    let activeSurface: HTMLElement | null = null;
-    let releaseTimer: number | undefined;
-    let previousPoint = { x: 0, y: 0 };
-
-    const releaseSurface = () => {
-      if (!activeSurface) return;
-      const surface = activeSurface;
-      activeSurface = null;
-      surface.classList.remove('jelly-runtime--active');
-      surface.classList.add('jelly-runtime--release');
-      surface.style.removeProperty('--jelly-runtime-x');
-      surface.style.removeProperty('--jelly-runtime-y');
-      surface.style.removeProperty('--jelly-runtime-shift');
-      surface.style.removeProperty('--jelly-runtime-scale-x');
-      surface.style.removeProperty('--jelly-runtime-scale-y');
-      window.clearTimeout(releaseTimer);
-      releaseTimer = window.setTimeout(() => surface.classList.remove('jelly-runtime--release'), 440);
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const target = event.target instanceof Element
-        ? event.target.closest<HTMLElement>('.glass-panel, .kb-jelly-surface, .browser-solving-dock, .browser-address')
-        : null;
-
-      if (!target) {
-        releaseSurface();
-        return;
-      }
-
-      if (target !== activeSurface) {
-        releaseSurface();
-        activeSurface = target;
-        target.classList.remove('jelly-runtime--release');
-        target.classList.add('jelly-runtime', 'jelly-runtime--active');
-      }
-
-      const rect = target.getBoundingClientRect();
-      const velocityX = Math.max(-18, Math.min(18, event.clientX - previousPoint.x));
-      const relativeX = (event.clientX - rect.left) / Math.max(rect.width, 1) - 0.5;
-      const relativeY = (event.clientY - rect.top) / Math.max(rect.height, 1) - 0.5;
-      const stretch = Math.min(0.022, Math.abs(velocityX) * 0.0012);
-
-      target.style.setProperty('--jelly-runtime-x', `${(-relativeY * 1.15).toFixed(2)}deg`);
-      target.style.setProperty('--jelly-runtime-y', `${(relativeX * 1.15).toFixed(2)}deg`);
-      target.style.setProperty('--jelly-runtime-shift', `${(velocityX * 0.16).toFixed(2)}px`);
-      target.style.setProperty('--jelly-runtime-scale-x', `${(1 + stretch).toFixed(4)}`);
-      target.style.setProperty('--jelly-runtime-scale-y', `${(1 - stretch * 0.5).toFixed(4)}`);
-      previousPoint = { x: event.clientX, y: event.clientY };
-    };
-
-    const releaseOnExit = (event: PointerEvent) => {
-      const nextTarget = event.relatedTarget;
-      if (!(nextTarget instanceof Node) || !document.querySelector('.app-shell')?.contains(nextTarget)) releaseSurface();
-    };
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('pointerout', releaseOnExit, { passive: true });
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerout', releaseOnExit);
-      window.clearTimeout(releaseTimer);
-      releaseSurface();
-    };
-  }, []);
 
   const closeNotice = () => {
     localStorage.setItem(START_NOTICE_KEY, '1');
@@ -194,9 +156,11 @@ export default function App() {
     appStore.addLog('info', `窗口操作已触发：${action}`);
   };
 
-  const openSideTab = (tab: TabId) => {
-    setActiveTab(tab);
-    setSideCollapsed(false);
+  const openSideTab = (tab: TabId, gesture?: 'drag') => {
+    if (tab === activeTab && !sideCollapsed && gesture !== 'drag') { dismissPanel(); return; }
+    const apply = () => { setActiveTab(tab); setSideCollapsed(false); };
+    if (!sideCollapsed && tab !== activeTab && gesture !== 'drag') void toolMotion.run('switch', apply);
+    else { toolMotion.cancel(); apply(); }
   };
 
   const startWorkbenchResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -246,7 +210,7 @@ export default function App() {
         : '#6366f1';
 
   return (
-    <div data-theme={settings.theme} className="app-shell">
+    <div data-theme={settings.theme} className="app-shell desktop-shell">
       <header className="app-shell-bar app-window-titlebar app-header">
         <div className="app-brand">
           <div className="app-brand__mark"><Brain size={15} /></div>
@@ -282,79 +246,26 @@ export default function App() {
         <section className="browser-deck">
           <BrowserPanel />
         </section>
-        <aside className={`app-right-drawer assistant-dock${sideCollapsed ? ' is-collapsed' : ''}`} style={{
-          width: sideCollapsed ? 58 : workbenchWidth,
-          flex: '0 0 auto',
-          minWidth: sideCollapsed ? 58 : workbenchWidth,
-          display: 'flex',
-          flexDirection: 'row',
-          background: 'var(--bg-panel)',
-          transition: resizingWorkbench ? 'none' : 'width 180ms ease, min-width 180ms ease'
-        }}>
-          {!sideCollapsed && <div className="workbench-resizer" onPointerDown={startWorkbenchResize} role="separator" aria-orientation="vertical" aria-label="调整右侧工作台宽度" title="拖动调整工作台宽度" />}
-          {!sideCollapsed && <div className="app-right-drawer__content assistant-dock__content" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <AnnouncementBanner />
-            <div className="side-panel-content" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <div key={activeTab} className="side-panel-page">
-                {activeTab === 'automation' && <AIPanel />}
-                {activeTab === 'snapshot' && <KnowledgeBase />}
-                {activeTab === 'tokens' && <TokenUsagePanel />}
-                {activeTab === 'history' && <HistoryPanel />}
-                {activeTab === 'bugs' && <BugReportPanel />}
-                {activeTab === 'tutorial' && <TutorialPanel />}
-                {activeTab === 'settings' && <SettingsPanel />}
-              </div>
-            </div>
-          </div>}
-          <nav className="app-side-tabs app-side-tabs--vertical" aria-label="功能面板">
-            <button
-              onClick={() => setSideCollapsed((value) => !value)}
-              title={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
-              aria-label={sideCollapsed ? '展开右侧面板' : '收起右侧面板'}
-              style={{
-                width: sideCollapsed ? 58 : 72,
-                height: 54,
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--text-secondary)',
-                background: 'transparent',
-                borderBottom: '1px solid var(--border-glass)',
-                borderRadius: 0
-              }}
-            >
-              {sideCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-            </button>
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  className={`app-side-tab${active ? ' is-active' : ''}`}
-                  onClick={() => openSideTab(tab.id)}
-                  title={tab.label}
-                  aria-label={tab.label}
-                  aria-current={active ? 'page' : undefined}
-                  style={{
-                    width: sideCollapsed ? 58 : 72,
-                    height: 58,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: active ? 'var(--primary-color)' : 'var(--text-secondary)',
-                    background: active ? 'rgba(99,102,241,0.04)' : 'transparent',
-                    borderRight: active ? '3px solid var(--primary-color)' : '3px solid transparent',
-                    borderRadius: 0
-                  }}
-                >
-                  <Icon size={15} />
-                  {!sideCollapsed && <span className="app-side-tabs__label">{tab.label}</span>}
-                </button>
-              );
-            })}
-          </nav>
+        {blocked && <button className="desktop-dismiss" aria-label="收起工具面板" tabIndex={-1}
+          onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }}
+          onPointerUp={event => { event.preventDefault(); dismissPanel(); }}
+          onClick={event => event.preventDefault()} onWheel={event => event.stopPropagation()} />}
+        <aside id="desktop-tool-panel" ref={sheetRef} aria-label="工具面板" aria-hidden={sideCollapsed}
+          className={`desktop-sheet${sideCollapsed ? '' : ' is-open'}`}
+          style={{ width: workbenchWidth, transition: resizingWorkbench ? 'none' : undefined }}>
+          <div className="desktop-sheet__material" aria-hidden="true"><img ref={panelBackdrop} alt="" /></div>
+          <div className="workbench-resizer" onPointerDown={startWorkbenchResize} role="separator" aria-orientation="vertical" aria-label="调整工具面板宽度" title="拖动调整工具面板宽度" />
+          <div className="desktop-sheet__heading"><span>{({ automation: '答题', snapshot: '本地题库', tokens: 'Token 用量', history: '运行记录', bugs: '错误报告', tutorial: '使用教程', settings: '设置' })[activeTab]}</span><span>点击下方同一按钮收起</span></div>
+          <AnnouncementBanner />
+          <div className="desktop-tool-content side-panel-content">
+            {visited.map(tab => <div key={tab} hidden={tab !== activeTab} className="side-panel-page">
+              {pages[tab]}
+            </div>)}
+          </div>
         </aside>
+        <MobileToolDock activeTab={activeTab} panelOpen={!sideCollapsed} navRef={tabsRef} onSelect={openSideTab}
+          theme={settings.theme} glassSource={desktopGlassSource} panelId="desktop-tool-panel" />
+        <canvas ref={dissolveCanvas} className="desktop-dissolve" aria-hidden="true" />
         {resizingWorkbench && <div className="workbench-drag-shield" aria-hidden="true" />}
       </main>
 

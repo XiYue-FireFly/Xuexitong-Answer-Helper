@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   navigate: (url: string) => ipcRenderer.invoke('browser:navigate', url),
   screenshot: (rect?: { x: number; y: number; width: number; height: number }) => 
     ipcRenderer.invoke('browser:screenshot', rect),
+  captureGlass: (request: { guestId: number; region: { x: number; y: number; width: number; height: number }; viewport: { x: number; y: number; width: number; height: number } }) =>
+    ipcRenderer.invoke('glass:capture', request),
   
   // Automation operations
   captureAutomationSnapshot: () => ipcRenderer.invoke('automation:snapshot'),

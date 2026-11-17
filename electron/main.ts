@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, clipboard, ipcMain, Notification, session, shell, webFrameMain } from 'electron';
+import { app, BrowserWindow, Menu, clipboard, ipcMain, Notification, session, shell, webFrameMain, webContents } from 'electron';
+import { glassRegion } from './glass-region';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -1357,6 +1358,25 @@ ipcMain.handle('browser:navigate', async (_, url: string) => {
 });
 
 // IPC Handler: OCR / Screenshot
+ipcMain.handle('glass:capture', async (event, request) => {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()
+    || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return {};
+  const guest = Number.isInteger(request?.guestId) ? webContents.fromId(request.guestId) : undefined;
+  if (!guest || guest.isDestroyed() || guest.hostWebContents !== event.sender || guest.getType() !== 'webview') return {};
+  const region = glassRegion(request.region, request.viewport);
+  if (!region || region.rect.width > 8192 || region.rect.height > 8192) return {};
+  try {
+    // Capture only the guest compositor surface. The tools cannot feed their
+    // own pixels back into the material, including after a long document scroll.
+    const image = await guest.capturePage(region.rect);
+    if (image.isEmpty()) return {};
+    const size = image.getSize();
+    const scale = Math.min(1, 1200 / size.width, 1200 / size.height);
+    const sampled = scale < 1 ? image.resize({ width: Math.round(size.width * scale), height: Math.round(size.height * scale) }) : image;
+    return { dataUrl: sampled.toDataURL(), bounds: region.bounds };
+  } catch { return {}; }
+});
+
 ipcMain.handle('browser:screenshot', async (_, rect) => {
   if (!mainWindow) return { success: false, error: 'Main window not initialized' };
   

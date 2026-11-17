@@ -393,6 +393,7 @@ function BrowserTabView({ tab, active, preloadPath, registerWebview, onStateChan
   return (
     <webview
       ref={ref as any}
+      data-active-browser={active ? 'true' : 'false'}
       src={tab.initialUrl}
       preload={preloadPath}
       partition={WEBVIEW_PARTITION}
