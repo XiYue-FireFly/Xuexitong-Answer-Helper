@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Download, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
 import { aiChatStream } from '../utils/aiRequest';
+import { AndroidTaskSettings } from './AndroidTaskSettings';
 
 type TestChatMessage = {
   role: 'user' | 'assistant';
@@ -759,6 +760,7 @@ export function SettingsPanel() {
 
       <div className="glass-panel" style={{ padding: 16, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <h5 style={{ color: 'var(--text-primary)', fontSize: '0.9rem' }}>真实页面能力</h5>
+        {isAndroid && <AndroidTaskSettings />}
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
           <div>

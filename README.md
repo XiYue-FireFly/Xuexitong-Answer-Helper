@@ -2,6 +2,15 @@
 
 Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
 
+## Android v1.3.0 更新
+
+- 底栏加入 GPU 折射、色散、镜片抬升、弹簧跟手及松手惯性；GPU 不可用时保留 CSS 玻璃材质。
+- 切到其他应用后通过前台服务继续答题，持续通知显示当前步骤和完成题数，任务结束后释放服务。
+- 在“设置 → 真实页面能力 → 后台答题状态”开启通知及可选顶部状态胶囊；顶部胶囊需要悬浮窗权限，点击可回到答题工具。
+- Android 16 请求系统实时更新，其他版本和不支持提升的系统使用持续进度通知。强制停止、撤销权限或清理进程后不会自动重启旧任务。
+
+下载 [Android v1.3.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.3.0)，也可按下文从源码构建。详见 [更新说明](docs/releases/android-v1.3.0.md) 与 [验证记录](docs/qa/android-browser/ultra-glass-v130-verification.md)。
+
 ## Android v1.2.0 更新
 
 - 工具 Tab 点击展开，再次点击当前 Tab 收起，删除独立收起按钮。

@@ -33,10 +33,10 @@ const composer = html(`<title>AI 输入测试页</title><h2>AI 输入测试页</
     const input=event.target; if(!input.value.trim()) return;
     window.sentCount++; const value=input.value; input.value='';
     const user=document.createElement('div'); user.dataset.messageAuthorRole='user'; user.textContent=value; document.querySelector('#history').append(user);
-    const answer=document.createElement('div'); answer.className='ds-markdown'; answer.dataset.messageId='reply-'+window.sentCount; answer.dataset.messageStatus='completed';
+    setTimeout(()=>{const answer=document.createElement('div'); answer.className='ds-markdown'; answer.dataset.messageId='reply-'+window.sentCount; answer.dataset.messageStatus='completed';
     try { const batch=JSON.parse(value.slice(value.lastIndexOf('\\n\\n{')+2));
       answer.textContent=JSON.stringify({requestId:batch.requestId,answers:batch.questions.map(q=>({id:q.id,answer:'2',choiceLabels:['A'],matchedOptions:['2'],confidence:0.99,analysis:'',warnings:[]}))});
-    } catch { answer.textContent='已收到提示词'; } document.querySelector('#history').append(answer);
+    } catch { answer.textContent='已收到提示词'; } document.querySelector('#history').append(answer);}, window.replyDelay || 0);
   });</script>`);
 const mobileComposer = html(`<title>DeepSeek 手机图文发送测试</title><style>
   body{padding:8px}#composer{padding:12px;background:white;border-radius:24px}
@@ -110,23 +110,26 @@ try {
   ]), { method, args });
   const request = (channel, detail) => shell.evaluate(({ channel, detail }) => new Promise(resolve => window.dispatchEvent(new CustomEvent(channel, { detail: { ...detail, onComplete: resolve } }))), { channel, detail });
   const tapWebView = async (page, selector) => {
-    await page.locator(selector).scrollIntoViewIfNeeded();
-    // Native IME resizing and WebView's focused-element scroll finish after the
-    // CDP scroll command returns. Read coordinates after that animation settles.
-    await page.waitForTimeout(350);
-    const rect = await page.locator(selector).boundingBox();
-    const views = await (await fetch('http://127.0.0.1:9222/json/list')).json();
-    const entry = views.find(view => view.url === page.url());
-    const dimensions = JSON.parse(entry.description);
-    const scale = dimensions.width / await page.evaluate(() => innerWidth);
-    // Older Android can open the IME during programmatic focus. An editor taller
-    // than that viewport has its center behind the keyboard, so tap its visible
-    // intersection instead of accidentally typing a key on the software IME.
-    const left = Math.max(0, rect.x), right = Math.min(dimensions.width / scale, rect.x + rect.width);
-    const top = Math.max(0, rect.y), bottom = Math.min(dimensions.height / scale, rect.y + rect.height);
-    assert.ok(right > left && bottom > top, `No visible tap area for ${selector}: ${JSON.stringify({ rect, dimensions })}`);
-    runAdb('shell', 'input', 'tap', String(Math.round(dimensions.screenX + (left + right) / 2 * scale)),
-      String(Math.round(dimensions.screenY + (top + bottom) / 2 * scale)));
+    let last;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      // IME resizing can finish after CDP's first scroll, and a landscape editor
+      // can exceed the remaining viewport. Re-center within the current bounds
+      // and tap its visible intersection, never a coordinate behind the IME.
+      await page.locator(selector).evaluate(input => input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+      await page.waitForTimeout(350);
+      const rect = await page.locator(selector).boundingBox();
+      const views = await (await fetch('http://127.0.0.1:9222/json/list')).json();
+      const dimensions = JSON.parse(views.find(view => view.url === page.url()).description);
+      const scale = dimensions.width / await page.evaluate(() => innerWidth);
+      const left = Math.max(0, rect.x), right = Math.min(dimensions.width / scale, rect.x + rect.width);
+      const top = Math.max(0, rect.y), bottom = Math.min(dimensions.height / scale, rect.y + rect.height);
+      last = { rect, dimensions };
+      if (right <= left || bottom <= top) continue;
+      runAdb('shell', 'input', 'tap', String(Math.round(dimensions.screenX + (left + right) / 2 * scale)),
+        String(Math.round(dimensions.screenY + (top + bottom) / 2 * scale)));
+      return;
+    }
+    assert.fail(`No visible tap area for ${selector}: ${JSON.stringify(last)}`);
   };
   const tabs = await native('listTabs');
   assert.ok(Array.isArray(tabs.tabs), 'Native tab inventory unavailable');
@@ -182,6 +185,11 @@ try {
     const tools = await shell.evaluate(() => ({ header: document.querySelector('.mobile-header').getBoundingClientRect().bottom,
       tabs: document.querySelector('.mobile-tabs').getBoundingClientRect().top }));
     assert.ok(tools.tabs > tools.header + 40, `${name}: browser touch area collapsed: ${JSON.stringify(tools)}`);
+    // The first touch opens the IME and changes both native bounds and the
+    // focused-element scroll. Re-read the visible input after that transition
+    // and verify real WebView focus before injecting hardware keystrokes.
+    await tapWebView(loginPage, '#account');
+    await loginPage.waitForFunction(() => document.hasFocus() && document.activeElement.id === 'account');
     runAdb('shell', 'input', 'text', '13800138000');
     await loginPage.waitForFunction(() => document.querySelector('#account').value === '13800138000');
     // Move to the password with the real keyboard, then tap it to verify touch
@@ -281,8 +289,82 @@ try {
   await source.evaluate(() => document.querySelectorAll('input').forEach(input => { input.checked = false; }));
   await shell.getByRole('button', { name: '答题', exact: true }).click();
   await shell.getByRole('tab', { name: /网页 AI/ }).click();
+  const background = process.env.ANDROID_QA_BACKGROUND === '1';
+  if (background) {
+    runAdb('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', 'allow');
+    await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'setOverlay', { enabled: true }));
+    aiHtml = composer.replace('window.sentCount=0;', 'window.sentCount=0;window.replyDelay=45000;');
+  }
   await shell.getByRole('button', { name: '开始自动答题', exact: true }).click();
-  await source.waitForFunction(() => document.querySelector('input[value="A"]').checked, null, { timeout: 45000 });
+  if (background) {
+    let started = false;
+    for (let i = 0; i < 30 && !started; i++) {
+      started = runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true');
+      if (!started) await shell.waitForTimeout(200);
+    }
+    assert.ok(started, 'A real task must start a foreground service before leaving the app');
+    let pendingAi;
+    for (let i = 0; i < 30 && !pendingAi; i++) {
+      pendingAi = context.pages().find(page => page !== ai && !page.isClosed() && page.url().startsWith('https://chat.deepseek.com/'));
+      if (!pendingAi) await shell.waitForTimeout(300);
+    }
+    assert.ok(pendingAi, 'The automatic job must create its own AI tab');
+    await pendingAi.waitForFunction(() => window.sentCount > 0);
+    runAdb('shell', 'input', 'keyevent', '3');
+    let capsuleVisible = false;
+    for (let i = 0; i < 20 && !capsuleVisible; i++) {
+      await shell.waitForTimeout(250);
+      capsuleVisible = runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status');
+    }
+    const notification = runAdb('shell', 'dumpsys', 'notification', '--noredact').toString();
+    assert.ok(notification.includes('answer_progress') && notification.includes('学习助手答题'), 'Ongoing progress notification must exist');
+    assert.ok(capsuleVisible, 'Opt-in task capsule must be visible above the launcher');
+    writeFileSync(path.join(out, 'background-task-capsule.png'), runAdb('exec-out', 'screencap', '-p'));
+    const taskNative = (method, args = {}) => shell.evaluate(({ method, args }) => window.Capacitor.nativePromise('TaskStatus', method, args), { method, args });
+    // The launcher can lock itself to portrait. Exercise a second app that
+    // actually rotates, and verify the display dimensions before accepting a
+    // landscape screenshot as evidence.
+    runAdb('shell', 'am', 'start', '-a', 'android.settings.SETTINGS');
+    for (const rotation of [0, 1]) {
+      runAdb('shell', 'settings', 'put', 'system', 'user_rotation', String(rotation));
+      let screenshot;
+      for (let i = 0; i < 20; i++) {
+        await shell.waitForTimeout(250);
+        screenshot = runAdb('exec-out', 'screencap', '-p');
+        const landscape = screenshot.readUInt32BE(16) > screenshot.readUInt32BE(20);
+        if (landscape === (rotation === 1)) break;
+      }
+      assert.equal(screenshot.readUInt32BE(16) > screenshot.readUInt32BE(20), rotation === 1, 'Background display must actually rotate');
+      await shell.waitForTimeout(900);
+      assert.ok(runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Background capsule must survive rotation');
+      writeFileSync(path.join(out, `background-capsule-${rotation === 0 ? 'portrait' : 'landscape'}.png`), runAdb('exec-out', 'screencap', '-p'));
+    }
+    await taskNative('setOverlay', { enabled: false });
+    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Disabling the capsule must remove it immediately');
+    assert.ok(runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true'), 'Notification-only fallback must keep the real job');
+    await taskNative('setOverlay', { enabled: true });
+    reports.push('A real background job survives portrait/landscape changes and capsule disablement; notification-only fallback keeps execution.');
+  }
+  await source.waitForFunction(() => document.querySelector('input[value="A"]').checked, null, { timeout: 60000, polling: 500 });
+  if (background) {
+    // Checking the radio precedes the native apply receipt and controller
+    // completion. Background WebViews also coalesce status timers: wait for
+    // actual service teardown instead of assuming a fixed 1.5-second delay.
+    let stopped = false;
+    for (let i = 0; i < 30 && !stopped; i++) {
+      stopped = !runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true');
+      if (!stopped) await shell.waitForTimeout(500);
+    }
+    assert.ok(stopped, 'Completed task must release its foreground service');
+    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Completed task must remove the capsule');
+    runAdb('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity', '-a', 'studypilot.SHOW_TASK');
+    await shell.locator('.mobile-sheet.is-open').waitFor();
+    await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'setOverlay', { enabled: false }));
+    runAdb('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', 'default');
+    await shell.getByRole('button', { name: '答题', exact: true }).click();
+    await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
+    reports.push('Real automatic task sends once, continues across other apps, fills the source in background, updates an opt-in capsule and notification, and removes its service on completion; task intent returns to the answer tools.');
+  }
   assert.equal((await native('getState')).tabId, original.tabId);
   assert.equal(await shell.locator('.mobile-sheet.is-open').count(), 0);
   reports.push('Shipped automatic UI completes extract -> prompt -> real Enter -> response -> import -> visible source fill.');

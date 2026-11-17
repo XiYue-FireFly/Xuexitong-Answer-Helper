@@ -72,6 +72,16 @@ class NativeWebViewPlugin : Plugin() {
         activity.window.decorView.post { setupWebView() }
     }
 
+    override fun handleOnStop() {
+        if (TaskStatusService.active) tabs.values.forEach { it.onResume() }
+    }
+
+    override fun handleOnDestroy() {
+        tasks.clear()
+        tabs.values.forEach { view -> (view.parent as? ViewGroup)?.removeView(view); view.destroy() }
+        tabs.clear(); studyWebView = null; container = null
+    }
+
     private fun createBrowser(tabId: String): WebView = WebView(context).apply {
         settings.apply {
             javaScriptEnabled = true
@@ -316,6 +326,35 @@ class NativeWebViewPlugin : Plugin() {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 75, bytes)
             bitmap.recycle()
             call.resolve(JSObject().put("dataUrl", "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP)))
+        }
+    }
+
+    @PluginMethod
+    fun captureDockBackdrop(call: PluginCall) {
+        activity.runOnUiThread {
+            val browser = container?.browser ?: return@runOnUiThread call.resolve(JSObject().put("dataUrl", ""))
+            // A software Canvas draw can block legacy WebView's hardware render
+            // thread while its first page is loading. Copy the composed window
+            // asynchronously; older systems retain the base glass material.
+            if (Build.VERSION.SDK_INT < 26 || browser.width <= 0 || browser.height <= 0 || !browser.isAttachedToWindow) {
+                return@runOnUiThread call.resolve(JSObject().put("dataUrl", ""))
+            }
+            val height = minOf(browser.height, (160 * context.resources.displayMetrics.density).toInt())
+            val scale = minOf(1f, 640f / browser.width)
+            val bitmap = Bitmap.createBitmap(maxOf(1, (browser.width * scale).toInt()), maxOf(1, (height * scale).toInt()), Bitmap.Config.ARGB_8888)
+            fun finish(success: Boolean) {
+                try {
+                    if (!success) { call.resolve(JSObject().put("dataUrl", "")); return }
+                    val bytes = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.JPEG, 85, bytes)
+                    call.resolve(JSObject().put("dataUrl", "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes.toByteArray(), android.util.Base64.NO_WRAP)))
+                } finally { bitmap.recycle() }
+            }
+            val location = IntArray(2); browser.getLocationInWindow(location)
+            val rect = AndroidRect(location[0], location[1] + browser.height - height, location[0] + browser.width, location[1] + browser.height)
+            try {
+                PixelCopy.request(activity.window, rect, bitmap,
+                    PixelCopy.OnPixelCopyFinishedListener { result -> finish(result == PixelCopy.SUCCESS) }, handler)
+            } catch (_: IllegalArgumentException) { finish(false) }
         }
     }
 

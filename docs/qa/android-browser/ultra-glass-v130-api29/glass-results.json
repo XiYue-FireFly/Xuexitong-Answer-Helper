@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-11-17T12:29:49.796Z",
+  "reports": [
+    "portrait: outside tap dismisses, zero webpage events; next tap reaches the source; browser viewport unchanged.",
+    "portrait: outside drag and long hold are consumed as whole gestures.",
+    "portrait: rapid reversal settles closed and restores webpage touch.",
+    "portrait: a held gesture across the closing transition never leaks to the source.",
+    "landscape: outside tap dismisses, zero webpage events; next tap reaches the source; browser viewport unchanged.",
+    "landscape: outside drag and long hold are consumed as whole gestures.",
+    "landscape: rapid reversal settles closed and restores webpage touch.",
+    "landscape: a held gesture across the closing transition never leaks to the source.",
+    "Native long hold follows the finger across the dock, release opens the target exactly once; tapping that tab again dissolves and closes, without a separate collapse button.",
+    "Rapid tab selection settles the shared capsule correctly; unsent draft survives tab changes and close/reopen; modal backdrop takes priority.",
+    "Legacy CSS glass retains lens lift, icon magnification and spring dragging without creating a WebGL surface above the browser.",
+    "320px dock: long-drag auto-scrolls to the edge tab; short swipe scrolls without selecting or opening a panel.",
+    "Reduced motion opens and closes without transitions."
+  ]
+}

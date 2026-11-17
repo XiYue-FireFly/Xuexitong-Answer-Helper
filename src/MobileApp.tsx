@@ -9,6 +9,8 @@ import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { MobileToolDock, type MobileToolTab } from './components/MobileToolDock';
 import { useToolDissolve } from './mobile/useToolDissolve';
+import { useBackgroundTask } from './mobile/useBackgroundTask';
+import { TaskStatus } from './platform/taskStatusPlugin';
 import { appStore, useAppStore } from './store/appStore';
 import { getPlatformAPI } from './platform';
 import { startAndroidBrowser } from './platform/androidBrowser';
@@ -31,6 +33,7 @@ function normalizeUrl(raw: string): string {
 }
 
 export default function MobileApp() {
+  useBackgroundTask();
   const { settings, status, logs } = useAppStore();
   const [activeTab, setActiveTab] = useState<MobileToolTab>('automation');
   const [panelOpen, setPanelOpen] = useState(false);
@@ -97,6 +100,18 @@ export default function MobileApp() {
   }, [settings.theme]);
 
   useEffect(() => startAndroidBrowser(), []);
+
+  useEffect(() => {
+    const show = () => {
+      void TaskStatus.consumeOpenTask().catch(() => undefined);
+      const running = webAISessions.getSnapshot().sessions.find(session => session.controller.getSnapshot().busy);
+      if (running) webAISessions.select(running.id);
+      toolMotion.cancel(); setActiveTab('automation'); setPanelOpen(true); setUrlEditing(false);
+    };
+    window.addEventListener('studypilot:show-task', show);
+    void TaskStatus.consumeOpenTask().then(result => { if (result.open) show(); }).catch(() => undefined);
+    return () => window.removeEventListener('studypilot:show-task', show);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -289,7 +304,7 @@ export default function MobileApp() {
           outsideGesture.current = null;
         }} />
 
-      <MobileToolDock navRef={tabsRef} activeTab={activeTab} panelOpen={panelOpen}
+      <MobileToolDock navRef={tabsRef} activeTab={activeTab} panelOpen={panelOpen} theme={settings.theme}
         onSelect={(tab, gesture) => {
           if (gesture === 'drag') { toolMotion.cancel(); setActiveTab(tab); setPanelOpen(true); }
           else if (tab === activeTab && panelOpen) {

@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativeWebViewPlugin.class);
+        registerPlugin(TaskStatusPlugin.class);
         super.onCreate(savedInstanceState);
         // NativeWebViewPlugin applies insets once to both WebViews. Keep the
         // system from also fitting/resizing content on pre-edge-to-edge Android.

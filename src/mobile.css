@@ -147,7 +147,7 @@ html, body, #root {
 .mobile-dismiss:is(:hover, :active) { transform: none; box-shadow: none; }
 .mobile-dismiss:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -3px; }
 
-/* The collapse button stays outside the horizontally scrolling glass tabs. */
+/* Fixed layout bounds keep the browser stable while the optical lens lifts. */
 .mobile-tabs {
   position: absolute;
   bottom: 7px;
@@ -164,11 +164,12 @@ html, body, #root {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(255, 255, 255, 0.06), 0 5px 22px rgba(15, 23, 42, 0.20);
   backdrop-filter: blur(22px) saturate(1.45);
   -webkit-backdrop-filter: blur(22px) saturate(1.45);
-  overflow: hidden;
+  overflow: visible;
   padding-bottom: 0;
   isolation: isolate;
 }
 .mobile-tabs__scroll {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
@@ -179,7 +180,12 @@ html, body, #root {
   user-select: none;
   -webkit-user-select: none;
   border-radius: 24px;
+  padding-block: 9px;
+  margin-block: -9px;
 }
+.mobile-tabs__optics { position: absolute; inset: -11px 0; width: 100%; height: calc(100% + 22px); pointer-events: none; }
+.mobile-tabs:has([data-optics='gpu']) { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.mobile-tabs__track[data-optics='gpu'] .mobile-tabs__selection { background: rgba(170,210,255,.12); box-shadow: none; }
 .mobile-tabs__scroll::-webkit-scrollbar { display: none; }
 .mobile-tabs__track {
   position: relative;
@@ -202,11 +208,11 @@ html, body, #root {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.46), inset 0 0 0 1px rgba(215, 234, 255, 0.24), 0 2px 7px rgba(7, 20, 40, 0.12);
 }
 .mobile-tabs__track[data-ready] .mobile-tabs__selection {
-  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1.08), width 360ms cubic-bezier(0.22, 1, 0.36, 1.08);
+  transition: none;
+  transform: translateX(calc(var(--dock-active-x, 0px) + var(--dock-pull, 0px))) scale(calc(1 + var(--dock-stretch, 0)), calc(1 + var(--dock-lift, 0) * .24 - var(--dock-stretch, 0) * .7));
 }
 .mobile-tabs__track[data-dragging] .mobile-tabs__selection {
   transition: none;
-  transform: translateX(var(--dock-active-x, 0px)) scaleY(1.08);
   background: radial-gradient(ellipse at var(--dock-drag-light, 50%) 0%, rgba(255,255,255,.55), transparent 65%),
     linear-gradient(155deg, rgba(185, 218, 255, .5), rgba(111, 167, 246, .16));
   box-shadow: inset 0 1px 1px rgba(255,255,255,.8), inset 0 -2px 4px rgba(121,180,255,.32), 0 4px 14px rgba(8,28,55,.2);
@@ -245,11 +251,17 @@ html, body, #root {
   transition: color 180ms ease;
 }
 .mobile-tab:is(:hover, :active) { transform: none; box-shadow: none; }
-.mobile-tab svg { transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1.15); }
+.mobile-tab svg { transform: scale(var(--dock-magnify, 1)); transition: none; }
 .mobile-tab.is-active { color: #b9dbff; font-weight: 650; }
 [data-theme='light'] .mobile-tab { color: #435873; }
 [data-theme='light'] .mobile-tab.is-active { color: #165dc8; }
-.mobile-tab:active svg { transform: scale(0.85); }
+.mobile-tab:active svg { transform: scale(var(--dock-magnify, 1)); }
+
+.mobile-task-settings { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.mobile-task-settings h5 { font-size: .9rem; }
+.mobile-task-settings p { color: var(--text-secondary); font-size: .75rem; line-height: 1.6; }
+.mobile-task-settings > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: .8rem; }
+.mobile-task-settings .btn { flex-shrink: 0; }
 @media (hover: hover) {
   .mobile-tab:hover { color: #e0edff; }
   [data-theme='light'] .mobile-tab:hover { color: #165dc8; }

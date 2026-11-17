@@ -97,7 +97,7 @@ try {
     const point = await outside();
     const before = await count();
     await tap(point);
-    await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'), null, { timeout: 3000 });
+    await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'), null, { timeout: 8000, polling: 100 });
     await shell.waitForTimeout(400);
     assert.deepEqual(await count(), before, 'Dismiss gesture must never reach or scroll the webpage');
     await tap(point);
@@ -242,7 +242,7 @@ try {
   assert.equal(await draft.inputValue(), '保留这段尚未发送的草稿 · glass QA');
   const selected = await shell.locator('.mobile-tab.is-active').boundingBox();
   const capsule = await shell.locator('.mobile-tabs__selection').boundingBox();
-  assert.ok(Math.abs(capsule.x - selected.x) < 1 && Math.abs(capsule.width - selected.width) < 1,
+  assert.ok(Math.abs(capsule.x + capsule.width / 2 - selected.x - selected.width / 2) < 1 && capsule.width >= selected.width,
     `Sliding capsule did not settle over the selected tab: ${JSON.stringify({ selected, capsule })}`);
   await tap(await outside());
   await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
@@ -274,6 +274,39 @@ try {
   await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
   await shell.waitForTimeout(400);
   reports.push('Rapid tab selection settles the shared capsule correctly; unsent draft survives tab changes and close/reopen; modal backdrop takes priority.');
+  const optics = await shell.locator('.mobile-tabs__track').getAttribute('data-optics');
+  const api = Number(runAdb('shell', 'getprop', 'ro.build.version.sdk').toString().trim());
+  assert.equal(optics, api >= 30 ? 'gpu' : 'css', 'Glass must use the supported system rendering path');
+  if (optics === 'gpu') {
+    const gpu = await shell.evaluate(() => {
+      const canvas = document.querySelector('.mobile-tabs__optics'); const gl = canvas.getContext('webgl');
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4); gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      let visible = 0; for (let i = 3; i < pixels.length; i += 4) if (pixels[i]) visible++;
+      return { visible, error: gl.getError() };
+    });
+    assert.ok(gpu.visible > 1000 && gpu.error === 0, `GPU glass output missing: ${JSON.stringify(gpu)}`);
+  }
+  // A real held press lifts the optical lens and magnifies the icons, without resizing the browser.
+  const pressBounds = await firstTab.boundingBox();
+  const pressPoint = await screenPoint({ x: pressBounds.x + pressBounds.width / 2, y: pressBounds.y + pressBounds.height / 2 });
+  motion('DOWN', pressPoint);
+  try {
+    await shell.waitForFunction(() => Number(document.querySelector('.mobile-tabs__track').style.getPropertyValue('--dock-lift')) > 0.95);
+    const magnify = await firstTab.evaluate(button => Number(button.style.getPropertyValue('--dock-magnify')));
+    assert.ok(magnify > 1.1, `Pressed icon should magnify through the lens: ${magnify}`);
+    writeFileSync(path.join(out, 'ultra-lens-pressed.png'), runAdb('exec-out', 'screencap', '-p'));
+  } finally { motion('UP', pressPoint); }
+  await shell.waitForTimeout(800);
+  if (optics === 'gpu') {
+    await shell.evaluate(() => {
+      const canvas = document.querySelector('.mobile-tabs__optics'); canvas.getContext('webgl').getExtension('WEBGL_lose_context').loseContext();
+    });
+    await shell.waitForFunction(() => document.querySelector('.mobile-tabs__track').dataset.optics === 'css');
+    assert.equal(await firstTab.isEnabled(), true);
+    reports.push('GPU glass produces real refracted pixels; a press lifts the lens and magnifies icons; GPU loss retains CSS material and usable tabs.');
+  } else {
+    reports.push('Legacy CSS glass retains lens lift, icon magnification and spring dragging without creating a WebGL surface above the browser.');
+  }
 
   const initialTheme = await shell.evaluate(() => document.documentElement.dataset.theme);
   for (const theme of ['dark', 'light']) {

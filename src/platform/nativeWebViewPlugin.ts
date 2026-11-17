@@ -65,6 +65,7 @@ export const NativeWebView = {
     return getPlugin().setLayout(layout);
   },
   captureBackdrop(): Promise<{ dataUrl: string }> { return getPlugin().captureBackdrop(); },
+  captureDockBackdrop(): Promise<{ dataUrl: string }> { return getPlugin().captureDockBackdrop(); },
   captureToolSurface(bounds: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string }> {
     return getPlugin().captureToolSurface(bounds);
   },

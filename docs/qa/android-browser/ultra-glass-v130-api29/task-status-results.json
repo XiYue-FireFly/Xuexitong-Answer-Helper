@@ -1,0 +1,15 @@
+{
+  "checkedAt": "2026-11-17T12:28:21.839Z",
+  "capabilities": {
+    "api": 29,
+    "notifications": true,
+    "overlay": true,
+    "overlayEnabled": true,
+    "liveUpdates": false,
+    "batteryRestricted": false
+  },
+  "reports": [
+    "Notification permission detection and overlay opt-in work; an idle foreground or background app never shows a stale job.",
+    "Cold task intent opens answer tools without restarting an old job; the app remains idle."
+  ]
+}
