@@ -5,9 +5,17 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Windows release tag to build
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-windows:
@@ -16,12 +24,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
+
+      - name: Verify release version
+        run: node -e "if (process.env.RELEASE_TAG !== 'v' + require('./package.json').version) throw new Error('Release tag must match package version')"
 
       - name: Install dependencies
         run: npm ci
@@ -37,11 +50,11 @@ jobs:
       - name: Publish GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           allowUpdates: true
           replacesArtifacts: true
           makeLatest: true
           artifactErrorsFailBuild: true
-          artifacts: release/windows/${{ github.ref_name }}/Xuexitong-Answer-Helper-*-win-x64-setup.exe,release/windows/${{ github.ref_name }}/SHA256SUMS.txt
-          bodyFile: docs/releases/${{ github.ref_name }}.md
+          artifacts: release/windows/${{ env.RELEASE_TAG }}/Xuexitong-Answer-Helper-*-win-x64-setup.exe,release/windows/${{ env.RELEASE_TAG }}/SHA256SUMS.txt
+          bodyFile: docs/releases/${{ env.RELEASE_TAG }}.md
