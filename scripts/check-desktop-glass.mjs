@@ -8,7 +8,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright-core');
 const root = process.cwd();
-const out = path.resolve(process.env.DESKTOP_QA_OUT || '.playwright-mcp/windows-v150');
+const out = path.resolve(process.env.DESKTOP_QA_OUT || '.playwright-mcp/windows-glass');
 mkdirSync(out, { recursive: true });
 const profile = mkdtempSync(path.join(os.tmpdir(), 'studypilot-glass-'));
 const userData = path.join(profile, 'user-data');
@@ -142,7 +142,8 @@ try {
   report('tap glides through intermediate positions within one button width', motion);
   const first = await dock.getByRole('button', { name: '答题', exact: true }).boundingBox();
   await shell.mouse.move(first.x + first.width / 2, first.y + first.height / 2); await shell.mouse.down();
-  await shell.waitForTimeout(500);
+  await shell.waitForFunction(() => parseFloat(document.querySelector('.mobile-tabs__track').style.getPropertyValue('--dock-active-height'))
+    > document.querySelector('.mobile-tabs').clientHeight, undefined, { timeout: 2500 });
   const held = await shell.evaluate(() => ({ height: parseFloat(document.querySelector('.mobile-tabs__track').style.getPropertyValue('--dock-active-height')),
     bar: document.querySelector('.mobile-tabs').clientHeight }));
   assert.ok(held.height > held.bar, 'Long hold must lift the lens');
@@ -156,19 +157,76 @@ try {
     assert.ok(await shell.locator('.side-panel-page:not([hidden])').isVisible());
   }
   report('all seven pages remain usable');
-  const draft = shell.locator('.side-panel-page:not([hidden]) textarea').first();
-  if (await draft.count()) {
-    await draft.fill('Windows 玻璃草稿保留验证'); await open('教程'); await open('设置');
-    assert.equal(await shell.locator('.side-panel-page:not([hidden]) textarea').first().inputValue(), 'Windows 玻璃草稿保留验证');
-  }
+  const draft = shell.getByPlaceholder('输入任意测试消息，例如：请回复一句中文，确认配置可用。');
+  await draft.click();
+  await shell.waitForFunction(() => document.activeElement?.getAttribute('placeholder') === '输入任意测试消息，例如：请回复一句中文，确认配置可用。');
+  await draft.fill('Windows 玻璃草稿保留验证');
+  await shell.waitForFunction(() => !document.querySelector('button[title="发送测试消息"]').disabled);
+  await draft.evaluate(element => { window.__draftElement = element; });
+  assert.equal(await draft.inputValue(), 'Windows 玻璃草稿保留验证');
+  await open('教程'); await open('设置');
+  assert.equal(await draft.evaluate(element => element === window.__draftElement), true, 'Editor must stay mounted');
+  assert.equal(await draft.inputValue(), 'Windows 玻璃草稿保留验证');
   report('switching pages preserves mounted editor state');
+
+  await source.evaluate(() => document.querySelectorAll('.block').forEach(element => element.style.background = '#fff'));
+  await open('题库');
+  await shell.waitForTimeout(500);
+  const contrastProbes = await shell.evaluate(() => {
+    const selectors = ['.desktop-sheet__heading > span:first-child', '.kb-kicker', '.kb-bento-card p', '.kb-bento-card__foot > span:first-child', '.kb-search-bar input', '.kb-type-pill:not(.is-active)'];
+    const probes = [];
+    for (const selector of selectors) {
+      const element = document.querySelector(`.desktop-sheet ${selector}`);
+      if (!element) continue;
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      const color = getComputedStyle(element, element.matches('input') ? '::placeholder' : null).color;
+      element.dataset.contrastProbe = 'true';
+      probes.push({ selector, foreground: color.match(/[\d.]+/g).slice(0, 3).map(Number),
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    }
+    const style = document.createElement('style'); style.id = 'contrast-measurement';
+    style.textContent = '[data-contrast-probe], [data-contrast-probe] *, [data-contrast-probe]::placeholder { transition: none !important; color: transparent !important; text-shadow: none !important; }';
+    document.head.append(style);
+    return { probes, viewportWidth: innerWidth };
+  });
+  assert.equal(contrastProbes.probes.length, 6, 'Probe headings, labels, descriptions, hints, placeholders and inactive filters');
+  const contrastImage = await shell.screenshot();
+  await shell.evaluate(() => { document.querySelector('#contrast-measurement').remove(); document.querySelectorAll('[data-contrast-probe]').forEach(element => delete element.dataset.contrastProbe); });
+  const contrasts = await app.evaluate(({ nativeImage }, payload) => {
+    const image = nativeImage.createFromBuffer(Buffer.from(payload.png, 'base64'));
+    const size = image.getSize(), pixels = image.toBitmap(), ratio = size.width / payload.viewportWidth;
+    const luminance = rgb => rgb.map(value => { const c = value / 255; return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; })
+      .reduce((sum, value, index) => sum + value * [.2126,.7152,.0722][index], 0);
+    return payload.probes.map(probe => {
+      const foreground = luminance(probe.foreground); let minimum = 100, background = [];
+      for (const x of [.15,.35,.55,.75,.85]) for (const y of [.3,.5,.7]) {
+        const offset = (Math.min(size.height - 1, Math.floor((probe.y + probe.height * y) * ratio)) * size.width
+          + Math.min(size.width - 1, Math.floor((probe.x + probe.width * x) * ratio))) * 4;
+        const rgb = [pixels[offset + 2], pixels[offset + 1], pixels[offset]];
+        const back = luminance(rgb), contrast = (Math.max(foreground, back) + .05) / (Math.min(foreground, back) + .05);
+        if (contrast < minimum) { minimum = contrast; background = rgb; }
+      }
+      return { selector: probe.selector, foreground: probe.foreground, background, minimum };
+    });
+  }, { ...contrastProbes, png: contrastImage.toString('base64') });
+  console.log('Text contrast:', JSON.stringify(contrasts));
+  for (const probe of contrasts) assert.ok(probe.minimum >= 4.5, `${probe.selector} text contrast ${probe.minimum.toFixed(2)} must reach 4.5:1`);
+  await shell.screenshot({ path: path.join(out, 'dark-white-page-readable.png') });
+  report('dark panel text stays readable over a white webpage', { contrasts });
+  await open('设置');
   await shell.getByRole('button', { name: '浅色模式', exact: true }).click();
   assert.equal(await shell.locator('.desktop-shell').getAttribute('data-theme'), 'light');
   await shell.screenshot({ path: path.join(out, 'light-tools.png') });
   await close();
 
   for (const [width, height] of [[960,640],[700,540],[1400,900]]) {
-    await app.evaluate(({ BrowserWindow }, size) => { const win = BrowserWindow.getAllWindows()[0]; win.unmaximize(); win.setSize(...size); }, [width,height]);
+    await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win.isMaximized()) await new Promise(resolve => { win.once('unmaximize', resolve); win.unmaximize(); });
+    });
+    await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setSize(...size), [width,height]);
+    await shell.waitForFunction(size => Math.abs(innerWidth - size[0]) <= 2 && Math.abs(innerHeight - size[1]) <= 2, [width,height]);
     await shell.waitForTimeout(400); await open('设置');
     const geometry = await shell.evaluate(() => {
       const panel = document.querySelector('.desktop-sheet').getBoundingClientRect(), dock = document.querySelector('.mobile-tabs').getBoundingClientRect();
@@ -180,6 +238,7 @@ try {
     report(`window resize ${width}x${height}`, geometry);
   }
   // A lost context must leave usable CSS glass and recover its live source.
+  await shell.waitForFunction(() => document.querySelector('.mobile-tabs__track').dataset.optics === 'gpu');
   await shell.evaluate(() => { const gl = document.querySelector('.mobile-tabs__optics').getContext('webgl'); window.__lose = gl.getExtension('WEBGL_lose_context'); window.__lose.loseContext(); });
   await shell.waitForFunction(() => document.querySelector('.mobile-tabs__track').dataset.optics === 'css');
   await open('教程'); await close();
@@ -200,6 +259,9 @@ try {
   assert.deepEqual(errors, [], 'No renderer errors');
   writeFileSync(path.join(out, 'results.json'), JSON.stringify({ passed: true, platform: process.platform, version: await app.evaluate(({ app }) => app.getVersion()), reports, errors }, null, 2));
 } catch (error) {
+  if (shell) console.error('Glass state:', await shell.evaluate(() => ({ hidden: document.hidden,
+    viewport: [innerWidth, innerHeight], optics: document.querySelector('.mobile-tabs__track')?.dataset.optics,
+    source: document.querySelector('webview[data-active-browser="true"]')?.getBoundingClientRect().toJSON() })).catch(() => null));
   if (shell) await shell.screenshot({ path: path.join(out, 'failure.png') }).catch(() => {});
   writeFileSync(path.join(out, 'results.json'), JSON.stringify({ passed: false, reports, errors, error: error.stack }, null, 2));
   throw error;

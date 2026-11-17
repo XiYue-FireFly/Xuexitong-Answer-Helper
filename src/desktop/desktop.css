@@ -10,6 +10,30 @@
   --desktop-edge: rgba(255,255,255,.72);
   --desktop-highlight: rgba(255,255,255,.86);
 }
+/* The live source supplies the translucency. An opaque backing prevents the
+   unblurred guest page leaking through and washing out text on white sites. */
+.desktop-shell[data-theme='dark'] .desktop-sheet {
+  --text-primary: #f5f8ff;
+  --text-secondary: #d5e1f2;
+  --text-muted: #b7cbe4;
+  --primary-color: #a5c8ff;
+  --accent-color: #d3baff;
+  --success-color: #52dfac;
+  --warning-color: #ffda8c;
+  --danger-color: #ffa7ad;
+  --desktop-fill: linear-gradient(145deg,rgba(103,133,174,.12),rgba(28,46,70,.10));
+  --desktop-control: linear-gradient(145deg,rgba(135,166,209,.16),rgba(77,110,155,.11));
+  background: #0d182b;
+  color: var(--text-primary);
+}
+.desktop-shell[data-theme='dark'] .desktop-sheet__material img { opacity: .14; }
+.desktop-shell[data-theme='dark'] .desktop-tool-content :is(input,textarea)::placeholder { color: var(--text-muted); opacity: 1; }
+.desktop-shell[data-theme='dark'] .desktop-tool-content :is(.btn-primary,.web-ai-primary,.kb-action-button--primary) {
+  background: linear-gradient(135deg,rgba(40,103,214,.98),rgba(58,78,184,.97)) !important;
+}
+.desktop-shell[data-theme='dark'] .desktop-tool-content .btn-success { color: var(--success-color); }
+.desktop-shell[data-theme='dark'] .desktop-tool-content .kb-option.is-correct > span { color: #092b21; }
+.desktop-shell[data-theme='dark'] .desktop-tool-content :is(.btn-danger,.kb-action-button--danger) { color: var(--danger-color); }
 .desktop-shell .app-workspace { position: relative; isolation: isolate; }
 .desktop-shell .browser-deck { width: 100%; border: 0; backdrop-filter: none; }
 .desktop-shell .mobile-tabs { max-width: 650px; width: calc(100% - 48px); bottom: 16px; z-index: 300; }

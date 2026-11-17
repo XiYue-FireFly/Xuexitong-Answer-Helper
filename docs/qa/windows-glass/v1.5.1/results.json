@@ -1,0 +1,243 @@
+{
+  "passed": true,
+  "platform": "win32",
+  "version": "1.5.1",
+  "reports": [
+    {
+      "name": "floating tools preserve the full browser viewport",
+      "passed": true
+    },
+    {
+      "name": "capture accepts only the owned guest surface",
+      "passed": true
+    },
+    {
+      "name": "floating tools preserve guest keyboard input",
+      "passed": true
+    },
+    {
+      "name": "long-page glass updates without pressing a button",
+      "passed": true,
+      "red": [
+        230,
+        27,
+        28,
+        255
+      ],
+      "blue": [
+        17,
+        85,
+        225,
+        255
+      ]
+    },
+    {
+      "name": "bright source pixels select readable dark labels",
+      "passed": true
+    },
+    {
+      "name": "outside click dismisses without passing the gesture into the guest",
+      "passed": true
+    },
+    {
+      "name": "tap glides through intermediate positions within one button width",
+      "passed": true,
+      "frames": [
+        2,
+        2,
+        82.81042465827062,
+        110.33086337160555,
+        140.1121316828154,
+        169.3107657949651,
+        300.3685081173559,
+        343.7241515976188,
+        362.88499242878413,
+        380.98557828478596,
+        397.6161417362373,
+        412.8463139774079,
+        477.0566619234661,
+        484.9960312214674,
+        491.70593357144713,
+        498.1984253168737,
+        503.6686163132098,
+        508.8362234106139,
+        513.5771110222074,
+        517.6448457345269,
+        521.3800317318533,
+        524.6541517939655,
+        527.6545438317899,
+        530.2799065437434,
+        532.6818756780976,
+        534.8258017707328,
+        539.7556126001554,
+        541.9408308501704,
+        543.3018550805368,
+        548.6700768272351,
+        551.8080509929148,
+        552.2397309443442,
+        552.5022184282494,
+        552.6388194349975,
+        552.7790761734201,
+        552.8620560515125,
+        552.9370116656028,
+        552.9771204666563,
+        552.9876107520046,
+        552.9929196254918,
+        552.9977817266496,
+        553.0005937805216,
+        553.0005937805216,
+        553.0005937805216,
+        553.0005937805216
+      ],
+      "width": 86,
+      "button": 90
+    },
+    {
+      "name": "held lens lifts and dragging outside the bar still selects the release destination",
+      "passed": true,
+      "height": 62.31536022177007,
+      "bar": 62
+    },
+    {
+      "name": "all seven pages remain usable",
+      "passed": true
+    },
+    {
+      "name": "switching pages preserves mounted editor state",
+      "passed": true
+    },
+    {
+      "name": "dark panel text stays readable over a white webpage",
+      "passed": true,
+      "contrasts": [
+        {
+          "selector": ".desktop-sheet__heading > span:first-child",
+          "foreground": [
+            245,
+            248,
+            255
+          ],
+          "background": [
+            46,
+            56,
+            72
+          ],
+          "minimum": 11.126114523221005
+        },
+        {
+          "selector": ".kb-kicker",
+          "foreground": [
+            213,
+            225,
+            242
+          ],
+          "background": [
+            53,
+            66,
+            84
+          ],
+          "minimum": 7.714391245943112
+        },
+        {
+          "selector": ".kb-bento-card p",
+          "foreground": [
+            213,
+            225,
+            242
+          ],
+          "background": [
+            53,
+            65,
+            84
+          ],
+          "minimum": 7.802192494732522
+        },
+        {
+          "selector": ".kb-bento-card__foot > span:first-child",
+          "foreground": [
+            183,
+            203,
+            228
+          ],
+          "background": [
+            52,
+            65,
+            84
+          ],
+          "minimum": 6.24393084792801
+        },
+        {
+          "selector": ".kb-search-bar input",
+          "foreground": [
+            245,
+            248,
+            255
+          ],
+          "background": [
+            63,
+            79,
+            101
+          ],
+          "minimum": 7.845951517716382
+        },
+        {
+          "selector": ".kb-type-pill:not(.is-active)",
+          "foreground": [
+            213,
+            225,
+            242
+          ],
+          "background": [
+            71,
+            83,
+            100
+          ],
+          "minimum": 5.905559217660707
+        }
+      ]
+    },
+    {
+      "name": "window resize 960x640",
+      "passed": true,
+      "right": 943.3333435058594,
+      "bottom": 518.4340209960938,
+      "dockTop": 529.3333740234375,
+      "dockBottom": 592.6667098999023,
+      "width": 961,
+      "height": 641
+    },
+    {
+      "name": "window resize 700x540",
+      "passed": true,
+      "right": 688.0000457763672,
+      "bottom": 436.3393859863281,
+      "dockTop": 441,
+      "dockBottom": 499.33333587646484,
+      "width": 700,
+      "height": 540
+    },
+    {
+      "name": "window resize 1400x900",
+      "passed": true,
+      "right": 1382.0000610351562,
+      "bottom": 777.0949401855469,
+      "dockTop": 788,
+      "dockBottom": 851.3333358764648,
+      "width": 1400,
+      "height": 900
+    },
+    {
+      "name": "GPU loss falls back to CSS and restores live refraction",
+      "passed": true
+    },
+    {
+      "name": "minimized window stops capture and restores its live material",
+      "passed": true
+    },
+    {
+      "name": "reduced motion expands and collapses without particles",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

@@ -2,6 +2,14 @@
 
 Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
 
+## Windows v1.5.1 更新
+
+- 修复暗色模式下工具 Tab 展开页文字发灰、被白色网页背景干扰的问题。
+- 加深面板底色并保留实时玻璃色彩，提亮标题、说明、占位文字和未选中的筛选按钮，调整主操作按钮与状态文字对比度。
+- 新增白色网页背景下的实际像素对比度回归，六类文字均达到 4.5:1 以上。
+
+下载 [Windows v1.5.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.1)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.1.md) 与 [验证记录](docs/qa/windows-glass/v1.5.1/verification.md)。
+
 ## Windows v1.5.0 更新
 
 - 七个工具 Tab 改为悬浮液态玻璃，实时折射当前网页；长页面滚动后持续更新取样。
