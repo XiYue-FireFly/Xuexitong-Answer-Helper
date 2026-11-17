@@ -58,7 +58,8 @@ try {
     if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
     await shell.waitForFunction(label => document.querySelector('.mobile-tab.is-active')?.getAttribute('aria-label') === label
       && document.querySelector('.mobile-sheet.is-open'), label);
-    await shell.waitForTimeout(450);
+    await shell.waitForFunction(() => !document.querySelector('.mobile-dissolve').style.width || document.querySelector('.mobile-dissolve').width === 0);
+    await shell.waitForTimeout(100);
   };
   const native = (method, args = {}) => shell.evaluate(({ method, args }) =>
     window.Capacitor.nativePromise('NativeWebView', method, args), { method, args });
@@ -69,6 +70,31 @@ try {
   }
   assert.ok(source);
   await source.getByRole('heading').waitFor();
+  const glassPixels = () => shell.evaluate(() => {
+    const canvas = document.querySelector('.mobile-tabs__optics'), gl = canvas.getContext('webgl');
+    const pixels = new Uint8Array(4);
+    gl.readPixels(Math.round(canvas.width / 2), Math.round(canvas.height / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return Array.from(pixels);
+  });
+  // Change only the source page: no navigation, shell click, resize or touch.
+  await source.evaluate(() => { document.body.style.background = '#ff2020'; });
+  await shell.waitForTimeout(800);
+  const redGlass = await glassPixels();
+  await source.evaluate(() => { document.body.style.background = '#2040ff'; });
+  await shell.waitForTimeout(800);
+  const blueGlass = await glassPixels();
+  assert.ok(redGlass[0] > blueGlass[0] + 25 && blueGlass[2] > redGlass[2] + 25,
+    `Refraction must follow source changes without a button press: ${JSON.stringify({redGlass, blueGlass})}`);
+  await openTools('设置');
+  await shell.waitForTimeout(1000);
+  const glassWithTools = await glassPixels();
+  assert.ok(glassWithTools.every((channel, index) => Math.abs(channel - blueGlass[index]) < 6),
+    `The optical texture must not capture its own UI: ${JSON.stringify({blueGlass, glassWithTools})}`);
+  await shell.getByRole('button', { name: '设置', exact: true }).click();
+  await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
+  await shell.waitForTimeout(500);
+  await source.evaluate(() => { document.body.style.background = ''; });
+  reports.push('Refraction follows changing webpage pixels without navigation or a dock press.');
   const screenPoint = async point => {
     const entries = await (await fetch('http://127.0.0.1:9222/json/list')).json();
     const dimensions = JSON.parse(entries.find(entry => entry.url.startsWith('https://localhost')).description);
@@ -183,6 +209,10 @@ try {
     motion('MOVE', endFinger);
     await shell.waitForTimeout(400);
     assert.equal(await shell.locator('.mobile-tabs__track').getAttribute('data-preview'), 'settings');
+    const bounds = await shell.locator('.mobile-tabs__selection').boundingBox();
+    const bar = await shell.locator('.mobile-tabs').boundingBox();
+    assert.ok(bounds.x >= bar.x && bounds.x + bounds.width <= bar.x + bar.width,
+      'Lifted and stretched lens must stay inside the dock at the edge');
   } finally { motion('UP', endFinger); }
   await shell.waitForFunction(() => document.querySelector('.mobile-tab.is-active')?.getAttribute('aria-label') === '设置');
   await shell.waitForTimeout(500);
@@ -242,7 +272,10 @@ try {
   assert.equal(await draft.inputValue(), '保留这段尚未发送的草稿 · glass QA');
   const selected = await shell.locator('.mobile-tab.is-active').boundingBox();
   const capsule = await shell.locator('.mobile-tabs__selection').boundingBox();
-  assert.ok(Math.abs(capsule.x + capsule.width / 2 - selected.x - selected.width / 2) < 1 && capsule.width >= selected.width,
+  const dockBounds = await shell.locator('.mobile-tabs').boundingBox();
+  const boundedCenter = Math.max(dockBounds.x + 5 + capsule.width / 2,
+    Math.min(dockBounds.x + dockBounds.width - 5 - capsule.width / 2, selected.x + selected.width / 2));
+  assert.ok(Math.abs(capsule.x + capsule.width / 2 - boundedCenter) < 1.5 && capsule.width >= selected.width,
     `Sliding capsule did not settle over the selected tab: ${JSON.stringify({ selected, capsule })}`);
   await tap(await outside());
   await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
@@ -278,6 +311,12 @@ try {
   const api = Number(runAdb('shell', 'getprop', 'ro.build.version.sdk').toString().trim());
   assert.equal(optics, api >= 30 ? 'gpu' : 'css', 'Glass must use the supported system rendering path');
   if (optics === 'gpu') {
+    for (const theme of ['light', 'dark']) {
+      await shell.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      assert.equal(await shell.locator('.mobile-tabs__selection').evaluate(element => getComputedStyle(element).opacity), '0',
+        `${theme}: GPU lens must not have a second painted CSS selection`);
+      assert.equal(await shell.locator('.mobile-tabs').evaluate(element => getComputedStyle(element).backgroundImage), 'none');
+    }
     const gpu = await shell.evaluate(() => {
       const canvas = document.querySelector('.mobile-tabs__optics'); const gl = canvas.getContext('webgl');
       const pixels = new Uint8Array(canvas.width * canvas.height * 4); gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
@@ -299,11 +338,14 @@ try {
   await shell.waitForTimeout(800);
   if (optics === 'gpu') {
     await shell.evaluate(() => {
-      const canvas = document.querySelector('.mobile-tabs__optics'); canvas.getContext('webgl').getExtension('WEBGL_lose_context').loseContext();
+      const canvas = document.querySelector('.mobile-tabs__optics'); canvas.qaContextLoss = canvas.getContext('webgl').getExtension('WEBGL_lose_context'); canvas.qaContextLoss.loseContext();
     });
     await shell.waitForFunction(() => document.querySelector('.mobile-tabs__track').dataset.optics === 'css');
     assert.equal(await firstTab.isEnabled(), true);
-    reports.push('GPU glass produces real refracted pixels; a press lifts the lens and magnifies icons; GPU loss retains CSS material and usable tabs.');
+    writeFileSync(path.join(out, 'gpu-fallback.png'), runAdb('exec-out', 'screencap', '-p'));
+    await shell.evaluate(() => document.querySelector('.mobile-tabs__optics').qaContextLoss.restoreContext());
+    await shell.waitForFunction(() => document.querySelector('.mobile-tabs__track').dataset.optics === 'gpu');
+    reports.push('GPU glass produces real refracted pixels; a press lifts the lens and magnifies icons; GPU loss retains CSS material and usable tabs, then restores the optical surface.');
   } else {
     reports.push('Legacy CSS glass retains lens lift, icon magnification and spring dragging without creating a WebGL surface above the browser.');
   }
@@ -313,6 +355,21 @@ try {
     if (await shell.evaluate(() => document.documentElement.dataset.theme) !== theme) {
       await shell.getByRole('button', { name: '切换明暗主题', exact: true }).click();
     }
+    // Before GPU-loss fallback, the selection proxy is invisible: only one
+    // optical lens may paint. This also guards theme-specific CSS overrides.
+    const materialChecks = [];
+    for (const [label, selector] of [['答题', '.answer-mode-switch__button'], ['题库', '.kb-search-bar'],
+      ['Token', '.mobile-control-group button[aria-pressed="true"]'], ['记录', '.mobile-glass-search'],
+      ['错误', '.mobile-main button'], ['教程', '.tutorial-panel details'], ['设置', '.custom-select__button']]) {
+      await openTools(label);
+      const material = await shell.locator(`.mobile-main > div:not([hidden]) ${selector.replace('.mobile-main ', '')}`).first().evaluate(element => {
+        const style = getComputedStyle(element);
+        return { background: style.backgroundImage, radius: parseFloat(style.borderRadius) };
+      });
+      assert.ok(material.background.includes('gradient') && material.radius >= 16, `${theme} ${label}: missing internal glass ${JSON.stringify(material)}`);
+      materialChecks.push(label);
+    }
+    reports.push(`${theme}: internal glass material covers ${materialChecks.join(', ')}.`);
     await openTools('Token');
     await shell.waitForTimeout(450);
     writeFileSync(path.join(out, `portrait-glass-${theme}.png`), runAdb('exec-out', 'screencap', '-p'));

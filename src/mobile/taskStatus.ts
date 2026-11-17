@@ -3,6 +3,7 @@ import type { AnswerActivity } from '../answerActivity/activityStore';
 export type MobileTaskStatus = {
   running: boolean; paused: boolean; title: string; phase: string;
   completed: number; total: number; skipped: number; indeterminate: boolean; outcome: string;
+  canPause?: boolean;
 };
 
 /** Only counters and generic phase text leave the task layer; never page content. */

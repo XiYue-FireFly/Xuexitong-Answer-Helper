@@ -117,7 +117,7 @@ export function TokenUsagePanel() {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-        <div className="glass-panel" style={{ padding: 4, display: 'flex', gap: 4, borderRadius: 8 }}>
+        <div className="glass-panel mobile-control-group" style={{ padding: 4, display: 'flex', gap: 4, borderRadius: 8 }}>
           {[
             { key: 'overview', label: '总览' },
             { key: 'models', label: '模型' }
@@ -126,6 +126,7 @@ export function TokenUsagePanel() {
               key={item.key}
               onClick={() => setMode(item.key as UsageMode)}
               className="btn"
+              aria-pressed={mode === item.key}
               style={{
                 minHeight: 32,
                 padding: '6px 12px',
@@ -137,7 +138,7 @@ export function TokenUsagePanel() {
             </button>
           ))}
         </div>
-        <div className="glass-panel" style={{ padding: 4, display: 'flex', gap: 4, borderRadius: 8 }}>
+        <div className="glass-panel mobile-control-group" style={{ padding: 4, display: 'flex', gap: 4, borderRadius: 8 }}>
           {[
             { key: 'all', label: '全部' },
             { key: '30d', label: '30天' },
@@ -147,6 +148,7 @@ export function TokenUsagePanel() {
               key={item.key}
               onClick={() => setRange(item.key as RangeKey)}
               className="btn"
+              aria-pressed={range === item.key}
               style={{
                 minHeight: 32,
                 padding: '6px 12px',

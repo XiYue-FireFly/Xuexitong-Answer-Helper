@@ -8,6 +8,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { MobileToolDock, type MobileToolTab } from './components/MobileToolDock';
+import { continuousCapture } from './mobile/continuousCapture';
 import { useToolDissolve } from './mobile/useToolDissolve';
 import { useBackgroundTask } from './mobile/useBackgroundTask';
 import { TaskStatus } from './platform/taskStatusPlugin';
@@ -158,18 +159,20 @@ export default function MobileApp() {
   useEffect(() => {
     if (!panelOpen) return;
     let cancelled = false;
+    let foreground = true;
     let revision = 0;
-    let timer: ReturnType<typeof setTimeout>;
-    const capture = () => {
+    const capture = async () => {
       const request = ++revision;
-      void NativeWebView.captureBackdrop().then(result => {
+      await NativeWebView.captureBackdrop().then(result => {
         if (!cancelled && request === revision) setBackdrop(result.dataUrl);
       }).catch(() => { if (!cancelled && request === revision) setBackdrop(''); });
     };
-    const resize = () => { ++revision; clearTimeout(timer); timer = setTimeout(capture, 180); };
-    capture();
-    window.addEventListener('resize', resize);
-    return () => { cancelled = true; clearTimeout(timer); window.removeEventListener('resize', resize); };
+    const captures = continuousCapture(capture, 220);
+    const visibility = () => { ++revision; captures.setVisible(foreground && !document.hidden); };
+    const nativeVisibility = NativeWebView.onVisibilityChanged(state => { foreground = state.visible; visibility(); });
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    return () => { cancelled = true; ++revision; captures.dispose(); void nativeVisibility.then(listener => listener.remove()); document.removeEventListener('visibilitychange', visibility); };
   }, [panelOpen, browserUrl, activeBrowserTab]);
 
   useLayoutEffect(() => {

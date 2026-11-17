@@ -29,7 +29,7 @@ export function HistoryPanel() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-glass)', borderRadius: 8, padding: '0 10px', background: 'rgba(255,255,255,0.02)' }}>
+      <div className="mobile-glass-inset mobile-glass-search" style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-glass)', borderRadius: 8, padding: '0 10px', background: 'rgba(255,255,255,0.02)' }}>
         <Search size={14} style={{ color: 'var(--text-muted)' }} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索运行记录..." style={{ flex: 1, border: 'none', background: 'transparent', fontSize: '0.8rem' }} />
       </div>

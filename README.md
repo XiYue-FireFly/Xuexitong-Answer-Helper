@@ -2,6 +2,15 @@
 
 Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
 
+## Android v1.4.0 更新
+
+- 底栏折射与面板背景持续跟随网页变化，修复长按拖动越界和亮暗主题重复玻璃，统一七个工具页控件材质。
+- 移除应用悬浮条，使用系统进度通知；可选媒体卡片以真实题数显示进度，支持暂停、继续和任务结束清理，无需播放声音。
+- 保留同一 Tab 再次点击收起、面板外点击收起并拦截手势、原题标签和完整浏览器视口。
+- Android 15、16 模拟器回归通过，Android 17 本轮跳过验证。系统是否上岛及具体动效由手机系统决定。
+
+下载 [Android v1.4.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.0)。详见 [更新说明](docs/releases/android-v1.4.0.md) 与 [验证记录](docs/qa/android-browser/live-glass-v140-verification.md)。
+
 ## Android v1.3.0 更新
 
 - 底栏加入 GPU 折射、色散、镜片抬升、弹簧跟手及松手惯性；GPU 不可用时保留 CSS 玻璃材质。

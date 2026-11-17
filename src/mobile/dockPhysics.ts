@@ -1,4 +1,11 @@
 export type Spring = { value: number; velocity: number; target: number };
+/** Bound the final deformed footprint, not just the finger or resting width. */
+export function fitDockLens(center: number, width: number, lift: number, stretch: number, dockWidth: number, dockHeight: number) {
+  const inset = Math.min(4, dockWidth / 2);
+  const w = Math.min(Math.max(0, dockWidth - inset * 2), width * (1 + Math.max(0, stretch)) + lift * 12);
+  const h = Math.max(0, Math.min(dockHeight - 8, (dockHeight - 12 + lift * 10) * (1 - Math.max(0, stretch) * .7)));
+  return { x: Math.max(inset, Math.min(dockWidth - inset - w, center - w / 2)), width: w, height: h };
+}
 export function springStep(spring: Spring, elapsed: number, stiffness = 460, damping = 32): boolean {
   const steps = Math.max(1, Math.ceil(Math.min(elapsed, 0.05) / 0.008));
   const dt = Math.min(elapsed, 0.05) / steps;

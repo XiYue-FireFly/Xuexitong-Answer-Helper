@@ -61,6 +61,9 @@ export const NativeWebView = {
   onNavigationChanged(callback: (state: NativeBrowserState) => void): Promise<PluginListenerHandle> {
     return getPlugin().addListener('navigationChanged', callback);
   },
+  onVisibilityChanged(callback: (state: { visible: boolean }) => void): Promise<PluginListenerHandle> {
+    return getPlugin().addListener('visibilityChanged', callback);
+  },
   setLayout(layout: { headerHeight: number; tabHeight: number; panelTop: number; modalOpen: boolean; panelOpen: boolean }): Promise<void> {
     return getPlugin().setLayout(layout);
   },

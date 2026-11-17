@@ -1,3 +1,4 @@
+import { fitDockLens } from './dockPhysics';
 /** Small WebGL 1 optical layer. CSS remains available when GPU rendering is lost. */
 export type DockOptics = { x: number; width: number; lift: number; stretch: number; light: number; dark: boolean };
 export function createGlassRenderer(canvas: HTMLCanvasElement) {
@@ -20,7 +21,7 @@ export function createGlassRenderer(canvas: HTMLCanvasElement) {
       return c;
     }
     void main(){vec2 p=vec2(uv.x,1.0-uv.y)*size;
-      vec4 bar=vec4(size.x*0.5,size.y*0.5,size.x-6.0,size.y-26.0);
+      vec4 bar=vec4(size.x*0.5,size.y*0.5,size.x-4.0,size.y-4.0);
       float db=capsule(p,bar);float dl=capsule(p,lens);
       float ab=1.0-smoothstep(-0.8,0.8,db);float al=(1.0-smoothstep(-0.8,0.8,dl))*mix(0.32,0.96,lift);
       vec3 base=pane(p,bar,8.0,0.75);vec3 top=pane(p,lens,-12.0-lift*5.0,0.1)+vec3(0.04,0.07,0.10);
@@ -56,9 +57,9 @@ export function createGlassRenderer(canvas: HTMLCanvasElement) {
       const ratio = Math.min(devicePixelRatio, 1.75);
       if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) { canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio); }
       gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
-      const h = height - 26 + state.lift * 14;
+      const lens = fitDockLens(state.x + state.width / 2, state.width, state.lift, state.stretch, width, height);
       gl.uniform2f(uniforms.size, width, height);
-      gl.uniform4f(uniforms.lens, state.x + state.width / 2, height / 2, state.width * (1 + state.stretch) + state.lift * 12, h * (1 - state.stretch * 0.7));
+      gl.uniform4f(uniforms.lens, lens.x + lens.width / 2, height / 2, lens.width, lens.height);
       gl.uniform1f(uniforms.lift, state.lift); gl.uniform1f(uniforms.dark, state.dark ? 1 : 0); gl.uniform1f(uniforms.light, state.light);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     },

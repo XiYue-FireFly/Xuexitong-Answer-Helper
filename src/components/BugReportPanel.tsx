@@ -110,15 +110,15 @@ export function BugReportPanel() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-          <div style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(239,68,68,0.08)' }}>
+          <div className="mobile-glass-inset" style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(239,68,68,0.08)' }}>
             <div style={{ color: 'var(--danger-color)', fontSize: '1rem', fontWeight: 900 }}>{stats.errors}</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>错误</div>
           </div>
-          <div style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(245,158,11,0.08)' }}>
+          <div className="mobile-glass-inset" style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(245,158,11,0.08)' }}>
             <div style={{ color: 'var(--warning-color)', fontSize: '1rem', fontWeight: 900 }}>{stats.warnings}</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>警告</div>
           </div>
-          <div style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(99,102,241,0.08)' }}>
+          <div className="mobile-glass-inset" style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, background: 'rgba(99,102,241,0.08)' }}>
             <div style={{ color: 'var(--primary-color)', fontSize: '1rem', fontWeight: 900 }}>{stats.total}</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>总数</div>
           </div>
@@ -160,7 +160,7 @@ export function BugReportPanel() {
             <div style={{ color: 'var(--text-primary)', fontSize: '0.78rem', lineHeight: 1.55, wordBreak: 'break-word' }}>{entry.message || '无错误消息'}</div>
             {entry.url && <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem', wordBreak: 'break-all' }}>{entry.url}</div>}
             {entry.stack && (
-              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto', background: 'rgba(0,0,0,0.22)', border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, color: 'var(--text-secondary)', fontSize: '0.68rem' }}>
+              <pre className="mobile-glass-inset" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 160, overflowY: 'auto', background: 'rgba(0,0,0,0.22)', border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, color: 'var(--text-secondary)', fontSize: '0.68rem' }}>
                 {entry.stack}
               </pre>
             )}

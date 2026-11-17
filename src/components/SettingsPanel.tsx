@@ -733,7 +733,7 @@ export function SettingsPanel() {
         </div>
 
         {updateInfo && (
-          <div style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 12, background: updateInfo.hasUpdate ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="mobile-glass-inset" style={{ border: '1px solid var(--border-glass)', borderRadius: 8, padding: 12, background: updateInfo.hasUpdate ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {updateInfo.success ? (
               <>
                 <div style={{ color: 'var(--text-primary)', fontSize: '0.8rem', fontWeight: 800 }}>
@@ -975,7 +975,7 @@ export function SettingsPanel() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label className="field-label">认证方式</label>
           {selectedPreset ? (
-            <div style={{ color: 'var(--text-primary)', fontSize: '0.78rem', padding: '9px 10px', border: '1px solid var(--border-glass)', borderRadius: 8, background: 'rgba(255,255,255,0.02)' }}>
+            <div className="mobile-glass-inset" style={{ color: 'var(--text-primary)', fontSize: '0.78rem', padding: '9px 10px', border: '1px solid var(--border-glass)', borderRadius: 8, background: 'rgba(255,255,255,0.02)' }}>
               {authHeaderLabel(selectedPreset.authHeader)}
             </div>
           ) : (
@@ -1042,7 +1042,7 @@ export function SettingsPanel() {
             </span>
           </div>
 
-          <div style={{ minHeight: 120, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.02)' }}>
+          <div className="mobile-glass-inset" style={{ minHeight: 120, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.02)' }}>
             {testMessages.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', textAlign: 'center', padding: '32px 0' }}>暂无测试消息</div>
             ) : (
@@ -1172,7 +1172,7 @@ export function SettingsPanel() {
               </button>
             </div>
 
-            <div style={{ border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: 14, background: 'rgba(99,102,241,0.10)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="mobile-glass-inset" style={{ border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: 14, background: 'rgba(99,102,241,0.10)', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ color: 'var(--text-primary)', fontSize: '0.88rem', fontWeight: 850 }}>{selectedKeyHelp.name}</div>

@@ -311,6 +311,16 @@ export function AIPanel() {
     livePausedRef.current = value;
     appStore.setAutomationRunning({ livePaused: value });
   };
+  useEffect(() => {
+    const pause = (event: Event) => {
+      if (!appStore.getState().liveRunning) return;
+      const paused = (event as CustomEvent<{ paused: boolean }>).detail.paused;
+      setLivePaused(paused);
+      appStore.setStatus(paused ? 'idle' : 'calling_ai', paused ? '已暂停边搜边填。' : '已继续边搜边填。');
+    };
+    window.addEventListener('studypilot:api-pause', pause);
+    return () => window.removeEventListener('studypilot:api-pause', pause);
+  }, []);
   const activeProvider = settings.providers.find((provider) => provider.id === settings.activeProviderId) || settings.providers[0];
   const aiConcurrency = normalizeApiConcurrency(settings.apiConcurrency);
   // 题库命中判定包含全库模糊匹配（O(bank×key²)），渲染期逐题现场计算会在状态高频变化时卡死 UI；
@@ -783,7 +793,7 @@ export function AIPanel() {
             <MousePointerClick size={15} /> 开始填入
           </button>
           <button
-            onClick={callAllAIAndApplyLive}
+            className="mobile-accent-action" onClick={callAllAIAndApplyLive}
             disabled={liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0}
             style={{ background: 'linear-gradient(135deg, var(--primary-color), var(--accent-color))', color: '#fff', padding: '11px 10px', borderRadius: 8, display: 'flex', justifyContent: 'center', gap: 7, alignItems: 'center', fontWeight: 900, opacity: liveRunning || batchRunning || status === 'calling_ai' || questions.length === 0 ? 0.55 : 1 }}
           >
@@ -1002,7 +1012,7 @@ export function AIPanel() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: liveRunning ? '1fr auto' : '1fr', gap: 8, marginTop: 8 }}>
             <button
-              onClick={callAllAIAndApplyLive}
+              className="mobile-accent-action" onClick={callAllAIAndApplyLive}
               disabled={liveRunning || batchRunning || status === 'calling_ai'}
               style={{ background: 'rgba(99,102,241,0.2)', color: 'var(--text-primary)', padding: 10, borderRadius: 8, fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, opacity: liveRunning || batchRunning || status === 'calling_ai' ? 0.55 : 1 }}
             >

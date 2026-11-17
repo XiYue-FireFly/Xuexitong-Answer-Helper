@@ -33,7 +33,7 @@ const composer = html(`<title>AI 输入测试页</title><h2>AI 输入测试页</
     const input=event.target; if(!input.value.trim()) return;
     window.sentCount++; const value=input.value; input.value='';
     const user=document.createElement('div'); user.dataset.messageAuthorRole='user'; user.textContent=value; document.querySelector('#history').append(user);
-    setTimeout(()=>{const answer=document.createElement('div'); answer.className='ds-markdown'; answer.dataset.messageId='reply-'+window.sentCount; answer.dataset.messageStatus='completed';
+    (window.scheduleReply || setTimeout)(()=>{const answer=document.createElement('div'); answer.className='ds-markdown'; answer.dataset.messageId='reply-'+window.sentCount; answer.dataset.messageStatus='completed';
     try { const batch=JSON.parse(value.slice(value.lastIndexOf('\\n\\n{')+2));
       answer.textContent=JSON.stringify({requestId:batch.requestId,answers:batch.questions.map(q=>({id:q.id,answer:'2',choiceLabels:['A'],matchedOptions:['2'],confidence:0.99,analysis:'',warnings:[]}))});
     } catch { answer.textContent='已收到提示词'; } document.querySelector('#history').append(answer);}, window.replyDelay || 0);
@@ -75,6 +75,7 @@ await new Promise(resolve => server.listen(8910, '0.0.0.0', resolve));
 let browser;
 let shell;
 let previousTheme;
+let previousMediaCard;
 const reports = [];
 try {
   // Start a fresh test session so an interrupted earlier run cannot leave its
@@ -104,6 +105,8 @@ try {
   assert.ok(shell, 'Capacitor shell missing');
   shell.setDefaultTimeout(15000);
   await shell.locator('.mobile-shell').waitFor();
+  previousMediaCard = (await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'getCapabilities', {}))).mediaCard;
+  await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'setMediaCard', { enabled: false }));
   const native = (method, args = {}) => shell.evaluate(({ method, args }) => Promise.race([
     window.Capacitor.nativePromise('NativeWebView', method, args),
     new Promise((_, reject) => setTimeout(() => reject(new Error(`Native ${method} timed out`)), 15000))
@@ -157,8 +160,8 @@ try {
     const fullHeight = await shell.evaluate(() => innerHeight);
     const padding = await shell.evaluate(() => ({ top: parseFloat(getComputedStyle(document.querySelector('.mobile-header')).paddingTop),
       bottom: parseFloat(getComputedStyle(document.querySelector('.mobile-tabs')).paddingBottom) }));
-    assert.ok(padding.top <= 10 && padding.bottom === 0,
-      `${name}: native safe-area margins must not also become tool padding: ${JSON.stringify(padding)}`);
+    assert.ok(padding.top <= 10 && padding.bottom >= 0 && padding.bottom <= 4,
+      `${name}: tool padding must remain at most 4px inside native safe-area margins: ${JSON.stringify(padding)}`);
     await loginPage.locator('#account').evaluate(input => { input.value = ''; input.scrollIntoView({ block: 'center' }); });
     await tapWebView(loginPage, '#account');
     await shell.waitForFunction(height => innerHeight < height - 100, fullHeight);
@@ -291,9 +294,8 @@ try {
   await shell.getByRole('tab', { name: /网页 AI/ }).click();
   const background = process.env.ANDROID_QA_BACKGROUND === '1';
   if (background) {
-    runAdb('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', 'allow');
     await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'setOverlay', { enabled: true }));
-    aiHtml = composer.replace('window.sentCount=0;', 'window.sentCount=0;window.replyDelay=45000;');
+    aiHtml = composer.replace('window.sentCount=0;', 'window.sentCount=0;window.scheduleReply=reply=>{window.completeReply=reply};');
   }
   await shell.getByRole('button', { name: '开始自动答题', exact: true }).click();
   if (background) {
@@ -311,16 +313,39 @@ try {
     assert.ok(pendingAi, 'The automatic job must create its own AI tab');
     await pendingAi.waitForFunction(() => window.sentCount > 0);
     runAdb('shell', 'input', 'keyevent', '3');
-    let capsuleVisible = false;
-    for (let i = 0; i < 20 && !capsuleVisible; i++) {
-      await shell.waitForTimeout(250);
-      capsuleVisible = runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status');
-    }
     const notification = runAdb('shell', 'dumpsys', 'notification', '--noredact').toString();
     assert.ok(notification.includes('answer_progress') && notification.includes('学习助手答题'), 'Ongoing progress notification must exist');
-    assert.ok(capsuleVisible, 'Opt-in task capsule must be visible above the launcher');
+    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Native status must not create a duplicate floating bar, even with the old preference enabled');
+    const api = Number(runAdb('shell', 'getprop', 'ro.build.version.sdk').toString().trim());
+    if (api >= 36) assert.ok(notification.includes('Notification$ProgressStyle'), 'System progress card must use ProgressStyle');
     writeFileSync(path.join(out, 'background-task-capsule.png'), runAdb('exec-out', 'screencap', '-p'));
     const taskNative = (method, args = {}) => shell.evaluate(({ method, args }) => window.Capacitor.nativePromise('TaskStatus', method, args), { method, args });
+    await taskNative('setMediaCard', { enabled: true });
+    const mediaDump = () => runAdb('shell', 'dumpsys', 'media_session').toString();
+    for (let attempt = 0; attempt < 20 && !mediaDump().includes('StudyPilotTaskProgress'); attempt++) await shell.waitForTimeout(200);
+    assert.ok(mediaDump().includes('StudyPilotTaskProgress'), 'Opt-in compatibility mode must create a system media session');
+    assert.ok(mediaDump().includes('speed=0.0'), 'Media progress must never advance with elapsed time');
+    for (const [key, state] of [['pause', 2], ['play', 3]]) {
+      // Address this session as a system media card does. Global hardware
+      // keys belong to the app actually playing audio, which we do not seize.
+      execFileSync(adb, ['shell', 'cmd', 'media_session', 'monitor', 'StudyPilotTaskProgress'],
+        { input: `${key}\nq\n`, windowsHide: true, timeout: 10000 });
+      let applied = false;
+      for (let attempt = 0; attempt < 30 && !applied; attempt++) {
+        applied = new RegExp(`state=(?:[A-Z_]+\\()?${state}\\)?,`).test(mediaDump());
+        if (!applied) await shell.waitForTimeout(200);
+      }
+      assert.ok(applied, `System ${key} action must control the real automatic task and receive its state back`);
+    }
+    runAdb('shell', 'cmd', 'statusbar', 'expand-settings'); await shell.waitForTimeout(2200);
+    runAdb('shell', 'uiautomator', 'dump', '/sdcard/studypilot-media-qa.xml');
+    assert.ok(runAdb('shell', 'cat', '/sdcard/studypilot-media-qa.xml').toString().includes('学习助手答题'), 'System media card must be visible');
+    writeFileSync(path.join(out, 'media-progress-card.png'), runAdb('exec-out', 'screencap', '-p'));
+    runAdb('shell', 'cmd', 'statusbar', 'collapse');
+    await taskNative('setMediaCard', { enabled: false });
+    assert.ok(!mediaDump().includes('StudyPilotTaskProgress'), 'Disabling media mode must release its session immediately');
+    await taskNative('setMediaCard', { enabled: true });
+    reports.push('Opt-in media card uses real counts at speed zero; system pause/play controls the real automatic job; disabling it releases the session.');
     // The launcher can lock itself to portrait. Exercise a second app that
     // actually rotates, and verify the display dimensions before accepting a
     // landscape screenshot as evidence.
@@ -336,34 +361,37 @@ try {
       }
       assert.equal(screenshot.readUInt32BE(16) > screenshot.readUInt32BE(20), rotation === 1, 'Background display must actually rotate');
       await shell.waitForTimeout(900);
-      assert.ok(runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Background capsule must survive rotation');
+      assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Native-only status must remain free of duplicate overlays after rotation');
       writeFileSync(path.join(out, `background-capsule-${rotation === 0 ? 'portrait' : 'landscape'}.png`), runAdb('exec-out', 'screencap', '-p'));
     }
     await taskNative('setOverlay', { enabled: false });
-    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Disabling the capsule must remove it immediately');
-    assert.ok(runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true'), 'Notification-only fallback must keep the real job');
+    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Legacy overlay requests must remain inert');
+    assert.ok(runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true'), 'Changing the legacy overlay setting must keep the real job');
     await taskNative('setOverlay', { enabled: true });
-    reports.push('A real background job survives portrait/landscape changes and capsule disablement; notification-only fallback keeps execution.');
+    reports.push('A real background job uses the system progress notification across rotation without a duplicate floating bar; old overlay requests do not affect execution.');
+    await pendingAi.evaluate(() => window.completeReply());
   }
-  await source.waitForFunction(() => document.querySelector('input[value="A"]').checked, null, { timeout: 60000, polling: 500 });
+  if (!background) await source.waitForFunction(() => document.querySelector('input[value="A"]').checked, null, { timeout: 60000, polling: 500 });
   if (background) {
     // Checking the radio precedes the native apply receipt and controller
     // completion. Background WebViews also coalesce status timers: wait for
     // actual service teardown instead of assuming a fixed 1.5-second delay.
     let stopped = false;
-    for (let i = 0; i < 30 && !stopped; i++) {
+    for (let i = 0; i < 300 && !stopped; i++) {
       stopped = !runAdb('shell', 'dumpsys', 'activity', 'services', 'com.studypilot.android').toString().includes('isForeground=true');
       if (!stopped) await shell.waitForTimeout(500);
     }
     assert.ok(stopped, 'Completed task must release its foreground service');
-    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Completed task must remove the capsule');
+    assert.ok(!runAdb('shell', 'dumpsys', 'media_session').toString().includes('StudyPilotTaskProgress'), 'Completed task must release its media session');
+    assert.ok(!runAdb('shell', 'dumpsys', 'window', 'windows').toString().includes('StudyPilot task status'), 'Completed task must leave no floating bar');
     runAdb('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity', '-a', 'studypilot.SHOW_TASK');
     await shell.locator('.mobile-sheet.is-open').waitFor();
+    assert.equal(await source.locator('input[value="A"]').isChecked(), true, 'The source answer must already be filled when returning from background');
     await shell.evaluate(() => window.Capacitor.nativePromise('TaskStatus', 'setOverlay', { enabled: false }));
     runAdb('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', 'default');
     await shell.getByRole('button', { name: '答题', exact: true }).click();
     await shell.waitForFunction(() => !document.querySelector('.mobile-sheet.is-open'));
-    reports.push('Real automatic task sends once, continues across other apps, fills the source in background, updates an opt-in capsule and notification, and removes its service on completion; task intent returns to the answer tools.');
+    reports.push('Real automatic task sends once, continues across other apps, fills the source in background, updates the system progress notification, and removes its service on completion; task intent returns to the answer tools.');
   }
   assert.equal((await native('getState')).tabId, original.tabId);
   assert.equal(await shell.locator('.mobile-sheet.is-open').count(), 0);
@@ -506,6 +534,9 @@ try {
     if (await shell.evaluate(() => document.documentElement.dataset.theme).catch(() => previousTheme) !== previousTheme) {
       await shell.getByRole('button', { name: '切换明暗主题', exact: true }).click().catch(() => {});
     }
+  }
+  if (previousMediaCard !== undefined && shell && !shell.isClosed()) {
+    await shell.evaluate(enabled => window.Capacitor.nativePromise('TaskStatus', 'setMediaCard', { enabled }), previousMediaCard).catch(() => {});
   }
   if (previousImeSetting === 'null') runAdb('shell', 'settings', 'delete', 'secure', 'show_ime_with_hard_keyboard');
   else runAdb('shell', 'settings', 'put', 'secure', 'show_ime_with_hard_keyboard', previousImeSetting);

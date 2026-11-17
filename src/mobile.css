@@ -4,12 +4,15 @@ html, body, #root {
 }
 
 /* ── Root shell fills the whole overlay ── */
-.mobile-shell {
+:is(.mobile-shell, body.mobile-ui) {
   --mobile-glass-fill: linear-gradient(145deg, rgba(103, 133, 174, 0.20), rgba(28, 46, 70, 0.12));
   --mobile-glass-edge: rgba(219, 239, 255, 0.22);
   --mobile-glass-highlight: rgba(255, 255, 255, 0.26);
   --mobile-control-fill: linear-gradient(145deg, rgba(224, 240, 255, 0.15), rgba(129, 176, 228, 0.06));
   --mobile-popup-fill: rgba(28, 43, 65, 0.88);
+  --mobile-active-fill: linear-gradient(135deg, rgba(112,182,255,.32), rgba(78,136,225,.12));
+}
+.mobile-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -22,12 +25,13 @@ html, body, #root {
   /* Push all content to the bottom so tab bar sits at bottom */
   position: relative;
 }
-[data-theme='light'] .mobile-shell {
+[data-theme='light'] :is(.mobile-shell, body.mobile-ui) {
   --mobile-glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.46), rgba(219, 237, 255, 0.22));
   --mobile-glass-edge: rgba(255, 255, 255, 0.68);
   --mobile-glass-highlight: rgba(255, 255, 255, 0.85);
   --mobile-control-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(189, 218, 252, 0.22));
   --mobile-popup-fill: rgba(242, 249, 255, 0.88);
+  --mobile-active-fill: linear-gradient(135deg, rgba(255,255,255,.9), rgba(96,166,255,.25));
 }
 
 /* ── Top browser nav bar — floats at very top ── */
@@ -164,8 +168,7 @@ html, body, #root {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.30), inset 0 -1px 0 rgba(255, 255, 255, 0.06), 0 5px 22px rgba(15, 23, 42, 0.20);
   backdrop-filter: blur(22px) saturate(1.45);
   -webkit-backdrop-filter: blur(22px) saturate(1.45);
-  overflow: visible;
-  padding-bottom: 0;
+  overflow: hidden;
   isolation: isolate;
 }
 .mobile-tabs__scroll {
@@ -183,9 +186,7 @@ html, body, #root {
   padding-block: 9px;
   margin-block: -9px;
 }
-.mobile-tabs__optics { position: absolute; inset: -11px 0; width: 100%; height: calc(100% + 22px); pointer-events: none; }
-.mobile-tabs:has([data-optics='gpu']) { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.mobile-tabs__track[data-optics='gpu'] .mobile-tabs__selection { background: rgba(170,210,255,.12); box-shadow: none; }
+.mobile-tabs__optics { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
 .mobile-tabs__scroll::-webkit-scrollbar { display: none; }
 .mobile-tabs__track {
   position: relative;
@@ -209,7 +210,9 @@ html, body, #root {
 }
 .mobile-tabs__track[data-ready] .mobile-tabs__selection {
   transition: none;
-  transform: translateX(calc(var(--dock-active-x, 0px) + var(--dock-pull, 0px))) scale(calc(1 + var(--dock-stretch, 0)), calc(1 + var(--dock-lift, 0) * .24 - var(--dock-stretch, 0) * .7));
+  top: 50%; bottom: auto;
+  height: var(--dock-active-height, 44px);
+  transform: translate(var(--dock-active-x, 0px), -50%);
 }
 .mobile-tabs__track[data-dragging] .mobile-tabs__selection {
   transition: none;
@@ -228,6 +231,13 @@ html, body, #root {
   background: linear-gradient(150deg, rgba(255, 255, 255, 0.76), rgba(149, 193, 255, 0.38));
   box-shadow: inset 0 1px 0 white, inset 0 0 0 1px rgba(255, 255, 255, 0.88), 0 2px 8px rgba(45, 83, 150, 0.14);
 }
+/* The GPU owns both optical surfaces. Keep the geometry proxy for layout,
+   but do not paint a second CSS lens in either theme or while dragging. */
+.mobile-shell .mobile-tabs:has([data-optics='gpu']) {
+  background: transparent; border-color: transparent; box-shadow: 0 5px 22px rgba(15,23,42,.16);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.mobile-shell .mobile-tabs__track[data-optics='gpu'] .mobile-tabs__selection { opacity: 0; }
 
 .mobile-tab {
   flex: 1 0 44px;
@@ -452,6 +462,54 @@ html, body, #root {
   outline-offset: 2px;
 }
 .mobile-shell :is(input[type='checkbox'], input[type='radio'], input[type='range']) { accent-color: #4189f6; }
+/* All seven tool pages share the same material, including controls originally
+   styled inline for the desktop layout. Chart/data colours stay meaningful. */
+:is(.mobile-main, body.mobile-ui .web-ai-dialog) :is(button, summary) {
+  min-height: 40px;
+  border-radius: 16px !important;
+  border: 1px solid var(--mobile-glass-edge) !important;
+  background: var(--mobile-control-fill) !important;
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight), inset 0 -1px 1px rgba(30,70,120,.06), 0 2px 8px rgba(8,25,51,.05) !important;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+:is(.mobile-main, body.mobile-ui .web-ai-dialog) :is(button, summary):active:not(:disabled) { transform: scale(.98); }
+:is(.mobile-main, body.mobile-ui .web-ai-dialog) :is(button.is-active, button[aria-selected='true'], button[aria-pressed='true']) {
+  background: var(--mobile-active-fill) !important;
+  border-color: rgba(103,168,255,.65) !important;
+  color: var(--text-primary) !important;
+}
+:is(.mobile-main, body.mobile-ui .web-ai-dialog) :is(.btn-primary, .web-ai-primary, .kb-action-button--primary, .mobile-accent-action) {
+  background: linear-gradient(135deg, rgba(48,135,255,.92), rgba(77,103,224,.72)) !important;
+  color: #fff !important;
+}
+:is(.mobile-main, body.mobile-ui .web-ai-dialog) button:disabled { opacity: .48; }
+.mobile-main :is(.web-ai-inline, .web-ai-step, .web-ai-auto-controls, .web-ai-preview article,
+  .tutorial-panel__hero, .tutorial-panel details, .tutorial-panel__note,
+  .kb-empty-state, .kb-search-bar, .kb-option, .kb-analysis, .kb-answer-line, .answer-usage-order, .mobile-glass-inset) {
+  border: 1px solid var(--mobile-glass-edge) !important;
+  border-radius: 18px !important;
+  background: var(--mobile-glass-fill) !important;
+  box-shadow: inset 0 1px 0 var(--mobile-glass-highlight), inset 0 -1px 1px rgba(30,70,120,.05);
+}
+.mobile-main .mobile-glass-search input {
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+}
+.mobile-main :is(.web-ai-step-active, .kb-option.is-correct) { border-color: rgba(103,168,255,.55) !important; }
+.mobile-main .web-ai-step-done { border-color: rgba(70,190,143,.5) !important; }
+.mobile-main .answer-mode-switch { background: transparent; border-radius: 20px; padding: 4px; }
+.mobile-main :is(input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']), textarea, select) {
+  background: var(--mobile-control-fill) !important;
+  border-color: var(--mobile-glass-edge) !important;
+  border-radius: 16px !important;
+}
+.mobile-main :is(input[type='checkbox'], input[type='radio']) { width: 20px; height: 20px; flex-shrink: 0; }
+.mobile-main :is(.web-ai-check, .web-ai-segments label) { min-height: 40px; padding: 6px 10px; gap: 8px; }
+.mobile-main .web-ai-flow-switch { border-radius: 20px; background: var(--mobile-glass-fill); border-color: var(--mobile-glass-edge); }
+.mobile-main .mobile-control-group { border-radius: 22px !important; }
+.mobile-main .usage-table { border-radius: 16px; overflow: hidden; background: var(--mobile-glass-fill); }
+.mobile-main .usage-table th { background: var(--mobile-control-fill); }
+.mobile-main .tutorial-panel__contents a { border-radius: 16px; background: var(--mobile-control-fill); border: 1px solid var(--mobile-glass-edge); }
+.mobile-main .tutorial-panel__hero::before, .mobile-main .kb-bento-card--hero::before { opacity: .2; }
 .mobile-shell .custom-select__menu {
   border-radius: 18px;
   background: var(--mobile-popup-fill);
@@ -471,6 +529,7 @@ html, body, #root {
 .mobile-shell .mobile-browser-tab.is-active { background: rgba(71,141,244,.20); border-color: rgba(103,168,255,.6); }
 .mobile-shell [role='dialog'] > .glass-panel { border-radius: 26px !important; }
 body.mobile-ui .web-ai-dialog { border-radius: 26px; background: var(--bg-panel); backdrop-filter: blur(24px); }
+body.mobile-ui .web-ai-dialog header { background: var(--mobile-glass-fill); }
 body.mobile-ui .web-ai-dialog::backdrop { background: rgba(7,18,36,.30); backdrop-filter: blur(5px); }
 @keyframes mobile-glass-enter { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
 .mobile-url-input { min-height: 34px; }
@@ -498,4 +557,5 @@ body.mobile-ui .web-ai-dialog::backdrop { background: rgba(7,18,36,.30); backdro
 @media (prefers-reduced-motion: reduce) {
   .mobile-sheet, .mobile-sheet.is-open { transition: none; }
   .mobile-tab, .mobile-tab svg, .mobile-tabs__track[data-ready] .mobile-tabs__selection { transition: none; }
+  .mobile-main :is(button, summary) { transition: none; }
 }

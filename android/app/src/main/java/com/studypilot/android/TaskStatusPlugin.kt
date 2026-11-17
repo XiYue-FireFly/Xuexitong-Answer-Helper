@@ -19,17 +19,22 @@ class TaskStatusPlugin : Plugin() {
     private var foreground = true
     private var pendingOpen = false
     override fun load() {
+        context.getSharedPreferences("task_status", 0).edit().remove("overlay").apply()
         pendingOpen = activity.intent?.action == "studypilot.SHOW_TASK"
         TaskStatusService.onRunningChanged = { running ->
             if (running) bridge.webView.onResume()
             else if (!foreground) bridge.webView.onPause()
         }
+        TaskStatusService.onMediaControl = { paused -> notifyListeners("mediaControl", JSObject().put("paused", paused)) }
     }
     private fun capabilities() = JSObject().apply {
         put("api", Build.VERSION.SDK_INT)
         put("notifications", NotificationManagerCompat.from(context).areNotificationsEnabled())
-        put("overlay", Settings.canDrawOverlays(context))
-        put("overlayEnabled", context.getSharedPreferences("task_status", 0).getBoolean("overlay", false))
+        put("overlay", false)
+        put("overlayEnabled", false)
+        put("mediaCard", context.getSharedPreferences("task_status", 0).getBoolean("media_card", false))
+        put("manufacturer", Build.MANUFACTURER)
+        put("brand", Build.BRAND)
         put("liveUpdates", Build.VERSION.SDK_INT >= 36 && (context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager).canPostPromotedNotifications())
         put("batteryRestricted", Build.VERSION.SDK_INT >= 28 && (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isBackgroundRestricted)
     }
@@ -40,20 +45,25 @@ class TaskStatusPlugin : Plugin() {
         else { if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) openSettings(if (Build.VERSION.SDK_INT >= 26) Settings.ACTION_APP_NOTIFICATION_SETTINGS else Settings.ACTION_APPLICATION_DETAILS_SETTINGS); call.resolve(capabilities()) }
     }
     @PermissionCallback private fun permissionResult(call: PluginCall) { call.resolve(capabilities()) }
-    @PluginMethod fun setOverlay(call: PluginCall) {
+    // Retired bridge method: old preferences/callers must not recreate a
+    // separate floating bar alongside the native ongoing notification.
+    @PluginMethod fun setOverlay(call: PluginCall) { call.resolve(capabilities()) }
+    @PluginMethod fun setMediaCard(call: PluginCall) {
         val enabled = call.getBoolean("enabled", false) ?: false
-        context.getSharedPreferences("task_status", 0).edit().putBoolean("overlay", enabled).apply()
+        context.getSharedPreferences("task_status", 0).edit().putBoolean("media_card", enabled).apply()
+        activity.runOnUiThread { TaskStatusService.instance?.refreshPresentation(); call.resolve(capabilities()) }
+    }
+    @PluginMethod fun openLiveUpdateSettings(call: PluginCall) {
         activity.runOnUiThread {
-            TaskStatusService.instance?.refreshOverlay()
-            if (enabled && !Settings.canDrawOverlays(context)) openSettings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-            call.resolve(capabilities())
+            openSettings(if (Build.VERSION.SDK_INT >= 36) Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS else if (Build.VERSION.SDK_INT >= 26) Settings.ACTION_APP_NOTIFICATION_SETTINGS else Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            call.resolve()
         }
     }
     @PluginMethod fun openBatterySettings(call: PluginCall) { openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS); call.resolve() }
     private fun openSettings(action: String) {
         try {
             val intent = Intent(action).apply {
-                if (Build.VERSION.SDK_INT >= 26 && action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                if (Build.VERSION.SDK_INT >= 26 && (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS || (Build.VERSION.SDK_INT >= 36 && action == Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS))) putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                 else data = Uri.parse("package:${context.packageName}")
             }
             activity.startActivity(intent)
@@ -70,6 +80,7 @@ class TaskStatusPlugin : Plugin() {
                     .putExtra("total", (call.getInt("total", 0) ?: 0).coerceIn(0, 100000))
                     .putExtra("completed", (call.getInt("completed", 0) ?: 0).coerceIn(0, 100000))
                     .putExtra("paused", call.getBoolean("paused", false))
+                    .putExtra("canPause", call.getBoolean("canPause", false))
                     .putExtra("indeterminate", call.getBoolean("indeterminate", false))
                 try {
                     // Starting only while the app is visible satisfies Android 12+ FGS restrictions.
@@ -84,11 +95,11 @@ class TaskStatusPlugin : Plugin() {
         }
     }
     override fun handleOnResume() {
-        foreground = true; TaskStatusService.visible = true; TaskStatusService.instance?.refreshOverlay()
+        foreground = true; TaskStatusService.visible = true
         bridge.webView.onResume()
     }
     override fun handleOnStop() {
-        foreground = false; TaskStatusService.visible = false; TaskStatusService.instance?.refreshOverlay()
+        foreground = false; TaskStatusService.visible = false
         if (TaskStatusService.active) bridge.webView.onResume()
     }
     override fun handleOnNewIntent(intent: Intent?) {
@@ -97,7 +108,7 @@ class TaskStatusPlugin : Plugin() {
         }, 250) }
     }
     override fun handleOnDestroy() {
-        handler.removeCallbacksAndMessages(null); TaskStatusService.onRunningChanged = null
+        handler.removeCallbacksAndMessages(null); TaskStatusService.onRunningChanged = null; TaskStatusService.onMediaControl = null
         TaskStatusService.instance?.finishWithNotice("应用已关闭，请重新启动任务")
     }
 }

@@ -15,7 +15,7 @@ const rotation = text('shell', 'settings', 'get', 'system', 'user_rotation').tri
 const autoRotation = text('shell', 'settings', 'get', 'system', 'accelerometer_rotation').trim();
 const overlayMode = text('shell', 'appops', 'get', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW').match(/SYSTEM_ALERT_WINDOW: (\w+)/)?.[1] || 'default';
 const notificationMode = text('shell', 'appops', 'get', 'com.studypilot.android', 'POST_NOTIFICATION').match(/POST_NOTIFICATION: (\w+)/)?.[1] || 'default';
-let browser, shell, previousOverlay = false, legacyNotifications;
+let browser, shell, previousMediaCard = false, legacyNotifications;
 const reports = [];
 const connect = async () => {
   for (let i = 0; i < 40; i++) {
@@ -51,10 +51,15 @@ try {
   // attaching a debugger and exercising Activity visibility.
   await new Promise(resolve => setTimeout(resolve, 2500));
   await connect();
-  const capabilities = await native('getCapabilities'); previousOverlay = capabilities.overlayEnabled;
+  const capabilities = await native('getCapabilities'); previousMediaCard = capabilities.mediaCard;
+  assert.equal(capabilities.overlay, false);
+  assert.equal(capabilities.overlayEnabled, false);
   run('shell', 'appops', 'set', 'com.studypilot.android', 'POST_NOTIFICATION', 'allow');
   run('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', 'allow');
   await native('setOverlay', { enabled: true });
+  await native('setMediaCard', { enabled: true });
+  assert.equal((await native('getCapabilities')).mediaCard, true);
+  assert.ok(!text('shell', 'dumpsys', 'media_session').includes('StudyPilotTaskProgress'), 'An idle media preference must not start playback');
   assert.ok(!hasService() && !hasOverlay(), 'Idle app must not create a service or window');
   run('shell', 'input', 'keyevent', '3'); await shell.waitForTimeout(700);
   assert.ok(!hasService() && !hasOverlay(), 'Idle background app must not show stale progress');
@@ -62,6 +67,11 @@ try {
   // before invoking UI settings; active jobs are tested separately.
   run('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity');
   await shell.waitForTimeout(500);
+  await native('setMediaCard', { enabled: false });
+  await native('openLiveUpdateSettings');
+  assert.ok(!hasService() && !hasOverlay());
+  run('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity');
+  await shell.waitForTimeout(400);
   await native('setOverlay', { enabled: false }); await shell.waitForTimeout(200);
   assert.ok(!hasOverlay() && !hasService());
   run('shell', 'appops', 'set', 'com.studypilot.android', 'POST_NOTIFICATION', 'ignore');
@@ -78,7 +88,7 @@ try {
   run('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity');
   await connect();
   assert.equal((await native('getCapabilities')).notifications, false);
-  reports.push('Notification permission detection and overlay opt-in work; an idle foreground or background app never shows a stale job.');
+  reports.push('Notification permission detection, native settings entry and idle media opt-in work; an idle foreground or background app never shows a stale job.');
   run('shell', 'am', 'force-stop', 'com.studypilot.android'); await browser.close(); browser = null;
   run('shell', 'am', 'start', '-n', 'com.studypilot.android/.MainActivity', '-a', 'studypilot.SHOW_TASK');
   await connect(); await shell.locator('.mobile-sheet.is-open').waitFor();
@@ -88,7 +98,7 @@ try {
   writeFileSync(path.join(out, 'task-status-results.json'), JSON.stringify({ checkedAt: new Date().toISOString(), capabilities, reports }, null, 2));
   console.log(reports.join('\n'));
 } finally {
-  if (shell && !shell.isClosed()) await native('setOverlay', { enabled: previousOverlay }).catch(() => {});
+  if (shell && !shell.isClosed()) await native('setMediaCard', { enabled: previousMediaCard }).catch(() => {});
   if (legacyNotifications !== undefined) setLegacyNotifications(legacyNotifications);
   run('shell', 'appops', 'set', 'com.studypilot.android', 'SYSTEM_ALERT_WINDOW', overlayMode);
   run('shell', 'appops', 'set', 'com.studypilot.android', 'POST_NOTIFICATION', notificationMode);
