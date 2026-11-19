@@ -10,4 +10,4 @@
 
 安装包：`Xuexitong-Answer-Helper-android-v1.4.0.apk`。
 
-媒体模式可能占用音乐控制区域。各品牌是否上岛、卡片展开方式和高光动画由系统控制；未开通厂商准入权限，不承诺所有机型自动上岛。具体测试范围见 [验证记录](../qa/android-browser/live-glass-v140-verification.md)。
+媒体模式可能占用音乐控制区域。各品牌是否上岛、卡片展开方式和高光动画由系统控制；未开通厂商准入权限，不承诺所有机型自动上岛。具体测试范围见 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/live-glass-v140-verification.md)。

@@ -8,7 +8,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 加深面板底色并保留实时玻璃色彩，提亮标题、说明、占位文字和未选中的筛选按钮，调整主操作按钮与状态文字对比度。
 - 新增白色网页背景下的实际像素对比度回归，六类文字均达到 4.5:1 以上。
 
-下载 [Windows v1.5.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.1)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.1.md) 与 [验证记录](docs/qa/windows-glass/v1.5.1/verification.md)。
+下载 [Windows v1.5.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.1)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.1.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/windows-glass/v1.5.1/verification.md)。
 
 ## Windows v1.5.0 更新
 
@@ -18,7 +18,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 七个工具页的卡片、选项、按钮和输入框统一玻璃材质，切换时保留编辑草稿，并加入渐隐颗粒动画。
 - 支持深浅主题、明亮网页上的图标对比度、窗口缩放、减少动态效果及图形上下文恢复。
 
-下载 [Windows v1.5.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.0)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.0.md) 与 [验证记录](docs/qa/windows-glass/v1.5.0/verification.md)。
+下载 [Windows v1.5.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.0)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.0.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/windows-glass/v1.5.0/verification.md)。
 
 ## Android v1.4.1 更新
 
@@ -27,7 +27,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 镜片限定为单个按钮，轻点快速平滑滑向目标；降低雾度，并修复长页面滚动后的旧位置取样。
 - 保留同 Tab 再点收起、外部点击收起并拦截本次手势；关闭面板后，底栏四周留白可操作网页。
 
-下载 [Android v1.4.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.1)。详见 [更新说明](docs/releases/android-v1.4.1.md) 与 [验证记录](docs/qa/android-browser/floating-glass-v141-verification.md)。
+下载 [Android v1.4.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.1)。详见 [更新说明](docs/releases/android-v1.4.1.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/floating-glass-v141-verification.md)。
 
 ## Android v1.4.0 更新
 
@@ -36,7 +36,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 保留同一 Tab 再次点击收起、面板外点击收起并拦截手势、原题标签和完整浏览器视口。
 - Android 15、16 模拟器回归通过，Android 17 本轮跳过验证。系统是否上岛及具体动效由手机系统决定。
 
-下载 [Android v1.4.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.0)。详见 [更新说明](docs/releases/android-v1.4.0.md) 与 [验证记录](docs/qa/android-browser/live-glass-v140-verification.md)。
+下载 [Android v1.4.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.0)。详见 [更新说明](docs/releases/android-v1.4.0.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/live-glass-v140-verification.md)。
 
 ## Android v1.3.0 更新
 
@@ -45,7 +45,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 在“设置 → 真实页面能力 → 后台答题状态”开启通知及可选顶部状态胶囊；顶部胶囊需要悬浮窗权限，点击可回到答题工具。
 - Android 16 请求系统实时更新，其他版本和不支持提升的系统使用持续进度通知。强制停止、撤销权限或清理进程后不会自动重启旧任务。
 
-下载 [Android v1.3.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.3.0)，也可按下文从源码构建。详见 [更新说明](docs/releases/android-v1.3.0.md) 与 [验证记录](docs/qa/android-browser/ultra-glass-v130-verification.md)。
+下载 [Android v1.3.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.3.0)，也可按下文从源码构建。详见 [更新说明](docs/releases/android-v1.3.0.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/ultra-glass-v130-verification.md)。
 
 ## Android v1.2.0 更新
 
@@ -54,7 +54,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 - 工具页切换与收起加入真实像素的灰化颗粒消散；地址栏、标签页、工具卡片、输入框与弹窗统一玻璃材质。
 - 点击面板外空白仅收起工具并拦截本次手势，保持网页尺寸和工具输入草稿。
 
-本版源码可按下文构建。详见 [Android v1.2.0 更新说明](docs/releases/android-v1.2.0.md) 与 [验证记录](docs/qa/android-browser/liquid-glass-v120-verification.md)。
+本版源码可按下文构建。详见 [Android v1.2.0 更新说明](docs/releases/android-v1.2.0.md) 与 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/liquid-glass-v120-verification.md)。
 
 ## Android v1.0.0
 
@@ -66,7 +66,7 @@ Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界
 
 下载 [Android Release](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.0.0) 中的 APK。该版本提供经过验证的 debug 签名安装包；后续安卓更新请从 Android Release 下载。Windows 最新发布继续使用独立的 `v*` 版本标签。
 
-完整说明见 [Android v1.0.0 发布说明](docs/releases/android-v1.0.0.md)，测试范围见 [安卓适配验收](docs/qa/android-browser/adaptation-audit-20261025.md)。
+完整说明见 [Android v1.0.0 发布说明](docs/releases/android-v1.0.0.md)，测试范围见 [安卓适配验收](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/cc7452c336524eb46e4269f713166c485f3d2d99/docs/qa/android-browser/adaptation-audit-20261025.md)。
 
 ### 从源码构建 Android
 
