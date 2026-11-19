@@ -33,4 +33,4 @@ Release 同时提供 `SHA256SUMS.txt`。Windows 用户继续下载 Windows 的 `
 
 用户取消了本轮新增的密码输入适配。真实学习通账号后的作业/考试，以及真实 AI 登录会话未验证；模拟器自动答题使用本地夹具，不提交作业或考试。
 
-详细记录见 [安卓适配验收](../qa/android-browser/adaptation-audit-20261025.md)。
+详细记录见 [安卓适配验收](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/6370b8951a68a611f5bb5ff364874147890d4414/docs/qa/android-browser/adaptation-audit-20261025.md)。

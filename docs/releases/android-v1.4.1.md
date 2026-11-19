@@ -10,6 +10,6 @@
 
 版本 `1.4.1`，versionCode `6`。安装包为 Android Debug 签名，可覆盖同签名测试包；最低安装要求仍为 API 24。本轮验证范围为 Android 15、16，Android 17 按要求跳过。
 
-安装包：`Xuexitong-Answer-Helper-android-v1.4.1.apk`。具体测试结果见 [验证记录](../qa/android-browser/floating-glass-v141-verification.md)。
+安装包：`Xuexitong-Answer-Helper-android-v1.4.1.apk`。具体测试结果见 [验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/6370b8951a68a611f5bb5ff364874147890d4414/docs/qa/android-browser/floating-glass-v141-verification.md)。
 
 折射使用受限尺寸的源网页采样，后台停止；部分硬件视频或 WebGL 内容可能无法进入软件采样纹理。
