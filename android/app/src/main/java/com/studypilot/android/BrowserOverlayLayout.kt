@@ -20,10 +20,11 @@ class BrowserOverlayLayout(context: Context) : FrameLayout(context) {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             // Hit the visible capsule, leaving its sides, rounded corners and
             // bottom gap available to the webpage underneath.
-            val radius = dockBounds.height() / 2
+            val radius = minOf(dockBounds.width(), dockBounds.height()) / 2
             val centerX = event.x.coerceIn(dockBounds.left + radius, dockBounds.right - radius)
+            val centerY = event.y.coerceIn(dockBounds.top + radius, dockBounds.bottom - radius)
             val dx = event.x - centerX
-            val dy = event.y - dockBounds.centerY()
+            val dy = event.y - centerY
             val inDock = !dockBounds.isEmpty && dx * dx + dy * dy <= radius * radius
             browserGesture = !modalOpen && !panelOpen && event.y >= headerBottom && !inDock
         }

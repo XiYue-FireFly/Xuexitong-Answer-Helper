@@ -9,13 +9,14 @@ import { lensDisplacement } from './lensDisplacement';
 const spring = (value: number): Spring => ({ value, target: value, velocity: 0 });
 export type GlassBackdrop = { dataUrl: string; bounds: { x: number; y: number; width: number; height: number } };
 export type DockGlassSource = { capture: (bounds: DOMRect) => Promise<GlassBackdrop>; available: () => Promise<boolean> };
-export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: RefObject<HTMLDivElement>, navRef: RefObject<HTMLElement>, theme: string, source?: DockGlassSource) {
+export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: RefObject<HTMLDivElement>, navRef: RefObject<HTMLElement>, theme: string, source?: DockGlassSource, vertical = false, collapsed = false, quality: 'ultra' | 'standard' = 'ultra') {
+  const options = useRef({ vertical, collapsed, quality }); options.current = { vertical, collapsed, quality };
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const motion = useRef({ x: spring(0), width: spring(44), lift: spring(0), stretch: spring(0), pull: spring(0) });
   const frame = useRef(0), previous = useRef(0), dark = useRef(theme === 'dark'); dark.current = theme === 'dark';
   const renderer = useRef<ReturnType<typeof createGlassRenderer>>(null);
   const dropping = useRef(false);
-  const contents = useRef<{ button: HTMLButtonElement; base: HTMLElement | null; magnified: HTMLElement | null; map: Element | null; warp: Element | null; active: boolean }[]>([]);
+  const contents = useRef<{ button: HTMLButtonElement; base: HTMLElement | null; magnified: HTMLElement | null; map: Element | null; warps: Element[]; active: boolean }[]>([]);
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   const paint = (now: number) => {
     frame.current = 0;
@@ -23,6 +24,8 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     if (!track || !nav) return;
     const dt = previous.current ? (now - previous.current) / 1000 : 1 / 60; previous.current = now;
     const m = motion.current;
+    const { vertical, collapsed, quality } = options.current;
+    const length = vertical ? nav.clientHeight : nav.clientWidth, cross = vertical ? nav.clientWidth : nav.clientHeight;
     const acceleration = (m.x.target - m.x.value) * 600 - m.x.velocity * 35;
     const braking = Math.max(0, -acceleration * Math.sign(m.x.velocity));
     m.stretch.target = .10 * Math.tanh(Math.abs(m.x.velocity) / 400) - .07 * Math.tanh(braking / 2500);
@@ -39,13 +42,13 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     }
     const lift = Math.max(0, Math.min(1.12, m.lift.value));
     const navBounds = nav.getBoundingClientRect();
-    const offset = track.getBoundingClientRect().left - navBounds.left;
+    const offset = vertical ? track.getBoundingClientRect().top - navBounds.top : track.getBoundingClientRect().left - navBounds.left;
     // Read geometry before any style writes. Alternating offset reads with
     // clip/filter writes forces a new layout for every destination each frame.
-    const geometry = contents.current.map(content => ({ ...content, left: content.button.offsetLeft,
-      width: content.button.offsetWidth, height: content.button.offsetHeight }));
+    const geometry = contents.current.map(content => ({ ...content, left: vertical ? content.button.offsetTop : content.button.offsetLeft,
+      width: vertical ? content.button.offsetHeight : content.button.offsetWidth, height: vertical ? content.button.offsetWidth : content.button.offsetHeight }));
     const lens = fitDockLens(m.x.value + offset + m.pull.value + m.width.value / 2, m.width.value, lift,
-      m.stretch.value, nav.clientWidth, nav.clientHeight);
+      m.stretch.value, length, cross, quality === 'ultra' ? 16 : 4);
     track.style.setProperty('--dock-active-x', `${lens.x - offset}px`);
     track.style.setProperty('--dock-active-width', `${lens.width}px`);
     track.style.setProperty('--dock-active-height', `${lens.height}px`);
@@ -54,28 +57,30 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     track.style.setProperty('--dock-pull', `${m.pull.value}px`);
     const center = m.x.value + m.width.value / 2;
     for (const [index, content] of geometry.entries()) {
-      const { button, base, magnified, map, warp, left: buttonLeft, width: buttonWidth, height: buttonHeight } = content;
+      const { button, base, magnified, map, warps, left: buttonLeft, width: buttonWidth, height: buttonHeight } = content;
       const weight = Math.max(0, 1 - Math.abs(buttonLeft + buttonWidth / 2 - center) / (m.width.value * 0.65));
-      const intersects = lift > .4 && lens.x - offset < buttonLeft + buttonWidth && lens.x - offset + lens.width > buttonLeft;
+      const intersects = !collapsed && lift > .4 && lens.x - offset < buttonLeft + buttonWidth && lens.x - offset + lens.width > buttonLeft;
       if (!intersects && !content.active) continue;
       contents.current[index].active = intersects;
-      button.style.setProperty('--dock-magnify', `${1 + lift * 0.12 * weight}`);
+      button.style.setProperty('--dock-magnify', `${1 + lift * 0.16 * weight}`);
       if (base && magnified) {
-        const left = lens.x - offset - buttonLeft, top = (buttonHeight - lens.height) / 2;
-        const w = lens.width, h = lens.height, r = Math.min(w, h) / 2;
+        const along = lens.x - offset - buttonLeft, across = (buttonHeight - lens.height) / 2;
+        const left = vertical ? across : along, top = vertical ? along : across;
+        const w = vertical ? lens.height : lens.width, h = vertical ? lens.width : lens.height, r = Math.min(w, h) / 2;
         const path = `M${left+r} ${top}H${left+w-r}Q${left+w} ${top} ${left+w} ${top+r}V${top+h-r}Q${left+w} ${top+h} ${left+w-r} ${top+h}H${left+r}Q${left} ${top+h} ${left} ${top+h-r}V${top+r}Q${left} ${top} ${left+r} ${top}Z`;
-        base.style.clipPath = intersects ? `path(evenodd, "M-20 -20H${buttonWidth+20}V${buttonHeight+20}H-20Z ${path}")` : '';
+        base.style.clipPath = intersects ? `path(evenodd, "M-20 -20H${(vertical ? buttonHeight : buttonWidth)+20}V${(vertical ? buttonWidth : buttonHeight)+20}H-20Z ${path}")` : '';
         magnified.style.clipPath = `path("${path}")`;
         magnified.style.opacity = intersects ? '1' : '0';
         if (map) {
           map.setAttribute('x', String(left)); map.setAttribute('y', String(top));
           map.setAttribute('width', String(w)); map.setAttribute('height', String(h));
         }
-        warp?.setAttribute('scale', String(lift * 8));
+        warps.forEach(warp => warp.setAttribute('scale', String(lift * (quality === 'ultra'
+          ? 14 + Number(warp.getAttribute('data-channel') || 0) * 3.6 : 8))));
       }
     }
-    renderer.current?.draw(nav.clientWidth, nav.clientHeight, { x: m.x.value + offset + m.pull.value, width: m.width.value,
-      lift, stretch: m.stretch.value, light: (center / track.offsetWidth - 0.5) * 2, dark: dark.current,
+    renderer.current?.draw(nav.clientWidth, nav.clientHeight, { x: collapsed ? 2 : m.x.value + offset + m.pull.value, width: collapsed ? length - 4 : m.width.value,
+      vertical, quality, lift: collapsed ? 0 : lift, stretch: m.stretch.value, light: (center / (vertical ? track.offsetHeight : track.offsetWidth) - 0.5) * 2, dark: dark.current,
       originX: navBounds.x, originY: navBounds.y });
     if (moving) frame.current = requestAnimationFrame(paint); else previous.current = 0;
   };
@@ -96,7 +101,7 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
     if (!canvas || !track || !scroller || !nav) return;
     contents.current = Array.from(track.querySelectorAll<HTMLButtonElement>('.mobile-tab')).map(button => ({ button,
       base: button.querySelector<HTMLElement>('.mobile-tab__content'), magnified: button.querySelector<HTMLElement>('.mobile-tab__lens'),
-      map: nav.querySelector(`[data-warp-map="${button.dataset.tool}"]`), warp: nav.querySelector(`[data-warp-scale="${button.dataset.tool}"]`), active: false }));
+      map: nav.querySelector(`[data-warp-map="${button.dataset.tool}"]`), warps: Array.from(nav.querySelectorAll(`[data-warp-scale="${button.dataset.tool}"]`)), active: false }));
     const field = lensDisplacement(), mapCanvas = document.createElement('canvas');
     mapCanvas.width = field.width; mapCanvas.height = field.height;
     const mapContext = mapCanvas.getContext('2d');
@@ -127,7 +132,7 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
         if (!disposed && foreground && request === revision && Math.abs(current.x - x) < 1 && Math.abs(current.y - y) < 1
           && Math.abs(current.width - width) < 1 && Math.abs(current.height - height) < 1) {
           renderer.current?.image(image, result.bounds); if (renderer.current) track.dataset.optics = 'gpu';
-          if (source) {
+          {
             const sample = document.createElement('canvas'); sample.width = sample.height = 4;
             const context = sample.getContext('2d', { willReadFrequently: true });
             if (context) {
@@ -135,7 +140,15 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
               const pixels = context.getImageData(0, 0, 4, 4).data;
               let luminance = 0;
               for (let i = 0; i < pixels.length; i += 4) luminance += pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722;
-              nav.dataset.backdropTone = luminance / 16 > 155 ? 'light' : 'dark';
+              let tone = luminance / 16;
+              nav.dataset.sceneTone = tone > 155 ? 'light' : 'dark';
+              if (options.current.quality === 'ultra') {
+                const t = Math.max(0, Math.min(1, (tone / 255 - .2) / .75));
+                const contrast = t * t * (3 - 2 * t);
+                const veil = dark.current ? .48 + .22 * contrast : .576 + .18 * (1 - contrast);
+                tone = tone * (1 - veil) + (dark.current ? 20 : 244) * veil;
+              }
+              nav.dataset.backdropTone = tone > 155 ? 'light' : 'dark';
             }
           }
           animate();
@@ -157,7 +170,7 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
       if (disposed) return;
       if (available) { create(); visible(); }
     }).catch(() => { /* Base glass remains usable without native capabilities. */ });
-    const observer = new ResizeObserver(animate); observer.observe(scroller);
+    const observer = new ResizeObserver(animate); observer.observe(scroller); observer.observe(nav);
     const nativeVisibility = source ? Promise.resolve(null) : NativeWebView.onVisibilityChanged(state => { foreground = state.visible; visible(); });
     const contextLost = (event: Event) => { lost(event); captures.setVisible(false); ++revision; };
     const restored = () => { create(); visible(); };
@@ -169,6 +182,6 @@ export function useDockGlass(trackRef: RefObject<HTMLDivElement>, scrollRef: Ref
       canvas.removeEventListener('webglcontextlost', contextLost); canvas.removeEventListener('webglcontextrestored', restored);
       document.removeEventListener('visibilitychange', visible); scroller.removeEventListener('scroll', animate); };
   }, []);
-  useLayoutEffect(animate, [theme]);
+  useLayoutEffect(animate, [theme, vertical, collapsed, quality]);
   return { canvasRef, target, lift, animate, pull: (value: number) => { motion.current.pull.target = value; animate(); } };
 }

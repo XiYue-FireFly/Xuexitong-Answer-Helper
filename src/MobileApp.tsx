@@ -8,6 +8,8 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { TokenUsagePanel } from './components/TokenUsagePanel';
 import { TutorialPanel } from './components/TutorialPanel';
 import { MobileToolDock, type MobileToolTab } from './components/MobileToolDock';
+import { useDockPreferences } from './ui/dockPreferences';
+import { useAdaptiveDock } from './ui/useAdaptiveDock';
 import { continuousCapture } from './mobile/continuousCapture';
 import { useToolDissolve } from './mobile/useToolDissolve';
 import { useBackgroundTask } from './mobile/useBackgroundTask';
@@ -35,7 +37,7 @@ function normalizeUrl(raw: string): string {
 
 export default function MobileApp() {
   useBackgroundTask();
-  const { settings, status, logs } = useAppStore();
+  const { settings, status, logs, liveRunning, batchRunning, livePaused } = useAppStore();
   const [activeTab, setActiveTab] = useState<MobileToolTab>('automation');
   // Keep mounted editors and their subscriptions, without rendering all seven
   // large trees again for each movement/selection of the floating controls.
@@ -67,6 +69,23 @@ export default function MobileApp() {
     if (toolMotion.dissolving) { toolMotion.cancel(); setPanelOpen(false); }
     else void toolMotion.run('close', () => setPanelOpen(false));
   };
+  const dockPreferences = useDockPreferences();
+  const automaticRunning = (liveRunning && !livePaused) || batchRunning
+    || (workflow.flow === 'automatic' && workflow.busy && !workflow.paused) || sessions.sessions.some(session => {
+    const task = session.controller.getSnapshot(); return task.flow === 'automatic' && task.busy && !task.paused;
+  });
+  const dock = useAdaptiveDock(true, automaticRunning, panelOpen, dockPreferences.autoCollapse, () => {
+    toolMotion.cancel(); setPanelOpen(false);
+  });
+  useEffect(() => {
+    const openTool = (event: Event) => {
+      const tab = (event as CustomEvent).detail as MobileToolTab;
+      if (!['tokens', 'history', 'bugs', 'tutorial', 'settings'].includes(tab)) return;
+      toolMotion.cancel(); dock.expand(); setActiveTab(tab); setPanelOpen(true);
+    };
+    window.addEventListener('studypilot:open-tool', openTool);
+    return () => window.removeEventListener('studypilot:open-tool', openTool);
+  }, []);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const outsideGesture = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
@@ -181,12 +200,13 @@ export default function MobileApp() {
 
   useLayoutEffect(() => {
     let frame = 0;
+    let movingUntil = performance.now() + 480;
     const updateLayout = () => {
       const header = headerRef.current?.getBoundingClientRect();
       const tabs = tabsRef.current?.getBoundingClientRect();
       const sheet = sheetRef.current;
       if (!header || !tabs || !sheet) return;
-      const tabInset = Math.max(0, window.innerHeight - tabs.top);
+      const tabInset = dockPreferences.edge === 'bottom' && !dock.collapsed ? Math.max(0, window.innerHeight - tabs.top) : 78;
       document.documentElement.style.setProperty('--mobile-header-height', `${header.height}px`);
       document.documentElement.style.setProperty('--mobile-tab-height', `${tabInset}px`);
       document.documentElement.style.setProperty('--mobile-viewport-height', `${window.innerHeight}px`);
@@ -196,11 +216,14 @@ export default function MobileApp() {
         modalOpen: Boolean(document.querySelector('dialog[open]')),
         panelOpen: blockBrowser,
       }).catch(() => undefined);
+      if (performance.now() < movingUntil) frame = requestAnimationFrame(updateLayout);
     };
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(updateLayout);
     };
+    const moving = () => { movingUntil = performance.now() + 480; measure(); };
+    tabsRef.current?.addEventListener('transitionrun', moving);
     const observer = new ResizeObserver(measure);
     [headerRef.current, tabsRef.current, sheetRef.current].forEach(el => el && observer.observe(el));
     const mutations = new MutationObserver(measure);
@@ -210,10 +233,11 @@ export default function MobileApp() {
     updateLayout();
     return () => {
       cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect();
+      tabsRef.current?.removeEventListener('transitionrun', moving);
       window.removeEventListener('resize', measure);
       window.visualViewport?.removeEventListener('resize', measure);
     };
-  }, [panelOpen, blockBrowser]);
+  }, [panelOpen, blockBrowser, dockPreferences.edge, dock.collapsed]);
 
   const navigate = (url: string) => {
     const normalized = normalizeUrl(url);
@@ -233,7 +257,7 @@ export default function MobileApp() {
   const statusColor = status === 'error' ? '#ef4444' : status === 'done' ? '#10b981' : status === 'executing' ? '#f59e0b' : '#6366f1';
 
   return (
-    <div data-theme={settings.theme} className="mobile-shell">
+    <div data-theme={settings.theme} className="mobile-shell" data-dock-edge={dockPreferences.edge}>
 
       {/* ── Top browser nav bar ── */}
       <header ref={headerRef} className={`mobile-header${urlEditing ? ' is-editing' : ''}`}>
@@ -311,8 +335,9 @@ export default function MobileApp() {
           outsideGesture.current = null;
         }} />
 
-      <MobileToolDock navRef={tabsRef} activeTab={activeTab} panelOpen={panelOpen} theme={settings.theme}
+      <MobileToolDock compact collapsed={dock.collapsed} onExpand={dock.expand} navRef={tabsRef} activeTab={activeTab} panelOpen={panelOpen} theme={settings.theme}
         onSelect={(tab, gesture) => {
+          dock.expand();
           if (gesture === 'drag') { toolMotion.cancel(); setActiveTab(tab); setPanelOpen(true); }
           else if (tab === activeTab && panelOpen) {
             if (toolMotion.closing) toolMotion.cancel();
@@ -331,6 +356,10 @@ export default function MobileApp() {
         {backdrop && <img className="mobile-sheet__backdrop" src={backdrop} alt="" aria-hidden="true" />}
         <div className="mobile-sheet__tint" />
         <div className="mobile-sheet__handle" aria-hidden="true" />
+        {['tokens','history','bugs','tutorial'].includes(activeTab) && <div className="mobile-tool-heading">
+          <strong>{({ tokens: 'Token 用量', history: '运行记录', bugs: '错误报告', tutorial: '使用教程' } as Record<string,string>)[activeTab]}</strong>
+          <button type="button" onClick={() => { toolMotion.cancel(); setActiveTab('settings'); }}><ArrowLeft size={16} />返回设置</button>
+        </div>}
         <main className="mobile-main">
           <AnnouncementBanner />
           <div hidden={activeTab !== 'automation'}>{toolPages.automation}</div>

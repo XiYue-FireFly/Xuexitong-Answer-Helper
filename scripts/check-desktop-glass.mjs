@@ -57,13 +57,15 @@ try {
   }, { id: guestId, fn: fn.toString(), arg }) };
   assert.match(await source.evaluate(() => document.body.innerText), /网页保持完整宽度/);
   const dock = shell.locator('.mobile-tabs');
-  assert.equal(await dock.locator('button').count(), 7);
+  assert.equal(await dock.locator('.mobile-tab').count(), 7);
   const open = async name => {
+    if (await dock.evaluate(element => element.classList.contains('is-collapsed'))) await dock.locator('.dock-answer').click();
     const tab = dock.getByRole('button', { name, exact: true });
     if (await tab.getAttribute('aria-expanded') !== 'true') await tab.click();
     await shell.waitForFunction(label => document.querySelector('.mobile-tab.is-active')?.getAttribute('aria-label') === label, name);
     await shell.waitForFunction(() => document.querySelector('.desktop-sheet.is-open'));
     await shell.waitForFunction(() => document.querySelector('.desktop-dissolve').width === 0 || !document.querySelector('.desktop-dissolve').style.width);
+    await shell.locator('.desktop-sheet').evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {}))); });
   };
   const close = async () => {
     if (await shell.locator('.desktop-sheet.is-open').count()) {
@@ -107,9 +109,9 @@ try {
   await shell.screenshot({ path: path.join(out, 'long-scroll-glass.png') });
   report('long-page glass updates without pressing a button', { red, blue });
   await source.evaluate(() => { document.querySelector('.blue').style.background = 'white'; });
-  await shell.waitForFunction(() => document.querySelector('.mobile-tabs').dataset.backdropTone === 'light');
+  await shell.waitForFunction(() => document.querySelector('.mobile-tabs').dataset.backdropTone === 'dark');
   await shell.screenshot({ path: path.join(out, 'bright-page-contrast.png') });
-  report('bright source pixels select readable dark labels');
+  report('bright source pixels keep readable labels on the dark glass material');
   await source.evaluate(() => scrollTo(0, 0));
 
   await open('答题');

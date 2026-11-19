@@ -1,10 +1,10 @@
 export type Spring = { value: number; velocity: number; target: number };
 export const DOCK_OPTICAL_BLEED = 12;
 /** Bound the final deformed footprint, not just the finger or resting width. */
-export function fitDockLens(center: number, width: number, lift: number, stretch: number, dockWidth: number, dockHeight: number) {
+export function fitDockLens(center: number, width: number, lift: number, stretch: number, dockWidth: number, dockHeight: number, growth = 4) {
   const inset = Math.min(4, dockWidth / 2);
   const strain = Math.max(-.12, Math.min(.2, stretch));
-  const w = Math.min(Math.max(0, dockWidth - inset * 2), width + 4, (width + lift * 4) * (1 + strain));
+  const w = Math.min(Math.max(0, dockWidth - inset * 2), width + Math.max(4, Math.min(1, lift) * growth), (width + lift * growth) * (1 + strain));
   const h = Math.max(0, Math.min(dockHeight + DOCK_OPTICAL_BLEED * 2 - 2, (dockHeight - 8 + lift * 16) * (1 - strain * 1.4)));
   return { x: Math.max(inset, Math.min(dockWidth - inset - w, center - w / 2)), width: w, height: h };
 }

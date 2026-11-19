@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Copy, Download, ExternalLink, Eye, EyeOff, KeyRound, Loader2, Lock, RefreshCw, Save, Send, Shield, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { AIProviderConfig, AI_PROVIDER_PRESETS, appStore, useAppStore } from '../store/appStore';
 import { aiChatStream } from '../utils/aiRequest';
+import { DockSettings } from './DockSettings';
 import { AndroidTaskSettings } from './AndroidTaskSettings';
 
 type TestChatMessage = {
@@ -704,6 +705,7 @@ export function SettingsPanel() {
 
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18, height: '100%', overflowY: 'auto' }}>
+      <DockSettings />
       <div className="glass-panel" style={{ padding: 18, borderRadius: 8, borderLeft: '4px solid var(--warning-color)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <Shield size={18} style={{ color: 'var(--warning-color)' }} />

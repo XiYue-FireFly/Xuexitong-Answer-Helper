@@ -17,6 +17,8 @@ import { useToolDissolve } from './mobile/useToolDissolve';
 import { desktopGlassSource, captureDesktopTool } from './desktop/glassSource';
 import { usePanelBackdrop } from './desktop/usePanelBackdrop';
 import './desktop/desktop.css';
+import { useDockPreferences } from './ui/dockPreferences';
+import { useAdaptiveDock } from './ui/useAdaptiveDock';
 
 const statusLabels: Record<string, string> = {
   idle: '空闲',
@@ -33,7 +35,7 @@ const statusLabels: Record<string, string> = {
 const START_NOTICE_KEY = 'studypilot_start_notice_v2';
 
 export default function App() {
-  const { status, statusText, logs, settings, isElectron } = useAppStore();
+  const { status, statusText, logs, settings, isElectron, liveRunning, batchRunning, livePaused } = useAppStore();
   const [activeTab, setActiveTab] = useState<TabId>('automation');
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
@@ -60,6 +62,14 @@ export default function App() {
   const [visited, setVisited] = useState<TabId[]>(['automation']);
   const pages = useMemo(() => ({ automation: <AIPanel />, snapshot: <KnowledgeBase />, tokens: <TokenUsagePanel />,
     history: <HistoryPanel />, bugs: <BugReportPanel />, tutorial: <TutorialPanel />, settings: <SettingsPanel /> }), []);
+  const dockPreferences = useDockPreferences();
+  const automaticRunning = (liveRunning && !livePaused) || batchRunning
+    || (webTask.flow === 'automatic' && webTask.busy && !webTask.paused) || webSessions.sessions.some(session => {
+    const task = session.controller.getSnapshot(); return task.flow === 'automatic' && task.busy && !task.paused;
+  });
+  const dock = useAdaptiveDock(false, automaticRunning, !sideCollapsed, dockPreferences.autoCollapse, () => {
+    toolMotion.cancel(); setSideCollapsed(true);
+  });
   const blocked = !sideCollapsed || panelPresent;
   const dismissPanel = () => {
     if (sideCollapsed) return;
@@ -158,6 +168,7 @@ export default function App() {
 
   const openSideTab = (tab: TabId, gesture?: 'drag') => {
     if (tab === activeTab && !sideCollapsed && gesture !== 'drag') { dismissPanel(); return; }
+    dock.expand();
     const apply = () => { setActiveTab(tab); setSideCollapsed(false); };
     if (!sideCollapsed && tab !== activeTab && gesture !== 'drag') void toolMotion.run('switch', apply);
     else { toolMotion.cancel(); apply(); }
@@ -178,7 +189,7 @@ export default function App() {
     const handleMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
       const { min, max } = workbenchBounds();
-      const nextWidth = startWidth + (startX - moveEvent.clientX);
+      const nextWidth = startWidth + (dockPreferences.edge === 'left' ? moveEvent.clientX - startX : startX - moveEvent.clientX);
       setWorkbenchWidth(Math.max(min, Math.min(Math.round(nextWidth), max)));
     };
     const handleEnd = () => {
@@ -210,7 +221,7 @@ export default function App() {
         : '#6366f1';
 
   return (
-    <div data-theme={settings.theme} className="app-shell desktop-shell">
+    <div data-theme={settings.theme} className="app-shell desktop-shell" data-dock-edge={dockPreferences.edge}>
       <header className="app-shell-bar app-window-titlebar app-header">
         <div className="app-brand">
           <div className="app-brand__mark"><Brain size={15} /></div>
@@ -255,7 +266,7 @@ export default function App() {
           style={{ width: workbenchWidth, transition: resizingWorkbench ? 'none' : undefined }}>
           <div className="desktop-sheet__material" aria-hidden="true"><img ref={panelBackdrop} alt="" /></div>
           <div className="workbench-resizer" onPointerDown={startWorkbenchResize} role="separator" aria-orientation="vertical" aria-label="调整工具面板宽度" title="拖动调整工具面板宽度" />
-          <div className="desktop-sheet__heading"><span>{({ automation: '答题', snapshot: '本地题库', tokens: 'Token 用量', history: '运行记录', bugs: '错误报告', tutorial: '使用教程', settings: '设置' })[activeTab]}</span><span>点击下方同一按钮收起</span></div>
+          <div className="desktop-sheet__heading"><span>{({ automation: '答题', snapshot: '本地题库', tokens: 'Token 用量', history: '运行记录', bugs: '错误报告', tutorial: '使用教程', settings: '设置' })[activeTab]}</span><span>再次点击当前工具收起</span></div>
           <AnnouncementBanner />
           <div className="desktop-tool-content side-panel-content">
             {visited.map(tab => <div key={tab} hidden={tab !== activeTab} className="side-panel-page">
@@ -264,7 +275,7 @@ export default function App() {
           </div>
         </aside>
         <MobileToolDock activeTab={activeTab} panelOpen={!sideCollapsed} navRef={tabsRef} onSelect={openSideTab}
-          theme={settings.theme} glassSource={desktopGlassSource} panelId="desktop-tool-panel" />
+          collapsed={dock.collapsed} onExpand={dock.expand} theme={settings.theme} glassSource={desktopGlassSource} panelId="desktop-tool-panel" />
         <canvas ref={dissolveCanvas} className="desktop-dissolve" aria-hidden="true" />
         {resizingWorkbench && <div className="workbench-drag-shield" aria-hidden="true" />}
       </main>
