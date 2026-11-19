@@ -35,3 +35,19 @@ Thumbs.db
 # Electron builder cache/output
 *.blockmap
 *.asar
+
+# Rust host build outputs
+src-tauri/target/
+src-tauri/target-installer/
+src-tauri/gen/
+dist-rust/
+dist-rust-bridge/
+dist-rust-policies/
+dist-rust-navigation/
+
+# Local plans, audits and progress records do not belong in release source.
+docs/analysis/
+docs/qa/
+docs/superpowers/
+docs/migrations/rust-host/*.md
+design-proposals/

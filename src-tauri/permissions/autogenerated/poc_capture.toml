@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-poc-capture"
+description = "Enables the poc_capture command without any pre-configured scope."
+commands.allow = ["poc_capture"]
+
+[[permission]]
+identifier = "deny-poc-capture"
+description = "Denies the poc_capture command without any pre-configured scope."
+commands.deny = ["poc_capture"]

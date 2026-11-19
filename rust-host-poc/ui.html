@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyPilot R1 trusted overlay</title>
+  <link rel="stylesheet" href="ui.css">
+  <script type="module" src="ui.mjs"></script>
+</head>
+<body>
+  <header id="header" class="island">
+    <div class="heading"><strong>Rust 宿主 · R1 原型</strong><span id="host-status" role="status">等待本地宿主</span></div>
+    <div class="header-actions">
+      <span class="label">面板方向</span>
+      <div class="edge-picker" role="group" aria-label="面板停靠方向">
+        <button type="button" data-edge="left" aria-pressed="false">左</button>
+        <button type="button" data-edge="top" aria-pressed="false">上</button>
+        <button type="button" data-edge="right" aria-pressed="true">右</button>
+        <button type="button" data-edge="bottom" aria-pressed="false">下</button>
+      </div>
+      <button type="button" id="probe-background">后台探针</button>
+      <span id="capture-status">截图尚未开始</span>
+    </div>
+  </header>
+
+  <button id="scrim" aria-label="收起面板并吞掉本次手势" tabindex="-1"></button>
+
+  <aside id="panel" data-edge="right" data-open="false" aria-label="R1 验证面板" aria-hidden="true" inert>
+    <div class="material" aria-hidden="true"><img id="panel-material" alt=""></div>
+    <div class="panel-title"><strong>原生合成验证</strong><button type="button" id="close-panel" aria-label="关闭面板">×</button></div>
+    <p>网页视口保持完整。透明空白应让点击、滚动和拖动直接进入网页。</p>
+    <p>面板打开时，外部点击只关闭面板，网页点击数应保持不变。</p>
+    <label class="field">UI 中文输入与 IME<input id="ui-ime" placeholder="在此输入中文，再切换到网页" autocomplete="off"></label>
+    <div class="button-row"><button type="button" id="probe-guest">读取网页状态</button><button type="button" id="capture-once">立即截图</button></div>
+    <div class="ui-marker">UI ONLY · 该标记不应出现在网页截图中</div>
+    <figure><img id="capture-preview" alt="仅指定 guest 的截图，尚未取得"><figcaption>guest CapturePreview 样本</figcaption></figure>
+    <pre id="result" tabindex="0" aria-label="验证原始结果">等待操作。</pre>
+    <p class="pending">这些按钮提供验证数据；G1 仍需实测 DPI、原生输入、触摸及窗口恢复。</p>
+  </aside>
+
+  <nav id="dock" class="island" aria-label="R1 原型工具栏" data-collapsed="false">
+    <div class="material" aria-hidden="true"><img id="dock-material" alt=""></div>
+    <button type="button" id="collapse-dock" aria-expanded="true" aria-label="折叠工具栏">‹</button>
+    <div class="dock-actions">
+      <button type="button" id="toggle-panel" aria-expanded="false" aria-controls="panel">验证面板</button>
+      <button type="button" id="native-enter">受控 Enter</button>
+      <button type="button" id="focus-guest">聚焦网页输入</button>
+      <span class="dock-hint">透明区可穿透</span>
+    </div>
+  </nav>
+</body>
+</html>

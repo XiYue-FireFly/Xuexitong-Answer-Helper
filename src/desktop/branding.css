@@ -1,0 +1,16 @@
+:root[data-brand] .app-brand__mark { background: transparent; box-shadow: none; width: 35px; height: 35px; border-radius: 11px; overflow: hidden; }
+:root[data-brand] .app-brand__mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
+:root[data-brand] .app-brand__title { font-family: 'Segoe UI',system-ui,sans-serif; font-size: 16px; letter-spacing: .12em; font-weight: 700; }
+:root[data-brand] .app-brand__tag { font-family: 'Segoe UI',system-ui,sans-serif; font-size: 10px; letter-spacing: .05em; }
+:root[data-brand='wisp-rs'] .app-window-titlebar { min-height: 46px; padding-block: 6px; user-select: none; cursor: default; border-radius: 0; }
+:root[data-brand='wisp-rs'] .app-header__meta { align-items: center; }
+:root[data-brand='wisp-rs'] .window-controls { gap: 0 !important; margin-left: 8px; align-self: stretch; }
+:root[data-brand='wisp-rs'] .window-control { min-width: 42px; min-height: 32px; border-radius: 8px !important; }
+:root[data-brand='wisp-rs'] .window-control:last-child:hover { background: #c72c41 !important; color: white !important; }
+:root[data-brand='wisp-rs'] .app-shell { border-radius: 0; }
+/* Native guests live below the transparent UI window. Layout containers must
+   not paint an extra surface outside the floating dock's optical silhouette. */
+:root[data-brand='wisp-rs'],
+:root[data-brand='wisp-rs'] :is(body,#root,.desktop-shell,.app-workspace,.browser-deck),
+:root[data-brand='wisp-rs'] .mock-page-container:has(webview) { background: transparent !important; }
+@media (max-width: 760px) { :root[data-brand] .app-brand__tag { display: none; } :root[data-brand] .app-brand__title { font-size: 14px; letter-spacing: .06em; } }

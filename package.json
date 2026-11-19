@@ -12,7 +12,7 @@
     "electron": "npm run electron:build && electron .",
     "logs:collect": "powershell -ExecutionPolicy Bypass -File scripts/collect-error-logs.ps1",
     "pack": "npm run build && npm run electron:build && electron-builder",
-    "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=false",
+    "pack:win": "npm run build && npm run electron:build && electron-builder --win nsis --config.win.signAndEditExecutable=true",
     "release:win": "powershell -ExecutionPolicy Bypass -File scripts/build-win-release.ps1",
     "android:sync": "node scripts/build-android-bridge.mjs && npx cap sync android && node -e \"require('fs').cpSync('dist/android-webview-bridge.js','android/app/src/main/assets/android-webview-bridge.js')\"",
     "android:open": "npm run android:sync && npx cap open android",
@@ -22,14 +22,15 @@
   },
   "build": {
     "appId": "com.studypilot.desktop",
-    "productName": "学习通答题辅助工具",
+    "productName": "WISP",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "public/icon.png"
     ],
     "asar": true,
     "win": {
@@ -41,7 +42,8 @@
           ]
         }
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true,
+      "icon": "public/wisp-icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -49,10 +51,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "学习通答题辅助工具",
+      "shortcutName": "WISP",
       "deleteAppDataOnUninstall": true,
       "include": "build/installer.nsh",
-      "uninstallDisplayName": "学习通答题辅助工具"
+      "uninstallDisplayName": "WISP"
     }
   },
   "keywords": [

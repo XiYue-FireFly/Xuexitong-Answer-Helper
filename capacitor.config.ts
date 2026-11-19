@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.studypilot.android',
-  appName: '学习通答题助手',
+  appName: 'WISP',
   webDir: 'dist',
   android: {
     buildOptions: {

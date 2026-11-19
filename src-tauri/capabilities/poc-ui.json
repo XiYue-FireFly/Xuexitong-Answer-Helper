@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "poc-ui",
+  "description": "Only the bundled R1 UI may control the fixed local fixture guests.",
+  "local": true,
+  "webviews": ["ui"],
+  "permissions": [
+    "allow-poc-info",
+    "allow-poc-layout",
+    "allow-poc-capture",
+    "allow-poc-probe",
+    "allow-poc-enter",
+    "allow-poc-focus",
+    "allow-desktop-host",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

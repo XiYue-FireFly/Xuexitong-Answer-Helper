@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-poc-probe"
+description = "Enables the poc_probe command without any pre-configured scope."
+commands.allow = ["poc_probe"]
+
+[[permission]]
+identifier = "deny-poc-probe"
+description = "Denies the poc_probe command without any pre-configured scope."
+commands.deny = ["poc_probe"]

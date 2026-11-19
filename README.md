@@ -1,376 +1,75 @@
-# 学习通答题辅助工具（Windows / Android）
+# WISP / WISP RS
 
-Windows 版使用 Electron，Android 版使用 Capacitor 和原生 WebView，界面使用 React、TypeScript 和 Vite。应用内置浏览器，用于在用户已登录、已授权访问的网页中抓取题目、维护本地题库，并通过用户配置的 OpenAI 兼容接口生成学习参考答案。
+WISP 是 Windows 与 Android 学习辅助应用。WISP RS 使用 Rust、Tauri 和 WebView2 桌面宿主；Electron 与 Android 版本继续提供。应用内置浏览器，用于用户已登录并获授权访问的网页、题目整理、本地题库和学习参考答案。
 
-## Windows v1.5.1 更新
+## 下载
 
-- 修复暗色模式下工具 Tab 展开页文字发灰、被白色网页背景干扰的问题。
-- 加深面板底色并保留实时玻璃色彩，提亮标题、说明、占位文字和未选中的筛选按钮，调整主操作按钮与状态文字对比度。
-- 新增白色网页背景下的实际像素对比度回归，六类文字均达到 4.5:1 以上。
+当前 [WISP RS 0.1.0 预览发布](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/wisp-rs-v0.1.0) 提供：
 
-下载 [Windows v1.5.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.1)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.1.md) 与 [验证记录](docs/qa/windows-glass/v1.5.1/verification.md)。
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| Windows Rust | `WISP-RS-0.1.0-windows-x64-setup.exe` | 推荐常规包；复用系统 WebView2，缺少时联网安装 |
+| Windows Rust 离线 | `WISP-RS-0.1.0-windows-x64-offline-setup.exe` | 内置完整 WebView2 运行时 |
+| Windows Electron | `WISP-Windows-Preview-setup.exe` | WISP 名称、柳叶图标与浮动工具栏 |
+| Android | `WISP-Android-Preview.apk` | WISP 名称、柳叶图标，当前使用 debug 测试签名 |
 
-## Windows v1.5.0 更新
+所有下载文件均附 SHA-256 校验值。Rust 版是独立预览，保留原 Electron 安装与数据；正式稳定版仍可在 [Releases](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases) 选择。Rust 版需要 Windows x64 与 WebView2 140.0.3485.0 或更新版本，预览的正式更新通道尚未启用。
 
-- 七个工具 Tab 改为悬浮液态玻璃，实时折射当前网页；长页面滚动后持续更新取样。
-- 点按镜片平滑滑向目标，长按抬起后支持拖动、边缘约束与松手吸附。
-- 工具面板覆盖网页，保持网页完整宽度；同一按钮再次点击收起，外部点击收起并拦截本次操作。
-- 七个工具页的卡片、选项、按钮和输入框统一玻璃材质，切换时保留编辑草稿，并加入渐隐颗粒动画。
-- 支持深浅主题、明亮网页上的图标对比度、窗口缩放、减少动态效果及图形上下文恢复。
+## 界面与功能
 
-下载 [Windows v1.5.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/v1.5.0)。请关闭应用后使用原 Windows 账号覆盖安装。详见 [发布说明](docs/releases/v1.5.0.md) 与 [验证记录](docs/qa/windows-glass/v1.5.0/verification.md)。
+- 柳叶应用图标；Rust 版显示 WISP RS，Electron 与 Android 显示 WISP。
+- 浏览器标签保留原题页面。工具面板覆盖网页，点击同一入口或面板外区域可收起。
+- 浮动玻璃工具栏支持四边停靠、点按平滑切换、长按拖动；下滑或答题时收缩为“答题”按钮，点击可展开，回到页顶或答题完成后恢复。
+- Android 常驻“答题、题库、设置”，其余入口位于设置；Windows 保留七个工具入口。
+- 网页 AI 与 OpenAI 兼容 API、图片材料、本地题库、历史与用量记录。缺失答案耗尽重试后跳过，继续后续内容。
 
-## Android v1.4.1 更新
+## 数据与迁移
 
-- 底部七个工具 Tab 悬浮在完整网页上，按实际位置实时折射后方内容，横屏居中限宽。
-- 长按镜片抬升，图标和文字一起放大、边缘折射，滑动跟手形变、回弹并吸附；镜片横向不超出底栏。
-- 镜片限定为单个按钮，轻点快速平滑滑向目标；降低雾度，并修复长页面滚动后的旧位置取样。
-- 保留同 Tab 再点收起、外部点击收起并拦截本次手势；关闭面板后，底栏四周留白可操作网页。
+Electron 内部名称与应用标识、Android 包名保持不变，显示名称变化不切换现有数据路径。Rust 预览使用独立身份 `com.studypilot.rust-preview`，不写入原 Electron profile。
 
-下载 [Android v1.4.1 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.1)。详见 [更新说明](docs/releases/android-v1.4.1.md) 与 [验证记录](docs/qa/android-browser/floating-glass-v141-verification.md)。
+Rust 设置中的“从 Electron 导入数据”接受完整迁移包：选择文件、校验后确认导入。开发者可使用 `scripts/export-electron-profile.mjs`，显式指定原数据库与 renderer 快照进行只读导出。迁移包可能包含敏感配置，请自行妥善保管。
 
-## Android v1.4.0 更新
+网站 Cookie 与站点存储不跨浏览器引擎复制，Rust 版需重新登录。Rust 与 Electron 后续数据修改不会自动双向同步。
 
-- 底栏折射与面板背景持续跟随网页变化，修复长按拖动越界和亮暗主题重复玻璃，统一七个工具页控件材质。
-- 移除应用悬浮条，使用系统进度通知；可选媒体卡片以真实题数显示进度，支持暂停、继续和任务结束清理，无需播放声音。
-- 保留同一 Tab 再次点击收起、面板外点击收起并拦截手势、原题标签和完整浏览器视口。
-- Android 15、16 模拟器回归通过，Android 17 本轮跳过验证。系统是否上岛及具体动效由手机系统决定。
+## 从源码构建
 
-下载 [Android v1.4.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.4.0)。详见 [更新说明](docs/releases/android-v1.4.0.md) 与 [验证记录](docs/qa/android-browser/live-glass-v140-verification.md)。
-
-## Android v1.3.0 更新
-
-- 底栏加入 GPU 折射、色散、镜片抬升、弹簧跟手及松手惯性；GPU 不可用时保留 CSS 玻璃材质。
-- 切到其他应用后通过前台服务继续答题，持续通知显示当前步骤和完成题数，任务结束后释放服务。
-- 在“设置 → 真实页面能力 → 后台答题状态”开启通知及可选顶部状态胶囊；顶部胶囊需要悬浮窗权限，点击可回到答题工具。
-- Android 16 请求系统实时更新，其他版本和不支持提升的系统使用持续进度通知。强制停止、撤销权限或清理进程后不会自动重启旧任务。
-
-下载 [Android v1.3.0 安装包](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.3.0)，也可按下文从源码构建。详见 [更新说明](docs/releases/android-v1.3.0.md) 与 [验证记录](docs/qa/android-browser/ultra-glass-v130-verification.md)。
-
-## Android v1.2.0 更新
-
-- 工具 Tab 点击展开，再次点击当前 Tab 收起，删除独立收起按钮。
-- 长按拖动时玻璃胶囊跟随手指，松手选择工具，窄屏支持边缘自动滚动。
-- 工具页切换与收起加入真实像素的灰化颗粒消散；地址栏、标签页、工具卡片、输入框与弹窗统一玻璃材质。
-- 点击面板外空白仅收起工具并拦截本次手势，保持网页尺寸和工具输入草稿。
-
-本版源码可按下文构建。详见 [Android v1.2.0 更新说明](docs/releases/android-v1.2.0.md) 与 [验证记录](docs/qa/android-browser/liquid-glass-v120-verification.md)。
-
-## Android v1.0.0
-
-- 浏览器独立标签页保留原题页面，支持新窗口、前进后退和系统返回键。
-- 底部玻璃 Tab 向上展开工具面板，覆盖网页并保持浏览器尺寸；展开后仍可切换工具。
-- 修复 DeepSeek 手机布局中长提示词与多张图片已就绪但无法发送的问题，检查上传状态和发送回执。
-- 无效或缺失答案最多补发三轮，仍无答案时跳过并继续后续题目；回填时切回原题标签。
-- 支持横竖屏、窄屏和系统字号变化，使用蓝色书本图标及 Android 自适应图标。
-
-下载 [Android Release](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/releases/tag/android-v1.0.0) 中的 APK。该版本提供经过验证的 debug 签名安装包；后续安卓更新请从 Android Release 下载。Windows 最新发布继续使用独立的 `v*` 版本标签。
-
-完整说明见 [Android v1.0.0 发布说明](docs/releases/android-v1.0.0.md)，测试范围见 [安卓适配验收](docs/qa/android-browser/adaptation-audit-20261025.md)。
-
-### 从源码构建 Android
-
-准备 Node.js 22 或更新版本、JDK 21 和 Android SDK。将 `JAVA_HOME` 指向 JDK 21，将 `ANDROID_HOME` 指向 SDK，或在忽略的 `android/local.properties` 中设置 `sdk.dir`。
+准备 Node.js 24，先运行：
 
 ```powershell
 npm ci
+npm test -- --maxWorkers=2
+```
+
+### Windows Rust
+
+准备 Rust stable MSVC、Visual Studio 2022 Build Tools 的“使用 C++ 的桌面开发”及 Windows SDK。源码必须包含完整 Git 历史，以验证固定核心基线。
+
+```powershell
+# 常规安装包，缺少运行时时联网安装
+./scripts/build-rust-installer.ps1
+
+# 同时生成常规和完整离线安装包
+./scripts/build-rust-installer.ps1 -RuntimeMode Both
+```
+
+输出位于 `release/rust/windows-preview/0.1.0/`。核心校验与 API 契约 JSON 是构建输入，不能删除；计划、进度、截图验收和临时诊断不随源码提交。
+
+### Windows Electron
+
+```powershell
+npm run pack:win
+```
+
+### Android
+
+准备 JDK 21 和 Android SDK，设置 `JAVA_HOME`、`ANDROID_HOME`，或在本地 `android/local.properties` 指定 `sdk.dir`。
+
+```powershell
 npm run android:build
 ```
 
-可安装 APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`。`npm run android:sync` 会同步原生依赖并生成网页题目桥接脚本；`npm run android:release` 生成的 release APK 需要维护者配置自己的签名后才能安装。
+APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`。正式签名发布需维护者另行配置签名。
 
-模拟器回归脚本为 `scripts/check-android-browser.mjs`，使用本地夹具。多设备使用 `ANDROID_SERIAL` 指定设备，ADB 路径使用 `ANDROID_ADB` 指定。执行前需安装 `playwright-core`，也可将 `PLAYWRIGHT_MODULE_PATH` 指向已有安装目录。
+## 使用范围
 
-## 产品边界
-
-本项目用于学习辅助、题目整理、题库复习和授权网页自动化操作。请只在你拥有、运营或明确获得授权的页面中使用。
-
-应用不会自动提交作业或考试结果。AI 返回内容仅作为学习参考，请自行核对课程材料、题目上下文和平台规则。
-
-## v1.4.5 更新
-
-- 修复 DeepSeek 一直停在“发送提示词”的问题：识别图片上传完成、无文字发送按钮及发送后的输入框重建，按实际请求编号和附件名确认发送结果。
-- 题目提示词增加同组材料、相邻题目和已有作答参考；支持附带题干、选项与材料中的真实图片，原有填写仅作为参考。
-- 每个题目页独立保存任务、进度和重试状态；切换标签或收起侧栏后继续运行，同一 AI 网站按序发送，减少任务串答。
-- 修复隐藏上传动画导致长期等待、可见图片漏抓，以及含 b/s 等正文被误识别为选项字母的问题。
-
-完整说明见 [v1.4.5 发布说明](docs/releases/v1.4.5.md)。
-
-## v1.4.4 更新
-
-- 网页 AI 提示词逐题明确题型，单选只接受唯一答案；修复相似选项同时高亮和选项圆圈放大。
-- 自动模式先录入有效答案，仅补发缺失或无效题，收齐后统一填回，无需人工确认，不最终提交。
-- 题库保存原始题型，兼容旧“对/错”题目分类；判断题显示中文答案并标记对应选项。
-- 自动运行收起侧栏，暂停、异常或需要重试时展开；修复侧栏双向拖动，启动时自动最大化。
-
-完整说明见 [v1.4.4 发布说明](docs/releases/v1.4.4.md)。
-
-## v1.4.3 更新
-
-- 网页 AI 新增自动流程：抓取当前页面全部题目、按字符数分批、打开网站、发送、持续检测回答，校验通过后入库并填回，不自动翻页或提交。
-- DeepSeek、豆包、千问统一按输入框可用性尝试发送，支持网站提供的游客聊天；取消以登录标记阻止发送的逻辑。
-- 提示词一次性录入，网站转为 TXT 附件时等待上传完成后直接发送；失败可从当前批次的失败步骤重试，避免重复粘贴和重复发送。
-- 自动和手动发送均支持生成结束后自动提取；缺题、低置信度或警告会要求核对。手动模式仍需确认入库和填入。
-- 收起右侧栏后 Web 任务继续；新增全页面流星雨、提取成功像素猫、完成礼花及可静音提示音，进度只统计实际答题或填入成功数。
-- 修复 Web 答题大面板鼠标悬停变形；更新“使用教程”的自动、手动、TXT、重试和升级说明。
-- 安装器增加升级前备份和安装后恢复校验，保护登录数据、题库与配置。请用原 Windows 账号覆盖安装，正式卸载仍会清理本机数据。
-
-完整说明见 [v1.4.3 发布说明](docs/releases/v1.4.3.md)。
-
-## v1.2.2 更新
-
-### Fixes
-
-- 修复真实 WebView 填入选择题时，页面实际选项顺序与右侧识别选项顺序不一致导致的错填问题。
-- 修复选项 selector 非唯一时默认命中第一个元素的问题，避免出现“AI 命中 B，但页面选中 A”的情况。
-- 加强旧扫描结果兼容：当历史 optionTarget 指向题目容器时，会继续在容器内按选项文本和值匹配真实选项。
-- 修复多题页面缺少精确题目 selector 时可能误取第一题 qid 的风险，避免后续题目被写入到第一题答案字段。
-
-### Improvements
-
-- 选项定位现在要求 selector 唯一命中当前元素；非唯一的 `qid/qtype`、`name`、`aria-label` 等选择器会自动退回到结构化路径。
-- 填答前会按选项 value、文本和选项容器特征对候选元素打分，提高乱序 DOM、旧缓存和页面脚本改写后的稳定性。
-
-## v1.2.0 更新
-
-### New Features
-
-- 新增更详细的启动弹窗和操作公告，覆盖真实 WebView、搜题配置、本地题库、Token 统计和排错流程。
-- 新增 Token 消耗统计页，支持总览、模型排行、热力图、调用明细表格排序和清空统计。
-- API 并发默认调整为 5 路，并发滑块会持久化保存，切换页面后不再回退。
-- AI 测试聊天和搜题请求会记录服务商返回的 usage 字段，用于本地 Token 统计。
-- 英语阅读、完形填空、七选五等文章类题目支持携带文章上下文进行抓题和搜题。
-- 本地题库支持保存文章上下文，阅读题会优先按上下文精确匹配，旧题库仍可兼容命中。
-
-### Fixes
-
-- 修复 API 余额不足、额度不足、配额不足时提示不清晰的问题，并在并发自动化中停止继续消耗请求。
-- 修复阅读题 DOM 已抓到小题时缺少文章上下文，导致 AI 只看到小题和选项的问题。
-- 修复带上下文题目可能绕过旧本地题库、继续调用 API 的兼容问题。
-- 优化填空题答案清洗，避免把“答案：”“解析：”等说明文本写入输入框。
-- 优化填空题写入后的页面同步和校验，减少显示已填入但提交值未更新的情况。
-- 扩展选择题选项识别范围到 A-H，适配七选五等更多选项格式。
-
-## v1.1.2 更新
-
-- 重构 WebView 预加载脚本，将浏览器导航、题目抓取、答案填入、保存同步、章节学习和考试流程拆分为独立模块。
-- 保留原有自动化行为和页面兼容逻辑，降低后续修复抓题、填入、章节和考试问题时的维护风险。
-- 精简 `electron/preload-webview.ts` 为入口注册文件，方便定位 IPC 事件和模块边界。
-## 本地隐私与数据存储
-
-以下数据只保存在你的本机，不会写入代码仓库：
-
-- AI API Key 和模型配置：保存在应用 localStorage 中。
-- 本地题库：保存在应用 localStorage 的 `studypilot_question_bank_v1` 中。
-- 答案历史和运行记录：保存在应用 localStorage 中。
-- 网页登录态、Cookie、localStorage、IndexedDB：保存在 Electron WebView 的持久化分区 `persist:studypilot-sites` 中。
-
-仓库提交时已通过 `.gitignore` 排除构建产物、依赖目录、诊断文件、截图和本地环境文件，避免把本地数据提交到 GitHub。
-
-## 核心功能
-
-### 答题辅助
-- 内置浏览器：支持地址栏、前进后退、刷新、多标签页、登录态持久化。
-- 题目抓取：从当前页面识别题干、题型、选项和页面定位信息。
-- 智能填入：支持单选、多选、判断题自动填入，修复判断题点击bug。
-- 本地题库：AI 解析成功后自动入库，再次遇到相同或高度相似题目时优先返回题库答案。
-- 题库导入导出：支持把本机题库导出为 JSON，也可以导入已有 JSON 题库。
-- 手动加入答案：支持按固定文本格式批量加入选择题、判断题、填空题和问答题答案。
-- 题库模糊匹配：先精确匹配，未命中时按题干相似度进行二次匹配，默认阈值为 80%。
-
-### 网页 AI 答题
-- 支持 DeepSeek、豆包和千问，可在应用内浏览器发送提示词，也可通过系统浏览器手动复制问答。
-- 自动模式处理当前页面能抓取的全部题目，自动发送、监测、校验、入库并填回；不自动翻页、不提交。收起侧栏不会终止任务，请保持应用和原题、AI 标签打开。
-- 每批按完整提示词 300000 字符整题分批，不限制题目数量。单题连同必要模板仍超限时跳过本次发送，显示题号与原因，保留原题。
-- 有可输入的聊天框即可尝试发送；提示词整段录入，自动转成 TXT 时等待附件就绪后直接发送。失败可重试当前步骤，发送状态不确定时先检查网页。
-- 发送后持续检测生成结束并自动提取完整 JSON；手动模式核对预览后确认入库，本批有效答案完整入库后再处理下一批。缺题、低置信度或警告需人工核对。
-- 应用内模式可在原题比对后确认填入，系统浏览器模式入库后可通过 API AI 的题库优先查询路径填入。
-
-### AI 提供商配置
-- 内置 22 个服务商预设：阿里云百炼/Qwen、DeepSeek、硅基流动、OpenRouter、Google Gemini、Kimi、智谱 GLM、火山方舟/豆包、腾讯混元、百度千帆、MiniMax、阶跃星辰、Groq、Mistral、Together、xAI/Grok、小米 MiMo、OpenAI、Ollama、LM Studio、vLLM/LocalAI 和自定义兼容接口。
-- 支持 `Authorization: Bearer`、`api-key` 和本地服务“无需认证”三种认证方式。
-- AI 测试聊天：设置页可直接发送测试消息，支持流式输出，用于验证 Base URL、模型和 API Key 是否可用。
-
-### 其他功能
-- 自动化控制：自动化页集成抓题、页面扫描、生成计划、批准计划和执行已批准计划。
-- 日志诊断：记录页面错误、请求结果、点击调试和保存/提交相关诊断信息。
-- 使用说明：右侧“使用教程”提供操作步骤、分批规则与排错说明，原公告横幅继续提供提示。
-
-## 题库查询逻辑
-
-题库查询会优先使用本地题库；未命中时才调用已配置的 AI 接口。阅读理解、完形填空、七选五等带文章上下文的题目，会把文章上下文纳入题库 key，降低不同文章小题互相误命中的风险；如果旧题库没有上下文字段，程序会在严格匹配失败后进行兼容回退。
-
-题库查询分两步：
-
-1. 精确匹配：对题干和选项做标准化处理，去掉空格、常见标点和选项前缀后生成 key，完全一致则命中。
-2. 模糊匹配：精确未命中时，对标准化后的题干计算相似度，相似度大于等于 80% 时命中。
-
-为降低误命中风险，模糊匹配会忽略过短题干，并要求双方选项数量差异不能过大。带上下文的阅读题会先使用“文章上下文 + 题干 + 选项”匹配，旧题库兼容命中只作为回退。
-
-## 本地题库导入导出
-
-打开“本地题库”页面后，可以直接导出当前题库 JSON 文件，也可以导入此前导出的 JSON 题库。导入时会按题干和选项生成题库 key，相同题目会更新，不会重复堆叠。
-
-本地题库只保存在本机，不会写入代码仓库。查询答案时会优先查本地题库，题库命中后不会调用 AI；只有题库未命中时，才需要使用已配置的 AI API Key。
-
-## 手动加入答案格式
-
-选择题、判断题可以使用题目、选项、答案的格式：
-
-```text
-题目：示例选择题题干
-A. 选项一
-B. 选项二
-C. 选项三
-D. 选项四
-答案：A
-解析：可选解析
-```
-
-多选题答案可以写成 `答案：A、C` 或 `答案：AC`。如果答案写完整选项文本，程序也会尝试和选项内容匹配。
-
-填空题、问答题可以使用题目、答案的格式：
-
-```text
-题目：示例填空题题干
-答案：填空答案
-解析：可选解析
-```
-
-多个题目可以连续粘贴，程序会在上一题的答案/解析结束后自动识别下一题；也可以用空行、`---`、`====` 或 `###` 分隔。手动加入的答案会直接形成本地解析，适合在没有 API Key 或不想调用 AI 时使用。
-
-## 安装与运行
-
-```bash
-npm install
-npm run electron
-```
-
-## 下载 Windows 安装包
-
-普通用户不需要克隆源码。打开 GitHub 仓库右侧的 Releases，下载最新版本里的 `Xuexitong-Answer-Helper-vx.x.x-win-x64-setup.exe`，双击安装即可。
-
-安装程序使用 NSIS，支持开始菜单快捷方式和控制面板卸载。升级时请使用原 Windows 账号直接覆盖安装，安装器会在移除旧版前备份并在首启前恢复、校验登录数据、题库和配置；备份失败会停止安装，恢复失败会阻止自动启动，并保留恢复目录。网站自身使登录失效时仍需重新登录。正式卸载会删除应用本体，并清理本机缓存、日志、登录态和题库；重要题库请先导出备份。
-
-项目维护者发布新版本时，先更新 `package.json` 里的 `version`，然后创建并推送版本标签：
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-GitHub Actions 会自动在 Windows 环境构建安装包，并把 `.exe` 上传到对应 Release 附件中。
-
-仅运行前端开发服务：
-
-```bash
-npm run dev
-```
-
-构建前端：
-
-```bash
-npm run build
-```
-
-构建 Electron 主进程和预加载脚本：
-
-```bash
-npm run electron:build
-```
-
-打包桌面应用：
-
-```bash
-npm run pack
-```
-
-生成 Windows 发布安装包：
-
-```bash
-npm run release:win
-```
-
-该命令会先清理旧的 `release/` 目录，再重新构建前端、Electron 主进程和 NSIS 安装包，并校验安装包内是否包含 `dist/index.html`、前端资源和 Electron 预加载脚本，避免旧包残留或安装后白屏。
-
-## API 并发与 Token 统计
-
-自动化页的 API 并发默认是 5 路，用户修改后会保存在本机设置中，切换页面或重启应用后继续沿用。遇到 429 限流时可降低到 1-2 路；如果接口返回余额、额度、配额或计费不足，应用会在状态和日志中提醒，并停止后续并发请求，避免继续浪费调用。
-
-Token 页面会统计本应用收到的 API `usage` 字段，包括输入 Token、输出 Token、总 Token、模型排行、热力图和调用明细。部分服务商或本地模型不返回 `usage` 时，不会计入统计。
-
-## AI 配置
-
-应用支持多种 OpenAI 兼容接口，在设置页面可以通过下拉框选择服务商、Base URL 和模型。API Key 只保存在本机，不会写入仓库。
-
-如果还没有 API Key，可以在设置页的 API Key 输入框右侧点击“没有秘钥，前往”。应用会弹出常用服务商的获取地址、复制链接按钮和简短教程，方便跳转到控制台创建密钥；Ollama、LM Studio、vLLM 等本地服务通常无需填写 API Key。
-
-### 云端服务商
-
-| 服务商 | 默认 Base URL | 默认模型 | 认证方式 |
-| --- | --- | --- | --- |
-| 阿里云百炼 / Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | Bearer |
-| DeepSeek | `https://api.deepseek.com` | `deepseek-v4-flash` | Bearer |
-| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `Qwen/Qwen3-8B` | Bearer |
-| OpenRouter | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` | Bearer |
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` | Bearer |
-| 月之暗面 Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | Bearer |
-| 智谱 AI / GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` | Bearer |
-| 火山方舟 / 豆包 | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-1-6-flash-250615` | Bearer |
-| 腾讯混元 | `https://api.hunyuan.cloud.tencent.com/v1` | `hunyuan-lite` | Bearer |
-| 百度千帆 / 文心 | `https://qianfan.baidubce.com/v2` | `ernie-4.0-turbo-8k` | Bearer |
-| MiniMax | `https://api.minimax.chat/v1` | `MiniMax-Text-01` | Bearer |
-| 阶跃星辰 StepFun | `https://api.stepfun.com/v1` | `step-2-mini` | Bearer |
-| Groq | `https://api.groq.com/openai/v1` | `llama-3.1-8b-instant` | Bearer |
-| Mistral AI | `https://api.mistral.ai/v1` | `mistral-small-latest` | Bearer |
-| Together AI | `https://api.together.xyz/v1` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` | Bearer |
-| xAI / Grok | `https://api.x.ai/v1` | `grok-3-mini` | Bearer |
-| 小米 MiMo | `https://api.xiaomimimo.com/v1` | `mimo-v2.5-pro` | `api-key` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4.1-mini` | Bearer |
-
-### 本地模型服务
-
-| 服务商 | 默认 Base URL | 默认模型 | 说明 |
-| --- | --- | --- | --- |
-| Ollama | `http://127.0.0.1:11434/v1` | `qwen2.5:7b` | 无需 API Key，需要先启动 Ollama 并拉取模型 |
-| LM Studio | `http://127.0.0.1:1234/v1` | `local-model` | 无需 API Key，需要开启 OpenAI Compatible Server |
-| vLLM / LocalAI | `http://127.0.0.1:8000/v1` | `local-model` | 无需 API Key，按服务端模型名填写 |
-
-### 配置步骤
-
-1. 打开“设置”标签页。
-2. 选择 AI 服务商、Base URL 和模型。
-3. 云端服务填写 API Key；没有密钥时点击“没有秘钥，前往”查看获取地址并复制链接，本地服务可保持 API Key 为空。
-4. 使用“AI 测试聊天”发送一句测试消息，确认配置可用。
-5. 点击“保存 AI 配置”。
-
-## 真实网页使用
-
-真实 WebView 能力默认关闭。需要在设置页开启真实 WebView 后，才会对内置浏览器当前页面进行抓题、扫描和自动化操作。
-
-登录态会保存在本机，关闭应用后再次打开仍可继续使用。如需清除扫码登录状态，可在设置页点击清除登录。
-
-## 使用教程
-
-点击右侧“使用教程”，可查看准备工作、网页 AI 自动答题、手动六步、300000 字符分批、TXT 直接发送、失败重试、系统浏览器手工路径、API AI、本地题库、进度反馈与升级说明。目录可直接打开对应章节，示例文本可选择复制。
-
-## 项目结构
-
-```text
-electron/                 Electron 主进程和 WebView preload
-src/components/           React 页面和业务组件
-src/store/appStore.ts     全局状态、题库、设置和历史记录
-scripts/                  诊断和辅助脚本
-```
-
-## 技术栈
-
-- Electron 31
-- React 18
-- TypeScript 5
-- Vite 5
-- lucide-react
-
-## 免责声明
-
-本项目仅用于学习辅助和授权页面自动化。使用者应遵守所在平台、学校、课程和网站的规则，自行承担使用行为产生的责任。
+只在你拥有、运营或明确获得授权的页面中使用。应用不会自动最终提交作业或考试结果；AI 内容仅作为学习参考，请核对课程材料、题目上下文和平台规则。

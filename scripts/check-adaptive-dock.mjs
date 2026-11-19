@@ -73,6 +73,7 @@ try {
   const tap=async locator=>{
     if(!mobile) return locator.click();
     await locator.scrollIntoViewIfNeeded();
+    await shell.waitForTimeout(250);
     const rect=await locator.boundingBox();
     const targets=await (await fetch('http://127.0.0.1:9222/json/list')).json();
     const d=JSON.parse(targets.find(target=>target.url.startsWith('https://localhost')).description);

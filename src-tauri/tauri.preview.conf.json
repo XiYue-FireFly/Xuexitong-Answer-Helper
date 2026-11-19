@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WISP RS",
+  "version": "0.1.0",
+  "identifier": "com.studypilot.rust-preview",
+  "build": {
+    "frontendDist": "../dist-rust"
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "StudyPilot Preview",
+    "shortDescription": "Independent Windows Rust host preview",
+    "createUpdaterArtifacts": false,
+    "icon": [
+      "icons/wisp.ico"
+    ],
+    "windows": {
+      "allowDowngrades": true,
+      "minimumWebview2Version": "140.0.3485.0",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": true,
+        "startMenuFolder": "WISP RS"
+      }
+    }
+  }
+}

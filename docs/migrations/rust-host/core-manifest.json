@@ -1,0 +1,2373 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "402dd25553185f39df56ca0014a1916a58c57a8e",
+  "hashPolicy": "SHA-256 of immutable Git blob bytes plus SHA-256 after CRLF-to-LF only for valid UTF-8. Binary bytes remain exact. Verifier accepts LF/CRLF checkout conversion and rejects every other byte change.",
+  "roots": [
+    "electron/error-logger.ts",
+    "electron/glass-region.ts",
+    "electron/inject.ts",
+    "electron/main.ts",
+    "electron/preload-webview.ts",
+    "electron/preload-webview/answer-applier.ts",
+    "electron/preload-webview/answer-matcher.ts",
+    "electron/preload-webview/applied-answer-store.ts",
+    "electron/preload-webview/bridge.ts",
+    "electron/preload-webview/chaoxing-chapter-api.ts",
+    "electron/preload-webview/dom-utils.ts",
+    "electron/preload-webview/exam-flow.ts",
+    "electron/preload-webview/font-decode.ts",
+    "electron/preload-webview/interaction.ts",
+    "electron/preload-webview/navigation.ts",
+    "electron/preload-webview/page-bridge.ts",
+    "electron/preload-webview/question-extractor.ts",
+    "electron/preload-webview/question-reference.ts",
+    "electron/preload-webview/snapshot.ts",
+    "electron/preload-webview/submit-sync.ts",
+    "electron/preload-webview/types.ts",
+    "electron/preload.ts",
+    "electron/web-ai-task-resources.ts",
+    "src/App.tsx",
+    "src/MobileApp.tsx",
+    "src/android-webview-bridge.ts",
+    "src/answerActivity/AnswerActivityLayer.tsx",
+    "src/answerActivity/activityStore.ts",
+    "src/answerActivity/answer-activity.css",
+    "src/answerActivity/assets/crying-pixel-cat.png",
+    "src/answerActivity/feedbackAudio.ts",
+    "src/components/AIPanel.tsx",
+    "src/components/AndroidTaskSettings.tsx",
+    "src/components/AnnouncementBanner.tsx",
+    "src/components/BrowserPanel.tsx",
+    "src/components/BugReportPanel.tsx",
+    "src/components/DockSettings.tsx",
+    "src/components/HistoryPanel.tsx",
+    "src/components/KnowledgeBase.tsx",
+    "src/components/MobileToolDock.tsx",
+    "src/components/SettingsPanel.tsx",
+    "src/components/TokenUsagePanel.tsx",
+    "src/components/TutorialPanel.tsx",
+    "src/components/dockAdaptive.css",
+    "src/components/knowledgeAnswer.ts",
+    "src/components/tutorial.css",
+    "src/desktop/desktop.css",
+    "src/desktop/glassSource.ts",
+    "src/desktop/usePanelBackdrop.ts",
+    "src/index.css",
+    "src/main.tsx",
+    "src/mobile.css",
+    "src/mobile/continuousCapture.ts",
+    "src/mobile/dissolve.ts",
+    "src/mobile/dock.css",
+    "src/mobile/dockPhysics.ts",
+    "src/mobile/glassRenderer.ts",
+    "src/mobile/lensDisplacement.ts",
+    "src/mobile/taskStatus.ts",
+    "src/mobile/useBackgroundTask.ts",
+    "src/mobile/useDockGlass.ts",
+    "src/mobile/useToolDissolve.ts",
+    "src/platform/androidBrowser.ts",
+    "src/platform/capacitorBridge.ts",
+    "src/platform/electronBridge.ts",
+    "src/platform/index.ts",
+    "src/platform/nativeWebViewPlugin.ts",
+    "src/platform/taskStatusPlugin.ts",
+    "src/platform/types.ts",
+    "src/store/appStore.ts",
+    "src/ui/dockPreferences.ts",
+    "src/ui/dockState.ts",
+    "src/ui/useAdaptiveDock.ts",
+    "src/utils/aiRequest.ts",
+    "src/webAI/WebAIController.ts",
+    "src/webAI/WebAISessionManager.ts",
+    "src/webAI/WebAIWorkflow.tsx",
+    "src/webAI/browserBridge.ts",
+    "src/webAI/composerText.ts",
+    "src/webAI/pageMonitor.ts",
+    "src/webAI/pageRequests.ts",
+    "src/webAI/protocol.ts",
+    "src/webAI/questionContext.ts",
+    "src/webAI/questionMedia.ts",
+    "src/webAI/sendPrompt.ts",
+    "src/webAI/useBrowserBridge.ts",
+    "src/webAI/web-ai.css",
+    "tests/adaptive-dock.test.ts",
+    "tests/android-browser.test.ts",
+    "tests/answer-activity.test.ts",
+    "tests/answer-applier.test.ts",
+    "tests/answer-matcher.test.ts",
+    "tests/appstore.test.ts",
+    "tests/desktop-glass.test.ts",
+    "tests/dom-utils.test.ts",
+    "tests/helpers/answer-dom.ts",
+    "tests/installer-migration.Tests.ps1",
+    "tests/knowledge-answer.test.ts",
+    "tests/mobile-dock-physics.test.ts",
+    "tests/mobile-glass-refresh.test.ts",
+    "tests/mobile-task-status.test.ts",
+    "tests/page-bridge.test.ts",
+    "tests/question-context.test.ts",
+    "tests/question-extractor.test.ts",
+    "tests/question-reference.test.ts",
+    "tests/web-ai-controller.test.ts",
+    "tests/web-ai-login.test.ts",
+    "tests/web-ai-media.test.ts",
+    "tests/web-ai-monitor.test.ts",
+    "tests/web-ai-page-requests.test.ts",
+    "tests/web-ai-protocol.test.ts",
+    "tests/web-ai-send.test.ts",
+    "tests/web-ai-sessions.test.ts",
+    "tests/web-ai-task-resources.test.ts",
+    "tests/web-ai.test.ts"
+  ],
+  "strictDirectories": [
+    "src/webAI/",
+    "src/utils/",
+    "electron/preload-webview/"
+  ],
+  "files": [
+    {
+      "path": "electron/error-logger.ts",
+      "bytes": 3349,
+      "gitBlob": "54fc1213a2e9797afbd968fdabade26c0bc014f3",
+      "sha256": "c3dab97feef685ed1a686eaaa7848a2d72143ac28d4b2e8a2089aad3d1ac8536",
+      "canonicalSha256": "c3dab97feef685ed1a686eaaa7848a2d72143ac28d4b2e8a2089aad3d1ac8536",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/glass-region.ts",
+      "bytes": 999,
+      "gitBlob": "0bc1713c995b8f09f80e15cca1e30a7d4e88cc6e",
+      "sha256": "50fc69ea3356d86119f24d0ba93c5dfa35710deddc81c8bce2e1d777763acabd",
+      "canonicalSha256": "50fc69ea3356d86119f24d0ba93c5dfa35710deddc81c8bce2e1d777763acabd",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/inject.ts",
+      "bytes": 242,
+      "gitBlob": "7bd9d94419c18e7be9ed44383ebb4d113acf684e",
+      "sha256": "92ae69c931465e368ef5530d1bd68e267cd923ecb9d1351f4c1657b917c4156d",
+      "canonicalSha256": "92ae69c931465e368ef5530d1bd68e267cd923ecb9d1351f4c1657b917c4156d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/main.ts",
+      "bytes": 76608,
+      "gitBlob": "d60e82f78bed78cdc2c1ddec8ae01c4135f1fa7d",
+      "sha256": "c70f3faf00ed715435771fcf133148d596b81e7595d809da2be281ecbd7adea7",
+      "canonicalSha256": "c70f3faf00ed715435771fcf133148d596b81e7595d809da2be281ecbd7adea7",
+      "role": "mixed-reference"
+    },
+    {
+      "path": "electron/preload-webview.ts",
+      "bytes": 6729,
+      "gitBlob": "a12299b41ee244b81d8048d1b42b01e90f33d132",
+      "sha256": "139d73093e66f3d6420306aece99658dc5155da1e0d8155b2f82038ff5416cfb",
+      "canonicalSha256": "139d73093e66f3d6420306aece99658dc5155da1e0d8155b2f82038ff5416cfb",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/answer-applier.ts",
+      "bytes": 49871,
+      "gitBlob": "1ea503f35d5d329f6b0d62ca5186f11e306d96a7",
+      "sha256": "1cdebfbc4fab69fd131c0bed47daca06ad8f35ea484b4363050858db9dfbcd19",
+      "canonicalSha256": "1cdebfbc4fab69fd131c0bed47daca06ad8f35ea484b4363050858db9dfbcd19",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/answer-matcher.ts",
+      "bytes": 5953,
+      "gitBlob": "a212d1591035c1c79d0d4ee00fa1132d8aa38cc5",
+      "sha256": "b412b0d14d0ca87a5a84eb028e57cf13b73899e7b75f45fe3d22d48c6928689f",
+      "canonicalSha256": "b412b0d14d0ca87a5a84eb028e57cf13b73899e7b75f45fe3d22d48c6928689f",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/applied-answer-store.ts",
+      "bytes": 766,
+      "gitBlob": "71630fdcb5a6a02016652b2f365b8d26e4608cef",
+      "sha256": "969da4bf783699e4bb9065be29353d8f414f856a97dd1cd02eb5a14fe668ce31",
+      "canonicalSha256": "969da4bf783699e4bb9065be29353d8f414f856a97dd1cd02eb5a14fe668ce31",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/bridge.ts",
+      "bytes": 1689,
+      "gitBlob": "33d70cdb604a7df08ae2f5001968babe1b17a0d3",
+      "sha256": "c0fccc3d821dd049c91de3e68fa4bcab6cd26620f57de15186b36932b25aed9a",
+      "canonicalSha256": "c0fccc3d821dd049c91de3e68fa4bcab6cd26620f57de15186b36932b25aed9a",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/chaoxing-chapter-api.ts",
+      "bytes": 672,
+      "gitBlob": "62095e97a520516b4cbf1ee5645a00a7dbfd56ab",
+      "sha256": "a00ade6813687c2fd42d07ab0d5fd6a0bc862ba739b8f871407217354dc419c5",
+      "canonicalSha256": "a00ade6813687c2fd42d07ab0d5fd6a0bc862ba739b8f871407217354dc419c5",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/dom-utils.ts",
+      "bytes": 8510,
+      "gitBlob": "a3a378bff8bc85951151aa9bb43fd86ebd5b4725",
+      "sha256": "4acfdb5ea56a76ef6fca28adf2d558974ecdcb0250cee73b4c5fd643a496f176",
+      "canonicalSha256": "4acfdb5ea56a76ef6fca28adf2d558974ecdcb0250cee73b4c5fd643a496f176",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/exam-flow.ts",
+      "bytes": 3276,
+      "gitBlob": "b8fc2f30a7bca46db3c8c347f3c2bc1dc069ad7f",
+      "sha256": "1cd86c4a80dead108b455de7891c9778414f204e5241a45dc12aa73f7baef944",
+      "canonicalSha256": "1cd86c4a80dead108b455de7891c9778414f204e5241a45dc12aa73f7baef944",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/font-decode.ts",
+      "bytes": 2478,
+      "gitBlob": "eec912cf584b4df0fa77e13b0d5e0c6ec894d1fe",
+      "sha256": "7cdd1751049cacbd318cce65e17cdacfbdc17ad3f647f1b07739c559759b3977",
+      "canonicalSha256": "7cdd1751049cacbd318cce65e17cdacfbdc17ad3f647f1b07739c559759b3977",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/interaction.ts",
+      "bytes": 1553,
+      "gitBlob": "49f172339dc8322a2fb6575e323bb5689e0f013e",
+      "sha256": "ab7582c043dd48e2530b9a4b2cf7884f8f2294c6a5871f567c9b70761ce45142",
+      "canonicalSha256": "ab7582c043dd48e2530b9a4b2cf7884f8f2294c6a5871f567c9b70761ce45142",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/navigation.ts",
+      "bytes": 42943,
+      "gitBlob": "d7cdad0557d9c66a857f6df0e0d0bb61f5a22541",
+      "sha256": "ee92a4f6ed5a1d7f78128829fbd4933639e018b5b3dac2db188a407dab010085",
+      "canonicalSha256": "ee92a4f6ed5a1d7f78128829fbd4933639e018b5b3dac2db188a407dab010085",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/page-bridge.ts",
+      "bytes": 6813,
+      "gitBlob": "266ad980176f2795cd80949fbe6a16fede756908",
+      "sha256": "830fc8838a47ff1b452bf8d8ac3449fa6ce448b5135a5efba6f647734f31edc2",
+      "canonicalSha256": "830fc8838a47ff1b452bf8d8ac3449fa6ce448b5135a5efba6f647734f31edc2",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/question-extractor.ts",
+      "bytes": 45720,
+      "gitBlob": "e3ca7d83c31ba1a5ac8096d4b7a20f941f30eafa",
+      "sha256": "904f80a137fdf28189fa4a132af582744397812d36c115018882a86a02bc745e",
+      "canonicalSha256": "904f80a137fdf28189fa4a132af582744397812d36c115018882a86a02bc745e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/question-reference.ts",
+      "bytes": 14617,
+      "gitBlob": "913b7bd9d8993691934f11912475ca91588b1890",
+      "sha256": "ab9ff0b4a192a3db591ed2e8e3d5f7cf4596073f574e1f40ad2fbb53546c5157",
+      "canonicalSha256": "ab9ff0b4a192a3db591ed2e8e3d5f7cf4596073f574e1f40ad2fbb53546c5157",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/snapshot.ts",
+      "bytes": 853,
+      "gitBlob": "bcd658eac75d964ab3823ed0c942b4a51c9f88fd",
+      "sha256": "508992fa95dc08015b432d894614eb51c31de18a0a5841dbcebe46040e1fa466",
+      "canonicalSha256": "508992fa95dc08015b432d894614eb51c31de18a0a5841dbcebe46040e1fa466",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/submit-sync.ts",
+      "bytes": 10457,
+      "gitBlob": "3cb2ae287072ec65903d187ebd29322f6387225f",
+      "sha256": "5c9b1ebff786bc645fe775c8903232fc5d7a55d4c3535c03d6229b47ad5fbdf7",
+      "canonicalSha256": "5c9b1ebff786bc645fe775c8903232fc5d7a55d4c3535c03d6229b47ad5fbdf7",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload-webview/types.ts",
+      "bytes": 1596,
+      "gitBlob": "8ac49f96f99b40cb57e86d912edb8a7bb408dde5",
+      "sha256": "21bcd80e694b23b0a87130d5ad5e59b1910034c5c41701c0204c76c1860b871d",
+      "canonicalSha256": "21bcd80e694b23b0a87130d5ad5e59b1910034c5c41701c0204c76c1860b871d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/preload.ts",
+      "bytes": 5871,
+      "gitBlob": "a91e71bd01cfd8a835ac1cec5879bd33ea2a3b2b",
+      "sha256": "2e0b8f7841739d159f354dd02ef584cc2b7716f34aa4f729fd16da1f58b7e49e",
+      "canonicalSha256": "2e0b8f7841739d159f354dd02ef584cc2b7716f34aa4f729fd16da1f58b7e49e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "electron/web-ai-task-resources.ts",
+      "bytes": 27356,
+      "gitBlob": "690c307a1c904ab4118033aeb46d88af4fb865bd",
+      "sha256": "06cab52605181a8c33bc855dab4f5707d8ebddf17771cce177302adc12b14050",
+      "canonicalSha256": "06cab52605181a8c33bc855dab4f5707d8ebddf17771cce177302adc12b14050",
+      "role": "mixed-reference"
+    },
+    {
+      "path": "src/App.tsx",
+      "bytes": 20486,
+      "gitBlob": "3c6731fc30a5b81d620e3c4cdfa8baf232c65184",
+      "sha256": "6d61a64af20151e2feba099c0e6c052472dc122275dcbd0fb5f7e1fd523f6c70",
+      "canonicalSha256": "6d61a64af20151e2feba099c0e6c052472dc122275dcbd0fb5f7e1fd523f6c70",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/MobileApp.tsx",
+      "bytes": 20403,
+      "gitBlob": "3f6144fca5f0c69dab1b2b000b9fc87413d9fd69",
+      "sha256": "5fb17f9ebf3b1b8cd5df4b8d40168da2f6fc7865e379610ea3a2ca90e9b6a91d",
+      "canonicalSha256": "5fb17f9ebf3b1b8cd5df4b8d40168da2f6fc7865e379610ea3a2ca90e9b6a91d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/android-webview-bridge.ts",
+      "bytes": 4633,
+      "gitBlob": "8c67c14a9d93273596ab41087235cfaf90e9c24f",
+      "sha256": "98c9e3816cb357f6f53f955ad6f35aea26fc1cba8ad064fcb8a52f0d1ecc6737",
+      "canonicalSha256": "98c9e3816cb357f6f53f955ad6f35aea26fc1cba8ad064fcb8a52f0d1ecc6737",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/answerActivity/AnswerActivityLayer.tsx",
+      "bytes": 11546,
+      "gitBlob": "bcb8fa1955137a56c69006027ac3c2a56e605888",
+      "sha256": "3875049044e6b188f110d47bc907766d54121a5ad770dd940103fe293578079b",
+      "canonicalSha256": "3875049044e6b188f110d47bc907766d54121a5ad770dd940103fe293578079b",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/answerActivity/activityStore.ts",
+      "bytes": 9082,
+      "gitBlob": "d0ca6c3d191a4049a8562f093126c933dbffd70b",
+      "sha256": "2b057978f9c59f5198c1ab3b1168fd1eb07240c773073227fc208e9a17f099dd",
+      "canonicalSha256": "2b057978f9c59f5198c1ab3b1168fd1eb07240c773073227fc208e9a17f099dd",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/answerActivity/answer-activity.css",
+      "bytes": 7135,
+      "gitBlob": "8145ffb0ed515e095cfc5400eae91295b81ee1e3",
+      "sha256": "a7048a05fdb74d29b5361c99713274da62d5e639a742bc3621a70e1bd3d1c59e",
+      "canonicalSha256": "a7048a05fdb74d29b5361c99713274da62d5e639a742bc3621a70e1bd3d1c59e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/answerActivity/assets/crying-pixel-cat.png",
+      "bytes": 505,
+      "gitBlob": "8384c46fec2d221296885c718071358bae81f7a6",
+      "sha256": "3fea7f2567933cc846feafb40788e088722d9cc2836f89cb9fbdd286101ba7c8",
+      "canonicalSha256": "3fea7f2567933cc846feafb40788e088722d9cc2836f89cb9fbdd286101ba7c8",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/answerActivity/feedbackAudio.ts",
+      "bytes": 3108,
+      "gitBlob": "3082a5834187a96779a8aa44e2ca38c664cb366e",
+      "sha256": "e5f956adf892be66a6d3f459fd188fbf1ceb0e3199047e2d0ef0b3e6512e1ef7",
+      "canonicalSha256": "e5f956adf892be66a6d3f459fd188fbf1ceb0e3199047e2d0ef0b3e6512e1ef7",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/AIPanel.tsx",
+      "bytes": 52801,
+      "gitBlob": "9aba68f2d3e302da978c7089770fbaca70ad85ce",
+      "sha256": "d0bd063d1202c29474363fc567768452987b6577d87b1ea44f21c9663dba7907",
+      "canonicalSha256": "d0bd063d1202c29474363fc567768452987b6577d87b1ea44f21c9663dba7907",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/AndroidTaskSettings.tsx",
+      "bytes": 3262,
+      "gitBlob": "72c26a077df84a36b7da3a3cd98109ec69e05bfb",
+      "sha256": "3e803febac3ab6b2149ee2c64ebf86879564c3ee9581df9b391a33354eab700d",
+      "canonicalSha256": "3e803febac3ab6b2149ee2c64ebf86879564c3ee9581df9b391a33354eab700d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/AnnouncementBanner.tsx",
+      "bytes": 5575,
+      "gitBlob": "a130e724bd99e25f5f7241f99c15f5e46688e9b8",
+      "sha256": "0ea419c222cbe04f09cc2766910ec57849a41ae2bb5d62f70e13a705956a060b",
+      "canonicalSha256": "0ea419c222cbe04f09cc2766910ec57849a41ae2bb5d62f70e13a705956a060b",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/BrowserPanel.tsx",
+      "bytes": 66940,
+      "gitBlob": "da952473dcec6628071b3f4ff4a32d39ab8513d5",
+      "sha256": "74323b00e47413f48a66016333802eb000d276b7aac5331ced14a33c25667517",
+      "canonicalSha256": "74323b00e47413f48a66016333802eb000d276b7aac5331ced14a33c25667517",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/BugReportPanel.tsx",
+      "bytes": 8539,
+      "gitBlob": "6ab6389a5b38a16546148e64c4398d028752dff2",
+      "sha256": "02eee67e92f36d14a2408bf28ee8dba2b783c987afd86331c5cfc46fcd55a57e",
+      "canonicalSha256": "02eee67e92f36d14a2408bf28ee8dba2b783c987afd86331c5cfc46fcd55a57e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/DockSettings.tsx",
+      "bytes": 2497,
+      "gitBlob": "925ccd7ca2b42dc3f425dfccbe3b2dc0e83dcdec",
+      "sha256": "aa9c17b2d489fcce94c1e5d5cf8f18e2bdfcd7ace447d0b2b951403e0c2b9172",
+      "canonicalSha256": "aa9c17b2d489fcce94c1e5d5cf8f18e2bdfcd7ace447d0b2b951403e0c2b9172",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/HistoryPanel.tsx",
+      "bytes": 4797,
+      "gitBlob": "7b02f487aa7cb58d8e5644931fd4109e23abdde9",
+      "sha256": "d95c63479cfb28f266e6c0ca3d760a2c8da5b09d8dab5ac3711d2d07dc7249ef",
+      "canonicalSha256": "d95c63479cfb28f266e6c0ca3d760a2c8da5b09d8dab5ac3711d2d07dc7249ef",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/KnowledgeBase.tsx",
+      "bytes": 17981,
+      "gitBlob": "431f9d9fe15c4fde9520962bc459172e202a9faa",
+      "sha256": "5465fec3b0bd5f88703957cf90d4c5d631eff90b2aa90412a81e7735fdcc6b64",
+      "canonicalSha256": "5465fec3b0bd5f88703957cf90d4c5d631eff90b2aa90412a81e7735fdcc6b64",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/MobileToolDock.tsx",
+      "bytes": 15930,
+      "gitBlob": "c0200061d12ad9c63bbe917a8b4af19c28f605fe",
+      "sha256": "2b42dda60d8b800df3b16f78ffe35789f27fa65315f27338757c8cbb16127962",
+      "canonicalSha256": "2b42dda60d8b800df3b16f78ffe35789f27fa65315f27338757c8cbb16127962",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/SettingsPanel.tsx",
+      "bytes": 61245,
+      "gitBlob": "a14d616762ebec23fac7b5fc04c2cfec4f984c43",
+      "sha256": "851d44c47a2379fad090850d88efa8d2bc7a1981e9048763e4d256325d9a19af",
+      "canonicalSha256": "851d44c47a2379fad090850d88efa8d2bc7a1981e9048763e4d256325d9a19af",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/TokenUsagePanel.tsx",
+      "bytes": 13106,
+      "gitBlob": "201f457fa95a1bd382f36ee7250c0ab0bd7bc050",
+      "sha256": "0eaf3e7c442deea99098d0781a067b9b9c3571186cbb1ba8d6e92e38ad52e2da",
+      "canonicalSha256": "0eaf3e7c442deea99098d0781a067b9b9c3571186cbb1ba8d6e92e38ad52e2da",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/TutorialPanel.tsx",
+      "bytes": 15015,
+      "gitBlob": "310922bb66e837179e91fa027ca87f0158866bd0",
+      "sha256": "04bb92392545aa8984c04e4b73606619a11a30964775d2da32c7dad0231ae1d2",
+      "canonicalSha256": "04bb92392545aa8984c04e4b73606619a11a30964775d2da32c7dad0231ae1d2",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/dockAdaptive.css",
+      "bytes": 6759,
+      "gitBlob": "f4a560b3d17dc7c83127e5afb59951d664ec2055",
+      "sha256": "58bc53b92d369a9c73aa99d338dbe2a2ecd8d3bb32af790c5b10ed42206fcdf8",
+      "canonicalSha256": "58bc53b92d369a9c73aa99d338dbe2a2ecd8d3bb32af790c5b10ed42206fcdf8",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/knowledgeAnswer.ts",
+      "bytes": 3596,
+      "gitBlob": "ce852fbe459c82f9df926e8864b6827369ac08bc",
+      "sha256": "c1090576d1a1257a9bbd14ebcdbb75c76a067f41e6e197a0dbdf2a02872acea9",
+      "canonicalSha256": "c1090576d1a1257a9bbd14ebcdbb75c76a067f41e6e197a0dbdf2a02872acea9",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/components/tutorial.css",
+      "bytes": 4901,
+      "gitBlob": "6f78d06c6ae21ca9913346fa94d32fe6ad80ed67",
+      "sha256": "0e61c037211246663167bfa4cce19f0e26a244f61f700f7fd1eed1de8d8c795d",
+      "canonicalSha256": "0e61c037211246663167bfa4cce19f0e26a244f61f700f7fd1eed1de8d8c795d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/desktop/desktop.css",
+      "bytes": 9063,
+      "gitBlob": "e407df94ac1978eead83664580ff5535aa719232",
+      "sha256": "795470913992ecd43679eb9312f988c19abe67a6ca7b9b0c3178040ff65d8f50",
+      "canonicalSha256": "795470913992ecd43679eb9312f988c19abe67a6ca7b9b0c3178040ff65d8f50",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/desktop/glassSource.ts",
+      "bytes": 1526,
+      "gitBlob": "34a9c2cd46dd5ddebcc72218022c11d41445114c",
+      "sha256": "5867386d50ea5f697c2faf46fb3f04cfd8ce9e223113f3dd35d07d7d85569d3c",
+      "canonicalSha256": "5867386d50ea5f697c2faf46fb3f04cfd8ce9e223113f3dd35d07d7d85569d3c",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/desktop/usePanelBackdrop.ts",
+      "bytes": 1707,
+      "gitBlob": "8ee11bad4d6c5c171cd3c83582176c925269de0f",
+      "sha256": "a5594b7b203745032baf9db55cef1dec36e7f956e75b09f30f3afcc6fe60a0e7",
+      "canonicalSha256": "a5594b7b203745032baf9db55cef1dec36e7f956e75b09f30f3afcc6fe60a0e7",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/index.css",
+      "bytes": 72815,
+      "gitBlob": "0495d6c714cf393acf4b750f4664193902e93828",
+      "sha256": "c8b7bc79a72e2f2327291dc078c26b444984a0584d8fe15a123dabf6513ac091",
+      "canonicalSha256": "c8b7bc79a72e2f2327291dc078c26b444984a0584d8fe15a123dabf6513ac091",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/main.tsx",
+      "bytes": 786,
+      "gitBlob": "4144eadb994a9bee62673200d8be9e189d138ded",
+      "sha256": "0f1c2186c04b7749195a8a2261062ac0ea30bcfb2a3d07571e7793889f69ddb3",
+      "canonicalSha256": "0f1c2186c04b7749195a8a2261062ac0ea30bcfb2a3d07571e7793889f69ddb3",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile.css",
+      "bytes": 18080,
+      "gitBlob": "4147c9464f3c5b1c07ee246b69cafd0e28e0d864",
+      "sha256": "0edf1a0d524bdbdd323a61f625146e67af2aa866acd7f6d1e81146d8986f6caf",
+      "canonicalSha256": "0edf1a0d524bdbdd323a61f625146e67af2aa866acd7f6d1e81146d8986f6caf",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/continuousCapture.ts",
+      "bytes": 925,
+      "gitBlob": "1b098a0b24a79ad28a6028417fdeb3635f000cda",
+      "sha256": "2e52fd63ebccd1d6e29074586ace736ad4023a4ee94c79f81a6faf448e9bd904",
+      "canonicalSha256": "2e52fd63ebccd1d6e29074586ace736ad4023a4ee94c79f81a6faf448e9bd904",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/dissolve.ts",
+      "bytes": 3611,
+      "gitBlob": "cbd6070796c238e39e39cc6204b653a8c006bf63",
+      "sha256": "51906b7d5af0aa1ce0d34cc32904726db1f1aafdd796422ae1b2db4083d54111",
+      "canonicalSha256": "51906b7d5af0aa1ce0d34cc32904726db1f1aafdd796422ae1b2db4083d54111",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/dock.css",
+      "bytes": 4939,
+      "gitBlob": "4536aeedb2d5e91a1f2c07fbb72ee812583d5b14",
+      "sha256": "a825e421680492da3f148134ebe93a69729290a52d197af384a8cb17c947498b",
+      "canonicalSha256": "a825e421680492da3f148134ebe93a69729290a52d197af384a8cb17c947498b",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/dockPhysics.ts",
+      "bytes": 2003,
+      "gitBlob": "0ff49801612b4d5d071fd0eabbc8a0a3ec90dd1e",
+      "sha256": "6c605b0a6544609745658b18901e9114ba5e615f9b10aa2db4caf9a29e40f0b0",
+      "canonicalSha256": "6c605b0a6544609745658b18901e9114ba5e615f9b10aa2db4caf9a29e40f0b0",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/glassRenderer.ts",
+      "bytes": 7949,
+      "gitBlob": "5b17e5d091e5fe29ba544ec300160182ae9fbffa",
+      "sha256": "56581eec236ada2ff8e58debd6f1db1f2f944ba904fbbc5f5a25446a0cf58ac6",
+      "canonicalSha256": "56581eec236ada2ff8e58debd6f1db1f2f944ba904fbbc5f5a25446a0cf58ac6",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/lensDisplacement.ts",
+      "bytes": 708,
+      "gitBlob": "7af9660d04c01db49ce9e3bb3d6c512e895d5471",
+      "sha256": "5788807e08c3488fbc84807ca47833210d21c18cfc1a666a94438afaa01f1cb8",
+      "canonicalSha256": "5788807e08c3488fbc84807ca47833210d21c18cfc1a666a94438afaa01f1cb8",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/taskStatus.ts",
+      "bytes": 2245,
+      "gitBlob": "881aa5c2eaef351ec59360c86a877e5672651451",
+      "sha256": "36fd820b50681e047b0b31ee737971f2845bd1aa7a7cf7c08f07401f2bdca438",
+      "canonicalSha256": "36fd820b50681e047b0b31ee737971f2845bd1aa7a7cf7c08f07401f2bdca438",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/useBackgroundTask.ts",
+      "bytes": 2644,
+      "gitBlob": "5c52f25cf3871487ed708032444555f9ddda7ea4",
+      "sha256": "e9801539fb5b4b376abc5863254ba74648a113b9905de1668fac00e7130ce782",
+      "canonicalSha256": "e9801539fb5b4b376abc5863254ba74648a113b9905de1668fac00e7130ce782",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/useDockGlass.ts",
+      "bytes": 14028,
+      "gitBlob": "35195bbc22eb62633dfe05bce53b80e08d13f026",
+      "sha256": "873b400afdfc63de86202c29dae510120ca308570198e14279003123c6eb2485",
+      "canonicalSha256": "873b400afdfc63de86202c29dae510120ca308570198e14279003123c6eb2485",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/mobile/useToolDissolve.ts",
+      "bytes": 3279,
+      "gitBlob": "76aedfdc9c75ac94052f8e7f81670d658098b29b",
+      "sha256": "a03a98a4aa4b6489ea62a7fed52f3c8112c8183b93c85cc55fb9c159fb87f06c",
+      "canonicalSha256": "a03a98a4aa4b6489ea62a7fed52f3c8112c8183b93c85cc55fb9c159fb87f06c",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/androidBrowser.ts",
+      "bytes": 6116,
+      "gitBlob": "abdc2f45346135353232db0174013bf9b2e3219a",
+      "sha256": "e0c6c508e501efd650ba613e50c3578675eb25cf043fd7d950a15cc69df8935e",
+      "canonicalSha256": "e0c6c508e501efd650ba613e50c3578675eb25cf043fd7d950a15cc69df8935e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/capacitorBridge.ts",
+      "bytes": 9128,
+      "gitBlob": "0a1ff2731120a8992f75b8fa71d89598817178bd",
+      "sha256": "2633499c8332d1eab6a7238a5000c9a5f9c273cc534b6a1cc6f5ee80dddacc7d",
+      "canonicalSha256": "2633499c8332d1eab6a7238a5000c9a5f9c273cc534b6a1cc6f5ee80dddacc7d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/electronBridge.ts",
+      "bytes": 2537,
+      "gitBlob": "3109dce37736a054c27f6228e58c3400dec26b59",
+      "sha256": "cbba85a964ff650f845396b75c69ce8f7266b7b383e12e8108335ca40a47f11e",
+      "canonicalSha256": "cbba85a964ff650f845396b75c69ce8f7266b7b383e12e8108335ca40a47f11e",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/index.ts",
+      "bytes": 831,
+      "gitBlob": "d501a2d95a3fc31345f6967820e1964e1efd268d",
+      "sha256": "62641a5a2d91deea0b6687bd6cd0eb53b25d525a00f867af8b7beedf07e87205",
+      "canonicalSha256": "62641a5a2d91deea0b6687bd6cd0eb53b25d525a00f867af8b7beedf07e87205",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/nativeWebViewPlugin.ts",
+      "bytes": 5715,
+      "gitBlob": "d266a5fdab8b4b691e9453274e95b744a8985448",
+      "sha256": "f01f1f076d793a24fb760a12a8b6a536005259ff3f260f2728e50b969b6c7608",
+      "canonicalSha256": "f01f1f076d793a24fb760a12a8b6a536005259ff3f260f2728e50b969b6c7608",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/taskStatusPlugin.ts",
+      "bytes": 971,
+      "gitBlob": "b2e2e220d766c9b9760a4f909dd2cb04d881e6cf",
+      "sha256": "dcfabfd741f396cb0f360d8c14b334c2186413ac587f639e0179071930de1994",
+      "canonicalSha256": "dcfabfd741f396cb0f360d8c14b334c2186413ac587f639e0179071930de1994",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/platform/types.ts",
+      "bytes": 2115,
+      "gitBlob": "7a68dec7bf74e5fc7e8e216dec031ef46f67a5bc",
+      "sha256": "6efb91bb0676894b9ffb85bd7b22843664c544801f7cd9850b4e483f27589fb4",
+      "canonicalSha256": "6efb91bb0676894b9ffb85bd7b22843664c544801f7cd9850b4e483f27589fb4",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/store/appStore.ts",
+      "bytes": 63699,
+      "gitBlob": "466c173adfb126933af0a9b5211d06683910698a",
+      "sha256": "585ad2c17787ae1523c9df1515c6b6264327a68bc716ba734dda264c12f49a04",
+      "canonicalSha256": "585ad2c17787ae1523c9df1515c6b6264327a68bc716ba734dda264c12f49a04",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/ui/dockPreferences.ts",
+      "bytes": 1354,
+      "gitBlob": "717c78aa50d0ad0a20d45ce471b6cfeb34d15fae",
+      "sha256": "a3526baa7636fd6d48bc9d05a52cb4a78da0cba66548cc04b3a333f82730bd01",
+      "canonicalSha256": "a3526baa7636fd6d48bc9d05a52cb4a78da0cba66548cc04b3a333f82730bd01",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/ui/dockState.ts",
+      "bytes": 1946,
+      "gitBlob": "a420be53e46d1c7d1bb47ad0ccc9630d49335f50",
+      "sha256": "0424683eebefce14cc10fbe6a3bbb52d46697a2489c703fed39abf2290633f21",
+      "canonicalSha256": "0424683eebefce14cc10fbe6a3bbb52d46697a2489c703fed39abf2290633f21",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/ui/useAdaptiveDock.ts",
+      "bytes": 3205,
+      "gitBlob": "059ad14f7771d81e4438871928ca553da988cca4",
+      "sha256": "4da791f72d116f86fbb1dd0ae8dc69267a3cb657467db918d545c970224b8dfe",
+      "canonicalSha256": "4da791f72d116f86fbb1dd0ae8dc69267a3cb657467db918d545c970224b8dfe",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/utils/aiRequest.ts",
+      "bytes": 5659,
+      "gitBlob": "0c637ecb6247dae8a3ce931765f8ff67ea4dedfe",
+      "sha256": "62d54fdb754714d7e15f8bd2a5a080c62f8c71f8b707fd2c5b71862ff5b78a03",
+      "canonicalSha256": "62d54fdb754714d7e15f8bd2a5a080c62f8c71f8b707fd2c5b71862ff5b78a03",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/WebAIController.ts",
+      "bytes": 43244,
+      "gitBlob": "7f3325e11606b1d82b53834fb49a4ded8293e4d7",
+      "sha256": "64cacc4128fa6ac541ac6c4076afe2c8708efc9c82b94965586e2f7e18a44ddd",
+      "canonicalSha256": "64cacc4128fa6ac541ac6c4076afe2c8708efc9c82b94965586e2f7e18a44ddd",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/WebAISessionManager.ts",
+      "bytes": 7762,
+      "gitBlob": "c6c73aff29c95a688ebaef8a716cb917b0073709",
+      "sha256": "ea2ffe229b97b346d43ba241c4cd45d0d91131e1b1fd40caf86931caddb1d772",
+      "canonicalSha256": "ea2ffe229b97b346d43ba241c4cd45d0d91131e1b1fd40caf86931caddb1d772",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/WebAIWorkflow.tsx",
+      "bytes": 22079,
+      "gitBlob": "2eb34181937c6fc397a086120abc4a052d2db0ad",
+      "sha256": "6099883985a91a129b743e8b2097578f85d0e5ba695c6934444ad96ed42f0778",
+      "canonicalSha256": "6099883985a91a129b743e8b2097578f85d0e5ba695c6934444ad96ed42f0778",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/browserBridge.ts",
+      "bytes": 22827,
+      "gitBlob": "71c0c65cd7053d6c8a312605767d2dd90b797d1e",
+      "sha256": "654d17ab5f3488abec73e32e92e0a9831a23ab9f5ba15d80d1e50972375b8660",
+      "canonicalSha256": "654d17ab5f3488abec73e32e92e0a9831a23ab9f5ba15d80d1e50972375b8660",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/composerText.ts",
+      "bytes": 1097,
+      "gitBlob": "b728fb4cf734109eb74dd2e9d555b96559689a51",
+      "sha256": "943b7ceb0c18c27f55c05cc7fd5445e1878dc46a1d3f37633e5b321b97ef65e6",
+      "canonicalSha256": "943b7ceb0c18c27f55c05cc7fd5445e1878dc46a1d3f37633e5b321b97ef65e6",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/pageMonitor.ts",
+      "bytes": 3958,
+      "gitBlob": "9f3f72c2b7dc088054c78cc43df71164e6749526",
+      "sha256": "23fb721bd061ecb973ea8c80b3076a1655ee51e80356a33539fa5cc6e01394a8",
+      "canonicalSha256": "23fb721bd061ecb973ea8c80b3076a1655ee51e80356a33539fa5cc6e01394a8",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/pageRequests.ts",
+      "bytes": 4544,
+      "gitBlob": "2ac2df9f73d9629cdd6c6e712ba903d553a1b8fc",
+      "sha256": "16de32dc2222221055124bbdfcce7bcde0ccaf2b013acff6ab44c43ea5f2879f",
+      "canonicalSha256": "16de32dc2222221055124bbdfcce7bcde0ccaf2b013acff6ab44c43ea5f2879f",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/protocol.ts",
+      "bytes": 16181,
+      "gitBlob": "b4e7fb82c9cd838212463076dde92e6187a5403a",
+      "sha256": "55132e038ad1c279888be2bbcb1ea12f9c14e65715577ec6ccbf8bb7cfeae33c",
+      "canonicalSha256": "55132e038ad1c279888be2bbcb1ea12f9c14e65715577ec6ccbf8bb7cfeae33c",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/questionContext.ts",
+      "bytes": 3460,
+      "gitBlob": "e640a69ab6bfe95cd0344431190604a7de8763ea",
+      "sha256": "b5f48740cc10a40faf4b298e01008c3831bf905ce78a8bd90ca4eda4687ca929",
+      "canonicalSha256": "b5f48740cc10a40faf4b298e01008c3831bf905ce78a8bd90ca4eda4687ca929",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/questionMedia.ts",
+      "bytes": 3801,
+      "gitBlob": "daad70b65fadbabf14151c2c3cbf2d1a6c51401e",
+      "sha256": "cf652f52d4b2eba303812b88311bd1f4bea7453880f8d07ba28959a952f0a20d",
+      "canonicalSha256": "cf652f52d4b2eba303812b88311bd1f4bea7453880f8d07ba28959a952f0a20d",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/sendPrompt.ts",
+      "bytes": 2509,
+      "gitBlob": "e81ac64683308126f67e014cb3c855ca1702983c",
+      "sha256": "ab593ecc4da8522bb9218c828a31b7f875e4b01368bf3d285ccf90180f93f387",
+      "canonicalSha256": "ab593ecc4da8522bb9218c828a31b7f875e4b01368bf3d285ccf90180f93f387",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/useBrowserBridge.ts",
+      "bytes": 4275,
+      "gitBlob": "b7bf92ee9123e33baecbca424e589d6381d4bca6",
+      "sha256": "8417375b8aa7e88fa38f12d2fbd2b563377400b14089ad9e86a6f4fa5a969ac0",
+      "canonicalSha256": "8417375b8aa7e88fa38f12d2fbd2b563377400b14089ad9e86a6f4fa5a969ac0",
+      "role": "frozen-source"
+    },
+    {
+      "path": "src/webAI/web-ai.css",
+      "bytes": 11562,
+      "gitBlob": "c06e9ac1df20dd9b5a656843addd95b7ab4f83d9",
+      "sha256": "ef26aa79aada238476dfc055454499edd021d9ae18eb39771376797846e49ce4",
+      "canonicalSha256": "ef26aa79aada238476dfc055454499edd021d9ae18eb39771376797846e49ce4",
+      "role": "frozen-source"
+    },
+    {
+      "path": "tests/adaptive-dock.test.ts",
+      "bytes": 3274,
+      "gitBlob": "46c9a64ca87ffeac78df0a9fbb206abd7f349f48",
+      "sha256": "6cbcf4e82734ea54e3e11b7d85bc21557921b759ec7e788f156b3fc646d8dbd0",
+      "canonicalSha256": "6cbcf4e82734ea54e3e11b7d85bc21557921b759ec7e788f156b3fc646d8dbd0",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/android-browser.test.ts",
+      "bytes": 6474,
+      "gitBlob": "22acc2d3e81c6f1c278fa5f71c54de3aacd448b4",
+      "sha256": "a9ed9c830ef95d9b21a3bbb6b6142597eaafa7e9247a04a0a35c53e33467d45b",
+      "canonicalSha256": "a9ed9c830ef95d9b21a3bbb6b6142597eaafa7e9247a04a0a35c53e33467d45b",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/answer-activity.test.ts",
+      "bytes": 7360,
+      "gitBlob": "e33f22507d29f6ed0cd8fa66de0470e1fbc8b97f",
+      "sha256": "d5a44e6848124734b67ae54837b26b63c9ada88e799b246f90d73b895ba45c16",
+      "canonicalSha256": "d5a44e6848124734b67ae54837b26b63c9ada88e799b246f90d73b895ba45c16",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/answer-applier.test.ts",
+      "bytes": 9991,
+      "gitBlob": "ff587f93b358952961328657cb2f2d3e6f95eca9",
+      "sha256": "5ca6bd376aeddb891b9145c7fa380cdb6ba47cc803776a59e0e12fbda73e8b14",
+      "canonicalSha256": "5ca6bd376aeddb891b9145c7fa380cdb6ba47cc803776a59e0e12fbda73e8b14",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/answer-matcher.test.ts",
+      "bytes": 3117,
+      "gitBlob": "268483ae2dff23e8f15bffb58b9c5f118c6a16c0",
+      "sha256": "f1069d53715a45ce2384ccdbc997cfdd1b96f1d5f249141fa55a4428882935d3",
+      "canonicalSha256": "f1069d53715a45ce2384ccdbc997cfdd1b96f1d5f249141fa55a4428882935d3",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/appstore.test.ts",
+      "bytes": 5644,
+      "gitBlob": "c57db9a73d4017631a20f1436b8579a6eb970f3c",
+      "sha256": "aaa4144731d7c6e40538a169a6a61e8d7f541475e38dac2e556f979efbfabbe0",
+      "canonicalSha256": "aaa4144731d7c6e40538a169a6a61e8d7f541475e38dac2e556f979efbfabbe0",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/desktop-glass.test.ts",
+      "bytes": 1629,
+      "gitBlob": "b7b6eaf55d41db11c6a623646a2969c2c8dd9c12",
+      "sha256": "db9c28e7a0a6845f79d08ed1e5a19ff13f7ef2fe93e8e57b46248dd5b5f4a2d0",
+      "canonicalSha256": "db9c28e7a0a6845f79d08ed1e5a19ff13f7ef2fe93e8e57b46248dd5b5f4a2d0",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/dom-utils.test.ts",
+      "bytes": 1681,
+      "gitBlob": "6de74905f5acbcdcccd3ea66ccfa5ef71a3b262e",
+      "sha256": "7a2befa4bc6d8e8d6959b97113ef28a2e7f54d456005fa33ebc19125345b837a",
+      "canonicalSha256": "7a2befa4bc6d8e8d6959b97113ef28a2e7f54d456005fa33ebc19125345b837a",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/helpers/answer-dom.ts",
+      "bytes": 3300,
+      "gitBlob": "0a294305446cf7938bb5783aca7e88895297acb0",
+      "sha256": "524d9ce890766db25d18c010c31b9a6fa96a7aee65d71fc40c097577b3a23391",
+      "canonicalSha256": "524d9ce890766db25d18c010c31b9a6fa96a7aee65d71fc40c097577b3a23391",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/installer-migration.Tests.ps1",
+      "bytes": 15193,
+      "gitBlob": "2cd4636858d4f77500fff168b83dc8f968dae307",
+      "sha256": "b52e2edd2b525c3d59b3ac7908274118d25bae47382c9d060117023cca418667",
+      "canonicalSha256": "b52e2edd2b525c3d59b3ac7908274118d25bae47382c9d060117023cca418667",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/knowledge-answer.test.ts",
+      "bytes": 4505,
+      "gitBlob": "352aa235192fdc371e0df32c5aa319098b27f36f",
+      "sha256": "163a5c47241ed907fba34e63345074a9d037442c0d7c00f45d4919ea6288b7cc",
+      "canonicalSha256": "163a5c47241ed907fba34e63345074a9d037442c0d7c00f45d4919ea6288b7cc",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/mobile-dock-physics.test.ts",
+      "bytes": 1566,
+      "gitBlob": "c13f24d14f864a41d3d47960fb6913b6e5ddc871",
+      "sha256": "00450751e3fe8257a79b105b39355cb062de9acfc3c62023383387dad732526d",
+      "canonicalSha256": "00450751e3fe8257a79b105b39355cb062de9acfc3c62023383387dad732526d",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/mobile-glass-refresh.test.ts",
+      "bytes": 4291,
+      "gitBlob": "cd920e8c35bf413a14376b1165669ad9a5d1a8a3",
+      "sha256": "c929412ad270c43f8b1b62c8836ce832f1e141af58f1e9c42661025ebbbce6be",
+      "canonicalSha256": "c929412ad270c43f8b1b62c8836ce832f1e141af58f1e9c42661025ebbbce6be",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/mobile-task-status.test.ts",
+      "bytes": 1975,
+      "gitBlob": "40f5cd01a398a5b6e19812fea93317cbef0d075d",
+      "sha256": "e6b7beddaef745638c751574aa46e139900589cde1b6f0b21f5c8ababde9f37e",
+      "canonicalSha256": "e6b7beddaef745638c751574aa46e139900589cde1b6f0b21f5c8ababde9f37e",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/page-bridge.test.ts",
+      "bytes": 1710,
+      "gitBlob": "737af63be03d0ebe7fe98fe3dda9c436b18b0ee0",
+      "sha256": "e5adb115ceaafeeea6fcb983c212ea6493ae639adcfc0c48839d5f0ad8a7badb",
+      "canonicalSha256": "e5adb115ceaafeeea6fcb983c212ea6493ae639adcfc0c48839d5f0ad8a7badb",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/question-context.test.ts",
+      "bytes": 4210,
+      "gitBlob": "7e267f7ea80b8eb829b6f46b509a8237b3057f9d",
+      "sha256": "e017996c197b45b80fa9ee22aa37bf2ae5e8d2b40649d593644793774df164b7",
+      "canonicalSha256": "e017996c197b45b80fa9ee22aa37bf2ae5e8d2b40649d593644793774df164b7",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/question-extractor.test.ts",
+      "bytes": 22446,
+      "gitBlob": "7c3fbd9c7c133537cb549325f193121558753a67",
+      "sha256": "2be375af7e716feadacdfdecc7585ab4b1283dde1941cf1bac14d1ad61285880",
+      "canonicalSha256": "2be375af7e716feadacdfdecc7585ab4b1283dde1941cf1bac14d1ad61285880",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/question-reference.test.ts",
+      "bytes": 12183,
+      "gitBlob": "6b38d0d3551844de50489dcdd08b6895d5390ccb",
+      "sha256": "95dbee1217ed5e33f9691b647329bfe74c984b6e2cc41da9ebab399cdd4870c7",
+      "canonicalSha256": "95dbee1217ed5e33f9691b647329bfe74c984b6e2cc41da9ebab399cdd4870c7",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-controller.test.ts",
+      "bytes": 44610,
+      "gitBlob": "6ac4cb06fc9c4480dc03dc11546b98eec27d88c2",
+      "sha256": "0f555265afdaae2f8cf2f8946e8f6e764867ccbc0b55773c5ede09f18ff2ac3e",
+      "canonicalSha256": "0f555265afdaae2f8cf2f8946e8f6e764867ccbc0b55773c5ede09f18ff2ac3e",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-login.test.ts",
+      "bytes": 37438,
+      "gitBlob": "b89721a0c0f0dc56f40b6f86e6334362afa54fd1",
+      "sha256": "193ba6bb760ce2aeaf98c3be39717219da42d9faad3d0b86ffb44751cf3250bb",
+      "canonicalSha256": "193ba6bb760ce2aeaf98c3be39717219da42d9faad3d0b86ffb44751cf3250bb",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-media.test.ts",
+      "bytes": 4456,
+      "gitBlob": "a53bfa82dae7a62333d7d61e971021f1d525765f",
+      "sha256": "3837ee1eef7b20bbf58efd368872b8de5d42c0735c2186927c11f0ae743e9a02",
+      "canonicalSha256": "3837ee1eef7b20bbf58efd368872b8de5d42c0735c2186927c11f0ae743e9a02",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-monitor.test.ts",
+      "bytes": 9376,
+      "gitBlob": "7c9f773831fb932414dabac3e6a200dbd363375f",
+      "sha256": "0d532ba9f01e19e770f6c28e44c56193da7bcd722fedfe790af575c9dd7288f7",
+      "canonicalSha256": "0d532ba9f01e19e770f6c28e44c56193da7bcd722fedfe790af575c9dd7288f7",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-page-requests.test.ts",
+      "bytes": 6286,
+      "gitBlob": "931597a30d2627f8f82a7688792fbe159cb9ded1",
+      "sha256": "7cc890c54f4686427524c0f874134a54e67762ba8baa37052a4665ab27c55708",
+      "canonicalSha256": "7cc890c54f4686427524c0f874134a54e67762ba8baa37052a4665ab27c55708",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-protocol.test.ts",
+      "bytes": 4774,
+      "gitBlob": "fa076517f855e90ac36bcded95ace6a315730b01",
+      "sha256": "cea3994ca3c21ee6a5a338b75cb398300fc7559412e113aaea0b203fbf7c77a3",
+      "canonicalSha256": "cea3994ca3c21ee6a5a338b75cb398300fc7559412e113aaea0b203fbf7c77a3",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-send.test.ts",
+      "bytes": 6575,
+      "gitBlob": "08a561b149b4e6f759460f2d6063b5b397a2a25c",
+      "sha256": "3329c9e193dadc2e81abab6960482bdf0e919df821af8cab7ef8bbb0596ae0b9",
+      "canonicalSha256": "3329c9e193dadc2e81abab6960482bdf0e919df821af8cab7ef8bbb0596ae0b9",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-sessions.test.ts",
+      "bytes": 8807,
+      "gitBlob": "c87d01eb8e59b0a7e99c41b07574e4ff7cc950f2",
+      "sha256": "f49aec540929403a8e8fa2e1b84baaee2774cb8f4b6032eada4d0c5fb34a0abe",
+      "canonicalSha256": "f49aec540929403a8e8fa2e1b84baaee2774cb8f4b6032eada4d0c5fb34a0abe",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai-task-resources.test.ts",
+      "bytes": 20363,
+      "gitBlob": "59fc5f250f46d464b6db05e6801c85193584428a",
+      "sha256": "8e2dc4fb236dd750a9a073773d4da79839efba8fe7ddd9f55c0420c31d0d08ea",
+      "canonicalSha256": "8e2dc4fb236dd750a9a073773d4da79839efba8fe7ddd9f55c0420c31d0d08ea",
+      "role": "existing-regression"
+    },
+    {
+      "path": "tests/web-ai.test.ts",
+      "bytes": 23046,
+      "gitBlob": "7c6c98594f6b2a1a019b15ec1839aa95c74e6a02",
+      "sha256": "0e0c3cdba7ef02542cb9916503f048a9f426554576ad5301ee5f3b643f3c0450",
+      "canonicalSha256": "0e0c3cdba7ef02542cb9916503f048a9f426554576ad5301ee5f3b643f3c0450",
+      "role": "existing-regression"
+    }
+  ],
+  "dependencyEdges": [
+    {
+      "from": "electron/main.ts",
+      "specifier": "./error-logger",
+      "to": "electron/error-logger.ts"
+    },
+    {
+      "from": "electron/main.ts",
+      "specifier": "./glass-region",
+      "to": "electron/glass-region.ts"
+    },
+    {
+      "from": "electron/main.ts",
+      "specifier": "./web-ai-task-resources",
+      "to": "electron/web-ai-task-resources.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/answer-applier",
+      "to": "electron/preload-webview/answer-applier.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/bridge",
+      "to": "electron/preload-webview/bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/exam-flow",
+      "to": "electron/preload-webview/exam-flow.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/font-decode",
+      "to": "electron/preload-webview/font-decode.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/navigation",
+      "to": "electron/preload-webview/navigation.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/question-extractor",
+      "to": "electron/preload-webview/question-extractor.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/snapshot",
+      "to": "electron/preload-webview/snapshot.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/submit-sync",
+      "to": "electron/preload-webview/submit-sync.ts"
+    },
+    {
+      "from": "electron/preload-webview.ts",
+      "specifier": "./preload-webview/types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./answer-matcher",
+      "to": "electron/preload-webview/answer-matcher.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./applied-answer-store",
+      "to": "electron/preload-webview/applied-answer-store.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./bridge",
+      "to": "electron/preload-webview/bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./interaction",
+      "to": "electron/preload-webview/interaction.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./page-bridge",
+      "to": "electron/preload-webview/page-bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./question-extractor",
+      "to": "electron/preload-webview/question-extractor.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./question-reference",
+      "to": "electron/preload-webview/question-reference.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-applier.ts",
+      "specifier": "./types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-matcher.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/answer-matcher.ts",
+      "specifier": "./types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "electron/preload-webview/chaoxing-chapter-api.ts",
+      "specifier": "./page-bridge",
+      "to": "electron/preload-webview/page-bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview/exam-flow.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/exam-flow.ts",
+      "specifier": "./interaction",
+      "to": "electron/preload-webview/interaction.ts"
+    },
+    {
+      "from": "electron/preload-webview/font-decode.ts",
+      "specifier": "./chaoxing-chapter-api",
+      "to": "electron/preload-webview/chaoxing-chapter-api.ts"
+    },
+    {
+      "from": "electron/preload-webview/navigation.ts",
+      "specifier": "./bridge",
+      "to": "electron/preload-webview/bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview/navigation.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-extractor.ts",
+      "specifier": "./answer-matcher",
+      "to": "electron/preload-webview/answer-matcher.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-extractor.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-extractor.ts",
+      "specifier": "./font-decode",
+      "to": "electron/preload-webview/font-decode.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-extractor.ts",
+      "specifier": "./question-reference",
+      "to": "electron/preload-webview/question-reference.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-extractor.ts",
+      "specifier": "./types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-reference.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/question-reference.ts",
+      "specifier": "./types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "electron/preload-webview/snapshot.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/submit-sync.ts",
+      "specifier": "./answer-matcher",
+      "to": "electron/preload-webview/answer-matcher.ts"
+    },
+    {
+      "from": "electron/preload-webview/submit-sync.ts",
+      "specifier": "./applied-answer-store",
+      "to": "electron/preload-webview/applied-answer-store.ts"
+    },
+    {
+      "from": "electron/preload-webview/submit-sync.ts",
+      "specifier": "./bridge",
+      "to": "electron/preload-webview/bridge.ts"
+    },
+    {
+      "from": "electron/preload-webview/submit-sync.ts",
+      "specifier": "./dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "electron/preload-webview/submit-sync.ts",
+      "specifier": "./question-extractor",
+      "to": "electron/preload-webview/question-extractor.ts"
+    },
+    {
+      "from": "electron/preload.ts",
+      "specifier": "./web-ai-task-resources",
+      "to": "electron/web-ai-task-resources.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/AIPanel",
+      "to": "src/components/AIPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/AnnouncementBanner",
+      "to": "src/components/AnnouncementBanner.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/BrowserPanel",
+      "to": "src/components/BrowserPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/BugReportPanel",
+      "to": "src/components/BugReportPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/HistoryPanel",
+      "to": "src/components/HistoryPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/KnowledgeBase",
+      "to": "src/components/KnowledgeBase.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/MobileToolDock",
+      "to": "src/components/MobileToolDock.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/SettingsPanel",
+      "to": "src/components/SettingsPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/TokenUsagePanel",
+      "to": "src/components/TokenUsagePanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./components/TutorialPanel",
+      "to": "src/components/TutorialPanel.tsx"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./desktop/desktop.css",
+      "to": "src/desktop/desktop.css"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./desktop/glassSource",
+      "to": "src/desktop/glassSource.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./desktop/usePanelBackdrop",
+      "to": "src/desktop/usePanelBackdrop.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./mobile/useToolDissolve",
+      "to": "src/mobile/useToolDissolve.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./ui/dockPreferences",
+      "to": "src/ui/dockPreferences.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./ui/useAdaptiveDock",
+      "to": "src/ui/useAdaptiveDock.ts"
+    },
+    {
+      "from": "src/App.tsx",
+      "specifier": "./webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/AIPanel",
+      "to": "src/components/AIPanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/AnnouncementBanner",
+      "to": "src/components/AnnouncementBanner.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/BugReportPanel",
+      "to": "src/components/BugReportPanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/HistoryPanel",
+      "to": "src/components/HistoryPanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/KnowledgeBase",
+      "to": "src/components/KnowledgeBase.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/MobileToolDock",
+      "to": "src/components/MobileToolDock.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/SettingsPanel",
+      "to": "src/components/SettingsPanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/TokenUsagePanel",
+      "to": "src/components/TokenUsagePanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./components/TutorialPanel",
+      "to": "src/components/TutorialPanel.tsx"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./mobile/continuousCapture",
+      "to": "src/mobile/continuousCapture.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./mobile/useBackgroundTask",
+      "to": "src/mobile/useBackgroundTask.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./mobile/useToolDissolve",
+      "to": "src/mobile/useToolDissolve.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./platform/androidBrowser",
+      "to": "src/platform/androidBrowser.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./platform/taskStatusPlugin",
+      "to": "src/platform/taskStatusPlugin.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./ui/dockPreferences",
+      "to": "src/ui/dockPreferences.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./ui/useAdaptiveDock",
+      "to": "src/ui/useAdaptiveDock.ts"
+    },
+    {
+      "from": "src/MobileApp.tsx",
+      "specifier": "./webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/android-webview-bridge.ts",
+      "specifier": "../electron/preload-webview/answer-applier",
+      "to": "electron/preload-webview/answer-applier.ts"
+    },
+    {
+      "from": "src/android-webview-bridge.ts",
+      "specifier": "../electron/preload-webview/exam-flow",
+      "to": "electron/preload-webview/exam-flow.ts"
+    },
+    {
+      "from": "src/android-webview-bridge.ts",
+      "specifier": "../electron/preload-webview/question-extractor",
+      "to": "electron/preload-webview/question-extractor.ts"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "../webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "./activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "./answer-activity.css",
+      "to": "src/answerActivity/answer-activity.css"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "./assets/crying-pixel-cat.png",
+      "to": "src/answerActivity/assets/crying-pixel-cat.png"
+    },
+    {
+      "from": "src/answerActivity/AnswerActivityLayer.tsx",
+      "specifier": "./feedbackAudio",
+      "to": "src/answerActivity/feedbackAudio.ts"
+    },
+    {
+      "from": "src/answerActivity/activityStore.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/AIPanel.tsx",
+      "specifier": "../platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/components/AIPanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/AIPanel.tsx",
+      "specifier": "../utils/aiRequest",
+      "to": "src/utils/aiRequest.ts"
+    },
+    {
+      "from": "src/components/AIPanel.tsx",
+      "specifier": "../webAI/WebAIWorkflow",
+      "to": "src/webAI/WebAIWorkflow.tsx"
+    },
+    {
+      "from": "src/components/AndroidTaskSettings.tsx",
+      "specifier": "../platform/taskStatusPlugin",
+      "to": "src/platform/taskStatusPlugin.ts"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../answerActivity/AnswerActivityLayer",
+      "to": "src/answerActivity/AnswerActivityLayer.tsx"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../webAI/pageRequests",
+      "to": "src/webAI/pageRequests.ts"
+    },
+    {
+      "from": "src/components/BrowserPanel.tsx",
+      "specifier": "../webAI/useBrowserBridge",
+      "to": "src/webAI/useBrowserBridge.ts"
+    },
+    {
+      "from": "src/components/BugReportPanel.tsx",
+      "specifier": "../platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/components/BugReportPanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/DockSettings.tsx",
+      "specifier": "../ui/dockPreferences",
+      "to": "src/ui/dockPreferences.ts"
+    },
+    {
+      "from": "src/components/HistoryPanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/KnowledgeBase.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/KnowledgeBase.tsx",
+      "specifier": "../webAI/WebAIWorkflow",
+      "to": "src/webAI/WebAIWorkflow.tsx"
+    },
+    {
+      "from": "src/components/KnowledgeBase.tsx",
+      "specifier": "./knowledgeAnswer",
+      "to": "src/components/knowledgeAnswer.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../mobile/dock.css",
+      "to": "src/mobile/dock.css"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../mobile/dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../mobile/useDockGlass",
+      "to": "src/mobile/useDockGlass.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../ui/dockPreferences",
+      "to": "src/ui/dockPreferences.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "../ui/dockState",
+      "to": "src/ui/dockState.ts"
+    },
+    {
+      "from": "src/components/MobileToolDock.tsx",
+      "specifier": "./dockAdaptive.css",
+      "to": "src/components/dockAdaptive.css"
+    },
+    {
+      "from": "src/components/SettingsPanel.tsx",
+      "specifier": "../platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/components/SettingsPanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/SettingsPanel.tsx",
+      "specifier": "../utils/aiRequest",
+      "to": "src/utils/aiRequest.ts"
+    },
+    {
+      "from": "src/components/SettingsPanel.tsx",
+      "specifier": "./AndroidTaskSettings",
+      "to": "src/components/AndroidTaskSettings.tsx"
+    },
+    {
+      "from": "src/components/SettingsPanel.tsx",
+      "specifier": "./DockSettings",
+      "to": "src/components/DockSettings.tsx"
+    },
+    {
+      "from": "src/components/TokenUsagePanel.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/components/TutorialPanel.tsx",
+      "specifier": "./tutorial.css",
+      "to": "src/components/tutorial.css"
+    },
+    {
+      "from": "src/components/knowledgeAnswer.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/desktop/glassSource.ts",
+      "specifier": "../mobile/useDockGlass",
+      "to": "src/mobile/useDockGlass.ts"
+    },
+    {
+      "from": "src/desktop/usePanelBackdrop.ts",
+      "specifier": "../mobile/continuousCapture",
+      "to": "src/mobile/continuousCapture.ts"
+    },
+    {
+      "from": "src/desktop/usePanelBackdrop.ts",
+      "specifier": "./glassSource",
+      "to": "src/desktop/glassSource.ts"
+    },
+    {
+      "from": "src/main.tsx",
+      "specifier": "./App",
+      "to": "src/App.tsx"
+    },
+    {
+      "from": "src/main.tsx",
+      "specifier": "./MobileApp",
+      "to": "src/MobileApp.tsx"
+    },
+    {
+      "from": "src/main.tsx",
+      "specifier": "./index.css",
+      "to": "src/index.css"
+    },
+    {
+      "from": "src/main.tsx",
+      "specifier": "./mobile.css",
+      "to": "src/mobile.css"
+    },
+    {
+      "from": "src/mobile/glassRenderer.ts",
+      "specifier": "../platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/mobile/glassRenderer.ts",
+      "specifier": "./dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "src/mobile/taskStatus.ts",
+      "specifier": "../answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/mobile/useBackgroundTask.ts",
+      "specifier": "../answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/mobile/useBackgroundTask.ts",
+      "specifier": "../platform/taskStatusPlugin",
+      "to": "src/platform/taskStatusPlugin.ts"
+    },
+    {
+      "from": "src/mobile/useBackgroundTask.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/mobile/useBackgroundTask.ts",
+      "specifier": "../webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/mobile/useBackgroundTask.ts",
+      "specifier": "./taskStatus",
+      "to": "src/mobile/taskStatus.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "../platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "../platform/taskStatusPlugin",
+      "to": "src/platform/taskStatusPlugin.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "./continuousCapture",
+      "to": "src/mobile/continuousCapture.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "./dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "./glassRenderer",
+      "to": "src/mobile/glassRenderer.ts"
+    },
+    {
+      "from": "src/mobile/useDockGlass.ts",
+      "specifier": "./lensDisplacement",
+      "to": "src/mobile/lensDisplacement.ts"
+    },
+    {
+      "from": "src/mobile/useToolDissolve.ts",
+      "specifier": "../platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/mobile/useToolDissolve.ts",
+      "specifier": "./dissolve",
+      "to": "src/mobile/dissolve.ts"
+    },
+    {
+      "from": "src/platform/androidBrowser.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/platform/androidBrowser.ts",
+      "specifier": "../webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/platform/androidBrowser.ts",
+      "specifier": "../webAI/composerText",
+      "to": "src/webAI/composerText.ts"
+    },
+    {
+      "from": "src/platform/androidBrowser.ts",
+      "specifier": "../webAI/protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/platform/androidBrowser.ts",
+      "specifier": "./nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/platform/capacitorBridge.ts",
+      "specifier": "./nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/platform/capacitorBridge.ts",
+      "specifier": "./types",
+      "to": "src/platform/types.ts"
+    },
+    {
+      "from": "src/platform/electronBridge.ts",
+      "specifier": "./types",
+      "to": "src/platform/types.ts"
+    },
+    {
+      "from": "src/platform/index.ts",
+      "specifier": "./capacitorBridge",
+      "to": "src/platform/capacitorBridge.ts"
+    },
+    {
+      "from": "src/platform/index.ts",
+      "specifier": "./electronBridge",
+      "to": "src/platform/electronBridge.ts"
+    },
+    {
+      "from": "src/platform/index.ts",
+      "specifier": "./types",
+      "to": "src/platform/types.ts"
+    },
+    {
+      "from": "src/platform/taskStatusPlugin.ts",
+      "specifier": "../mobile/taskStatus",
+      "to": "src/mobile/taskStatus.ts"
+    },
+    {
+      "from": "src/store/appStore.ts",
+      "specifier": "../../electron/preload-webview/types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "src/ui/useAdaptiveDock.ts",
+      "specifier": "../platform/nativeWebViewPlugin",
+      "to": "src/platform/nativeWebViewPlugin.ts"
+    },
+    {
+      "from": "src/ui/useAdaptiveDock.ts",
+      "specifier": "./dockState",
+      "to": "src/ui/dockState.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "../answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "../platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./composerText",
+      "to": "src/webAI/composerText.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./pageMonitor",
+      "to": "src/webAI/pageMonitor.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./questionContext",
+      "to": "src/webAI/questionContext.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./questionMedia",
+      "to": "src/webAI/questionMedia.ts"
+    },
+    {
+      "from": "src/webAI/WebAIController.ts",
+      "specifier": "./sendPrompt",
+      "to": "src/webAI/sendPrompt.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "../answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "../platform",
+      "to": "src/platform/index.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./WebAIController",
+      "to": "src/webAI/WebAIController.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./pageRequests",
+      "to": "src/webAI/pageRequests.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./questionContext",
+      "to": "src/webAI/questionContext.ts"
+    },
+    {
+      "from": "src/webAI/WebAISessionManager.ts",
+      "specifier": "./questionMedia",
+      "to": "src/webAI/questionMedia.ts"
+    },
+    {
+      "from": "src/webAI/WebAIWorkflow.tsx",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/WebAIWorkflow.tsx",
+      "specifier": "./WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/webAI/WebAIWorkflow.tsx",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/WebAIWorkflow.tsx",
+      "specifier": "./web-ai.css",
+      "to": "src/webAI/web-ai.css"
+    },
+    {
+      "from": "src/webAI/browserBridge.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/browserBridge.ts",
+      "specifier": "./questionMedia",
+      "to": "src/webAI/questionMedia.ts"
+    },
+    {
+      "from": "src/webAI/pageMonitor.ts",
+      "specifier": "./browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/webAI/pageMonitor.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/protocol.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/protocol.ts",
+      "specifier": "./questionContext",
+      "to": "src/webAI/questionContext.ts"
+    },
+    {
+      "from": "src/webAI/protocol.ts",
+      "specifier": "./questionMedia",
+      "to": "src/webAI/questionMedia.ts"
+    },
+    {
+      "from": "src/webAI/questionContext.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/questionContext.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "src/webAI/questionMedia.ts",
+      "specifier": "../store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "src/webAI/sendPrompt.ts",
+      "specifier": "./browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/webAI/useBrowserBridge.ts",
+      "specifier": "./WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "src/webAI/useBrowserBridge.ts",
+      "specifier": "./browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "src/webAI/useBrowserBridge.ts",
+      "specifier": "./composerText",
+      "to": "src/webAI/composerText.ts"
+    },
+    {
+      "from": "src/webAI/useBrowserBridge.ts",
+      "specifier": "./protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "tests/adaptive-dock.test.ts",
+      "specifier": "../src/mobile/dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "tests/adaptive-dock.test.ts",
+      "specifier": "../src/ui/dockState",
+      "to": "src/ui/dockState.ts"
+    },
+    {
+      "from": "tests/android-browser.test.ts",
+      "specifier": "../src/platform/androidBrowser",
+      "to": "src/platform/androidBrowser.ts"
+    },
+    {
+      "from": "tests/android-browser.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/answer-activity.test.ts",
+      "specifier": "../src/answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "tests/answer-activity.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/answer-applier.test.ts",
+      "specifier": "../electron/preload-webview/answer-applier",
+      "to": "electron/preload-webview/answer-applier.ts"
+    },
+    {
+      "from": "tests/answer-applier.test.ts",
+      "specifier": "../electron/preload-webview/types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "tests/answer-applier.test.ts",
+      "specifier": "./helpers/answer-dom",
+      "to": "tests/helpers/answer-dom.ts"
+    },
+    {
+      "from": "tests/answer-matcher.test.ts",
+      "specifier": "../electron/preload-webview/answer-matcher",
+      "to": "electron/preload-webview/answer-matcher.ts"
+    },
+    {
+      "from": "tests/appstore.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/desktop-glass.test.ts",
+      "specifier": "../electron/glass-region",
+      "to": "electron/glass-region.ts"
+    },
+    {
+      "from": "tests/dom-utils.test.ts",
+      "specifier": "../electron/preload-webview/dom-utils",
+      "to": "electron/preload-webview/dom-utils.ts"
+    },
+    {
+      "from": "tests/knowledge-answer.test.ts",
+      "specifier": "../src/components/knowledgeAnswer",
+      "to": "src/components/knowledgeAnswer.ts"
+    },
+    {
+      "from": "tests/knowledge-answer.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/mobile-dock-physics.test.ts",
+      "specifier": "../src/mobile/dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "tests/mobile-glass-refresh.test.ts",
+      "specifier": "../src/mobile/continuousCapture",
+      "to": "src/mobile/continuousCapture.ts"
+    },
+    {
+      "from": "tests/mobile-glass-refresh.test.ts",
+      "specifier": "../src/mobile/dockPhysics",
+      "to": "src/mobile/dockPhysics.ts"
+    },
+    {
+      "from": "tests/mobile-glass-refresh.test.ts",
+      "specifier": "../src/mobile/lensDisplacement",
+      "to": "src/mobile/lensDisplacement.ts"
+    },
+    {
+      "from": "tests/mobile-task-status.test.ts",
+      "specifier": "../src/answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "tests/mobile-task-status.test.ts",
+      "specifier": "../src/mobile/taskStatus",
+      "to": "src/mobile/taskStatus.ts"
+    },
+    {
+      "from": "tests/page-bridge.test.ts",
+      "specifier": "../electron/preload-webview/page-bridge",
+      "to": "electron/preload-webview/page-bridge.ts"
+    },
+    {
+      "from": "tests/question-context.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/question-context.test.ts",
+      "specifier": "../src/webAI/protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "tests/question-context.test.ts",
+      "specifier": "../src/webAI/questionContext",
+      "to": "src/webAI/questionContext.ts"
+    },
+    {
+      "from": "tests/question-extractor.test.ts",
+      "specifier": "../electron/preload-webview/question-extractor",
+      "to": "electron/preload-webview/question-extractor.ts"
+    },
+    {
+      "from": "tests/question-extractor.test.ts",
+      "specifier": "./helpers/answer-dom",
+      "to": "tests/helpers/answer-dom.ts"
+    },
+    {
+      "from": "tests/question-reference.test.ts",
+      "specifier": "../electron/preload-webview/question-reference",
+      "to": "electron/preload-webview/question-reference.ts"
+    },
+    {
+      "from": "tests/question-reference.test.ts",
+      "specifier": "../electron/preload-webview/types",
+      "to": "electron/preload-webview/types.ts"
+    },
+    {
+      "from": "tests/question-reference.test.ts",
+      "specifier": "./helpers/answer-dom",
+      "to": "tests/helpers/answer-dom.ts"
+    },
+    {
+      "from": "tests/web-ai-controller.test.ts",
+      "specifier": "../src/answerActivity/activityStore",
+      "to": "src/answerActivity/activityStore.ts"
+    },
+    {
+      "from": "tests/web-ai-controller.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/web-ai-controller.test.ts",
+      "specifier": "../src/webAI/WebAIController",
+      "to": "src/webAI/WebAIController.ts"
+    },
+    {
+      "from": "tests/web-ai-controller.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-login.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-login.test.ts",
+      "specifier": "../src/webAI/composerText",
+      "to": "src/webAI/composerText.ts"
+    },
+    {
+      "from": "tests/web-ai-media.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/web-ai-media.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-media.test.ts",
+      "specifier": "../src/webAI/composerText",
+      "to": "src/webAI/composerText.ts"
+    },
+    {
+      "from": "tests/web-ai-media.test.ts",
+      "specifier": "../src/webAI/protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "tests/web-ai-media.test.ts",
+      "specifier": "../src/webAI/questionMedia",
+      "to": "src/webAI/questionMedia.ts"
+    },
+    {
+      "from": "tests/web-ai-monitor.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-monitor.test.ts",
+      "specifier": "../src/webAI/pageMonitor",
+      "to": "src/webAI/pageMonitor.ts"
+    },
+    {
+      "from": "tests/web-ai-page-requests.test.ts",
+      "specifier": "../electron/preload-webview",
+      "to": "electron/preload-webview.ts"
+    },
+    {
+      "from": "tests/web-ai-page-requests.test.ts",
+      "specifier": "../src/webAI/pageRequests",
+      "to": "src/webAI/pageRequests.ts"
+    },
+    {
+      "from": "tests/web-ai-protocol.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/web-ai-protocol.test.ts",
+      "specifier": "../src/webAI/protocol",
+      "to": "src/webAI/protocol.ts"
+    },
+    {
+      "from": "tests/web-ai-send.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-send.test.ts",
+      "specifier": "../src/webAI/sendPrompt",
+      "to": "src/webAI/sendPrompt.ts"
+    },
+    {
+      "from": "tests/web-ai-sessions.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/web-ai-sessions.test.ts",
+      "specifier": "../src/webAI/WebAISessionManager",
+      "to": "src/webAI/WebAISessionManager.ts"
+    },
+    {
+      "from": "tests/web-ai-sessions.test.ts",
+      "specifier": "../src/webAI/browserBridge",
+      "to": "src/webAI/browserBridge.ts"
+    },
+    {
+      "from": "tests/web-ai-task-resources.test.ts",
+      "specifier": "../electron/web-ai-task-resources",
+      "to": "electron/web-ai-task-resources.ts"
+    },
+    {
+      "from": "tests/web-ai-task-resources.test.ts",
+      "specifier": "./helpers/answer-dom",
+      "to": "tests/helpers/answer-dom.ts"
+    },
+    {
+      "from": "tests/web-ai.test.ts",
+      "specifier": "../src/store/appStore",
+      "to": "src/store/appStore.ts"
+    },
+    {
+      "from": "tests/web-ai.test.ts",
+      "specifier": "../src/webAI/protocol",
+      "to": "src/webAI/protocol.ts"
+    }
+  ],
+  "externalImports": [
+    "@capacitor/browser",
+    "@capacitor/cli",
+    "@capacitor/core",
+    "@capacitor/local-notifications",
+    "@electron/asar",
+    "@vitejs/plugin-react",
+    "canvas-confetti",
+    "crypto",
+    "electron",
+    "esbuild",
+    "fs",
+    "http",
+    "https",
+    "lucide-react",
+    "node:assert/strict",
+    "node:child_process",
+    "node:crypto",
+    "node:events",
+    "node:fs",
+    "node:fs/promises",
+    "node:http",
+    "node:module",
+    "node:os",
+    "node:path",
+    "node:url",
+    "node:vm",
+    "path",
+    "react",
+    "react-dom",
+    "react-dom/client",
+    "url",
+    "vite",
+    "vitest",
+    "vitest/config"
+  ],
+  "unresolvedRelativeImports": []
+}

@@ -20,7 +20,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE." }
   npm run electron:build
   if ($LASTEXITCODE -ne 0) { throw "Electron build failed with exit code $LASTEXITCODE." }
-  npx electron-builder --win nsis --publish never --config.win.signAndEditExecutable=false "--config.directories.output=$releaseDir"
+  npx electron-builder --win nsis --publish never --config.win.signAndEditExecutable=true "--config.directories.output=$releaseDir"
   if ($LASTEXITCODE -ne 0) { throw "Windows installer build failed with exit code $LASTEXITCODE." }
 
   $installer = Get-ChildItem -LiteralPath $releaseDir -Filter "*.exe" |

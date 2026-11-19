@@ -9,4 +9,4 @@
 
 SHA256：`4029122863825c2dd3eddf18ea6cb40ec117a17ad137fa5cca26e344ad56be46`。
 
-387 项测试、APK 构建和 Android Lint 通过。Android 10 / 15 模拟器覆盖真实触摸、横竖屏、320px、明暗主题、草稿、自动答题及长提示词加三图发送；网站流程使用本地夹具。详细记录见 `docs/qa/android-browser/liquid-glass-v120-verification.md`。
+387 项测试、APK 构建和 Android Lint 通过。Android 10 / 15 模拟器覆盖真实触摸、横竖屏、320px、明暗主题、草稿、自动答题及长提示词加三图发送；网站流程使用本地夹具。详细记录见 [历史验证记录](https://github.com/XiYue-FireFly/Xuexitong-Answer-Helper/blob/android-v1.3.0/docs/qa/android-browser/liquid-glass-v120-verification.md)。

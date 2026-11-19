@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "402dd25553185f39df56ca0014a1916a58c57a8e",
+  "baselineParent": "8e50eaccc652ecd9b33ab2fc9dd91f77d05b9489",
+  "applicationVersion": "1.5.1",
+  "workingTreePolicy": "Reviewed UI source is anchored at immutable commit 402dd25553185f39df56ca0014a1916a58c57a8e. Only that commit is read by this generator. Untracked files are excluded. Do not regenerate from HEAD to bless drift.",
+  "preservedChanges": [
+    {
+      "status": "M",
+      "path": "android/app/src/main/java/com/studypilot/android/BrowserOverlayLayout.kt",
+      "sha256": "414e434df9dde38e75c79bfc93b2d7fd233ec0cc504596d1537f9a981f65bdd9",
+      "bytes": 1795
+    },
+    {
+      "status": "A",
+      "path": "scripts/check-adaptive-dock.mjs",
+      "sha256": "9b1575e9bc63774ae9dd9911d892b37c46a1c48f295353c5e21be761b35f8786",
+      "bytes": 18599
+    },
+    {
+      "status": "M",
+      "path": "scripts/check-desktop-glass.mjs",
+      "sha256": "aaf173027f236e163eb4033ffddffe882669bcac63e9647427ceabac8bf59c67",
+      "bytes": 20505
+    },
+    {
+      "status": "M",
+      "path": "src/App.tsx",
+      "sha256": "6d61a64af20151e2feba099c0e6c052472dc122275dcbd0fb5f7e1fd523f6c70",
+      "bytes": 20486
+    },
+    {
+      "status": "M",
+      "path": "src/MobileApp.tsx",
+      "sha256": "5fb17f9ebf3b1b8cd5df4b8d40168da2f6fc7865e379610ea3a2ca90e9b6a91d",
+      "bytes": 20403
+    },
+    {
+      "status": "A",
+      "path": "src/components/DockSettings.tsx",
+      "sha256": "aa9c17b2d489fcce94c1e5d5cf8f18e2bdfcd7ace447d0b2b951403e0c2b9172",
+      "bytes": 2497
+    },
+    {
+      "status": "M",
+      "path": "src/components/MobileToolDock.tsx",
+      "sha256": "2b42dda60d8b800df3b16f78ffe35789f27fa65315f27338757c8cbb16127962",
+      "bytes": 15930
+    },
+    {
+      "status": "M",
+      "path": "src/components/SettingsPanel.tsx",
+      "sha256": "851d44c47a2379fad090850d88efa8d2bc7a1981e9048763e4d256325d9a19af",
+      "bytes": 61245
+    },
+    {
+      "status": "A",
+      "path": "src/components/dockAdaptive.css",
+      "sha256": "58bc53b92d369a9c73aa99d338dbe2a2ecd8d3bb32af790c5b10ed42206fcdf8",
+      "bytes": 6759
+    },
+    {
+      "status": "M",
+      "path": "src/mobile/dockPhysics.ts",
+      "sha256": "6c605b0a6544609745658b18901e9114ba5e615f9b10aa2db4caf9a29e40f0b0",
+      "bytes": 2003
+    },
+    {
+      "status": "M",
+      "path": "src/mobile/glassRenderer.ts",
+      "sha256": "56581eec236ada2ff8e58debd6f1db1f2f944ba904fbbc5f5a25446a0cf58ac6",
+      "bytes": 7949
+    },
+    {
+      "status": "M",
+      "path": "src/mobile/useDockGlass.ts",
+      "sha256": "873b400afdfc63de86202c29dae510120ca308570198e14279003123c6eb2485",
+      "bytes": 14028
+    },
+    {
+      "status": "A",
+      "path": "src/ui/dockPreferences.ts",
+      "sha256": "a3526baa7636fd6d48bc9d05a52cb4a78da0cba66548cc04b3a333f82730bd01",
+      "bytes": 1354
+    },
+    {
+      "status": "A",
+      "path": "src/ui/dockState.ts",
+      "sha256": "0424683eebefce14cc10fbe6a3bbb52d46697a2489c703fed39abf2290633f21",
+      "bytes": 1946
+    },
+    {
+      "status": "A",
+      "path": "src/ui/useAdaptiveDock.ts",
+      "sha256": "4da791f72d116f86fbb1dd0ae8dc69267a3cb657467db918d545c970224b8dfe",
+      "bytes": 3205
+    },
+    {
+      "status": "A",
+      "path": "tests/adaptive-dock.test.ts",
+      "sha256": "6cbcf4e82734ea54e3e11b7d85bc21557921b759ec7e788f156b3fc646d8dbd0",
+      "bytes": 3274
+    }
+  ],
+  "buildInputs": [
+    {
+      "path": "package.json",
+      "sha256": "f407afeab92459ba4fb2b26b18d161f391c2a6a3db889d20abc1093329c4008c",
+      "canonicalSha256": "f407afeab92459ba4fb2b26b18d161f391c2a6a3db889d20abc1093329c4008c"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "c9ebcec45967dafbe5b0f0fe3fd91930c57f911b8f09b52e7ed7ac02b9402475",
+      "canonicalSha256": "c9ebcec45967dafbe5b0f0fe3fd91930c57f911b8f09b52e7ed7ac02b9402475"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "e101adbcb871ef9e912bf108b29a054a851cb3fbbb9b7dcc9c5a2095f05d6797",
+      "canonicalSha256": "e101adbcb871ef9e912bf108b29a054a851cb3fbbb9b7dcc9c5a2095f05d6797"
+    },
+    {
+      "path": "tsconfig.electron.json",
+      "sha256": "56bbdb8e68e18e78dc907e77b01e6160f6fd53374221a739e7944e0d5f5c5d6e",
+      "canonicalSha256": "56bbdb8e68e18e78dc907e77b01e6160f6fd53374221a739e7944e0d5f5c5d6e"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "6aa5497edadc739d7284c94721ec4a22b8b777bcea8d0055bb6b224224dab274",
+      "canonicalSha256": "6aa5497edadc739d7284c94721ec4a22b8b777bcea8d0055bb6b224224dab274"
+    },
+    {
+      "path": "scripts/build-webview-preload.mjs",
+      "sha256": "e732dc46450c9631fb024067995475e6932f3d6912e7f5d9bc74ab262c603217",
+      "canonicalSha256": "e732dc46450c9631fb024067995475e6932f3d6912e7f5d9bc74ab262c603217"
+    }
+  ],
+  "behaviorFixtures": [
+    {
+      "behavior": "tab-switch-and-source-ownership",
+      "file": "tests/web-ai-sessions.test.ts",
+      "test": "restores the source owner on AI tab selection and protects retryable identity",
+      "sourceSha256": "f49aec540929403a8e8fa2e1b84baaee2774cb8f4b6032eada4d0c5fb34a0abe",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "unanswered-skip",
+      "file": "tests/web-ai-controller.test.ts",
+      "test": "skips exhausted missing answers and fills the valid answers without stopping the task",
+      "sourceSha256": "0f555265afdaae2f8cf2f8946e8f6e764867ccbc0b55773c5ede09f18ff2ac3e",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "out-of-order-and-duplicate-replies",
+      "file": "tests/web-ai-page-requests.test.ts",
+      "test": "routes reversed replies and ignores other tabs, documents and duplicate replies",
+      "sourceSha256": "7cc890c54f4686427524c0f874134a54e67762ba8baa37052a4665ab27c55708",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "source-invalidated",
+      "file": "tests/web-ai-page-requests.test.ts",
+      "test": "invalidates inflight operations on navigation without cancelling another session",
+      "sourceSha256": "7cc890c54f4686427524c0f874134a54e67762ba8baa37052a4665ab27c55708",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "image-byte-quotas",
+      "file": "tests/web-ai-task-resources.test.ts",
+      "test": "rejects non-images and limits streamed individual and total task bytes",
+      "sourceSha256": "8e2dc4fb236dd750a9a073773d4da79839efba8fe7ddd9f55c0420c31d0d08ea",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "question-bank-import-export",
+      "file": "tests/appstore.test.ts",
+      "test": "保留 %s 的原始题型并支持导入导出",
+      "sourceSha256": "aaa4144731d7c6e40538a169a6a61e8d7f541475e38dac2e556f979efbfabbe0",
+      "evidence": ".playwright-mcp/rust-baseline/tests-before.log",
+      "outcome": "See fresh command result; frozen test assertions and input fixtures are the executable baseline."
+    },
+    {
+      "behavior": "streaming-json-sse-and-timeout",
+      "file": "tests/contracts/core-freeze.test.ts",
+      "test": "records legacy JSON, SSE byte chunks and request cleanup using the original AST handler",
+      "evidence": ".playwright-mcp/rust-baseline/transport-fixtures.json"
+    }
+  ],
+  "validationDirectory": ".playwright-mcp/rust-baseline",
+  "documentHashes": {
+    "coreManifest": "2505442fc7698a1c4d5c850ab73e7ff7431fed6f7108327b49a92ad07c18d6e1",
+    "symbolBoundary": "644665bcd7c74ea7a1763015692f09db28015ed4ab7b4ee36bd7d988d710104e",
+    "apiContract": "3273f9e59a9203fe983e920a8357ca5723ade15c8aea47315336bfc5b2051317"
+  }
+}

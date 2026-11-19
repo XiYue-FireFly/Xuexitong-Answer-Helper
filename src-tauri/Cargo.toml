@@ -1,0 +1,40 @@
+[package]
+name = "studypilot-rust-host-poc"
+version = "0.1.0"
+description = "R1 Windows WebView2 composition and input proof of concept"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[lib]
+name = "studypilot_rust_host_poc"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.7", features = ["unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "=0.22.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+boa_engine = "0.21"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "=0.39.1"
+windows = { version = "=0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Storage_FileSystem",
+] }

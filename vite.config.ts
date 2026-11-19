@@ -4,7 +4,7 @@ import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [{ name: 'wisp-ui-brand', transformIndexHtml: { order: 'pre', handler(html) { return html.replace('</head>', '<script type="module" src="/src/desktop/branding.ts"></script></head>'); } } }, react()],
   base: './',
   resolve: {
     alias: {

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WISP RS",
+  "version": "0.1.0",
+  "identifier": "com.studypilot.rust-host-poc",
+  "build": {
+    "frontendDist": "../dist-rust"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "poc-ui"
+      ],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/wisp.ico"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>R1 local guest fixture</title>
+  <link rel="stylesheet" href="guest.css">
+  <script type="module" src="guest.mjs"></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">GUEST ONLY · LOCAL FIXTURE</p>
+    <h1>网页保持完整视口</h1>
+    <p class="intro">滚动彩色页面，拖动标记，并在原生输入框输入中文。玻璃 UI 应覆盖网页，透明区应允许直接操作网页。</p>
+    <section class="card">
+      <div class="stat-row"><strong>网页点击数 <output id="click-count">0</output></strong><button type="button" id="guest-click">增加网页点击数</button></div>
+      <p id="viewport-size"></p>
+      <label for="guest-editor">网页输入 / Enter 发送 / 中文 IME</label>
+      <input id="guest-editor" data-poc-editor placeholder="在这里输入。受控 Enter 应只提交一次。" autocomplete="off">
+      <div class="stat-row"><span>已提交 <output id="submission-count">0</output> 次</span><span>可信 Enter <output id="trusted-count">0</output> 次</span></div>
+      <pre id="last-event">尚未收到 Enter。</pre>
+      <p id="permission-state">正在检查 guest 的宿主权限……</p>
+    </section>
+    <section class="card drag-card">
+      <strong>拖放与触摸夹具</strong>
+      <div id="drag-chip" draggable="true">拖动此标记</div>
+      <div id="drop-zone">拖入此区域：<output id="drop-count">0</output> 次</div>
+      <label for="guest-textarea">多行原生输入<textarea id="guest-textarea" rows="3" placeholder="测试中文候选框、选区、粘贴和滚轮"></textarea></label>
+    </section>
+    <section class="color-section section-one"><strong>滚动取样区域 A</strong><p>蓝色与绿色棋盘应出现在玻璃取样中。</p></section>
+    <section class="color-section section-two"><strong>滚动取样区域 B</strong><p>此区域只属于 guest；UI 的粉色标记不能进入 CapturePreview。</p></section>
+    <footer>本夹具不登录、不访问外部服务、不提交真实网页任务。</footer>
+  </main>
+</body>
+</html>
