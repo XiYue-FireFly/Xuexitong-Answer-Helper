@@ -1,0 +1,1591 @@
+/* ==========================================================================
+   StudyPilot / WISP Liquid Glass & Redesigned Light/Dark Theme System
+   Zero-Core-Touch Presentation Layer (Electron + Rust Unified)
+   Light Theme: 清透冰瓷 (Ice Porcelain)
+   Dark Theme : 深海曜石 (Abyssal Obsidian)
+   ========================================================================== */
+
+:root[data-lg-ready='true'] {
+  --lg-progress: 0.5;
+  --lg-blur-px: 24px;
+  --lg-header-blur-px: 22px;
+  --lg-header-extent-px: 24px;
+  --lg-dock-blur-px: 24px;
+  --lg-saturate: 1.64;
+
+  --lg-surface-alpha-dark: 0.884;
+  --lg-surface-alpha-light: 0.748;
+  --lg-card-alpha-dark: 0.746;
+  --lg-card-alpha-light: 0.791;
+  --lg-chrome-alpha-dark: 0.844;
+  --lg-chrome-alpha-light: 0.783;
+  --lg-dock-alpha-dark: 0.616;
+  --lg-dock-alpha-light: 0.743;
+
+  --lg-prism-opacity: 0.476;
+  --lg-refraction-opacity: 0.598;
+  --lg-specular-opacity: 0.642;
+  --lg-border-alpha-dark: 0.296;
+  --lg-border-alpha-light: 0.797;
+
+  --lg-dock-timing: cubic-bezier(0.22, 1.38, 0.36, 1);
+  --lg-dock-duration: 460ms;
+  --lg-popup-timing: cubic-bezier(0.22, 1.32, 0.36, 1);
+  --lg-popup-duration: 360ms;
+
+  /* Dark Theme: 深海曜石 (Abyssal Obsidian) */
+  --lg-ink-primary: #f5f9ff;
+  --lg-ink-secondary: #dce8f8;
+  --lg-ink-muted: #b8cde8;
+  --lg-accent: #6ab2ff;
+  --lg-accent-strong: #3b82f6;
+  --lg-accent-2: #38bdf8;
+  --lg-accent-soft: rgba(90, 168, 255, 0.22);
+  --lg-border-color: rgba(196, 226, 255, var(--lg-border-alpha-dark));
+  --lg-border-subtle: rgba(186, 218, 255, 0.16);
+  --lg-specular: rgba(235, 246, 255, calc(var(--lg-specular-opacity) * 0.42));
+  --lg-shadow-elevated: 0 22px 58px rgba(2, 10, 26, 0.52), 0 4px 16px rgba(2, 10, 26, 0.28);
+  --lg-shadow-soft: 0 10px 28px rgba(3, 12, 30, 0.34);
+  --lg-prism-gradient: linear-gradient(
+    90deg,
+    transparent 4%,
+    rgba(56, 189, 248, var(--lg-prism-opacity)) 24%,
+    rgba(129, 140, 248, var(--lg-prism-opacity)) 52%,
+    rgba(52, 211, 153, var(--lg-prism-opacity)) 78%,
+    transparent 96%
+  );
+  --lg-sheet-bg: linear-gradient(
+    148deg,
+    rgba(14, 25, 45, var(--lg-surface-alpha-dark)),
+    rgba(8, 15, 30, calc(var(--lg-surface-alpha-dark) + 0.05))
+  );
+  --lg-chrome-bg: linear-gradient(
+    180deg,
+    rgba(14, 25, 44, var(--lg-chrome-alpha-dark)),
+    rgba(9, 17, 32, calc(var(--lg-chrome-alpha-dark) - 0.04))
+  );
+  --lg-card-bg: linear-gradient(
+    145deg,
+    rgba(24, 41, 70, calc(var(--lg-card-alpha-dark) * 0.90)),
+    rgba(12, 22, 41, calc(var(--lg-card-alpha-dark) * 0.96))
+  );
+  --lg-control-bg: linear-gradient(
+    145deg,
+    rgba(32, 54, 90, 0.72),
+    rgba(16, 30, 56, 0.78)
+  );
+  --lg-control-hover-bg: linear-gradient(
+    145deg,
+    rgba(44, 74, 120, 0.82),
+    rgba(24, 44, 78, 0.86)
+  );
+  --lg-popup-dock-bg: linear-gradient(
+    152deg,
+    rgba(16, 28, 50, calc(var(--lg-surface-alpha-dark) + 0.06)),
+    rgba(9, 17, 34, calc(var(--lg-surface-alpha-dark) + 0.09))
+  );
+  --lg-popup-theme-bg: linear-gradient(
+    152deg,
+    rgba(20, 44, 82, 0.90),
+    rgba(11, 24, 52, 0.93)
+  );
+  --lg-modal-scrim: rgba(4, 10, 24, 0.52);
+  --lg-shell-backdrop:
+    radial-gradient(circle at 12% 10%, rgba(56, 189, 248, 0.22), transparent 36%),
+    radial-gradient(circle at 86% 14%, rgba(99, 102, 241, 0.20), transparent 34%),
+    radial-gradient(circle at 74% 88%, rgba(20, 184, 166, 0.16), transparent 36%),
+    linear-gradient(148deg, #060e1c 0%, #0b1629 48%, #071222 100%);
+}
+
+/* Light Theme: 清透冰瓷 (Ice Porcelain) */
+:root[data-lg-ready='true'][data-theme='light'],
+:root[data-lg-ready='true'][data-lg-theme='light'],
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] {
+  --lg-ink-primary: #0d1d36;
+  --lg-ink-secondary: #2c466b;
+  --lg-ink-muted: #526a8b;
+  --lg-accent: #1b6ce5;
+  --lg-accent-strong: #1558c4;
+  --lg-accent-2: #0284c7;
+  --lg-accent-soft: rgba(27, 108, 229, 0.14);
+  --lg-border-color: rgba(255, 255, 255, var(--lg-border-alpha-light));
+  --lg-border-subtle: rgba(24, 62, 118, 0.12);
+  --lg-specular: rgba(255, 255, 255, calc(0.55 + var(--lg-specular-opacity) * 0.45));
+  --lg-shadow-elevated: 0 20px 52px rgba(17, 45, 92, 0.15), 0 4px 16px rgba(17, 45, 92, 0.08);
+  --lg-shadow-soft: 0 8px 24px rgba(20, 52, 104, 0.09);
+  --lg-prism-gradient: linear-gradient(
+    90deg,
+    transparent 4%,
+    rgba(56, 189, 248, calc(var(--lg-prism-opacity) * 0.92)) 24%,
+    rgba(99, 102, 241, calc(var(--lg-prism-opacity) * 0.85)) 52%,
+    rgba(16, 185, 129, calc(var(--lg-prism-opacity) * 0.78)) 78%,
+    transparent 96%
+  );
+  --lg-sheet-bg: linear-gradient(
+    148deg,
+    rgba(249, 252, 255, var(--lg-surface-alpha-light)),
+    rgba(229, 241, 255, calc(var(--lg-surface-alpha-light) - 0.04))
+  );
+  --lg-chrome-bg: linear-gradient(
+    180deg,
+    rgba(251, 254, 255, var(--lg-chrome-alpha-light)),
+    rgba(235, 245, 255, calc(var(--lg-chrome-alpha-light) - 0.05))
+  );
+  --lg-card-bg: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, calc(var(--lg-card-alpha-light) * 0.92)),
+    rgba(226, 240, 255, calc(var(--lg-card-alpha-light) * 0.56))
+  );
+  --lg-control-bg: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.86),
+    rgba(223, 238, 255, 0.52)
+  );
+  --lg-control-hover-bg: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.96),
+    rgba(208, 231, 255, 0.70)
+  );
+  --lg-popup-dock-bg: linear-gradient(
+    152deg,
+    rgba(250, 253, 255, calc(var(--lg-surface-alpha-light) + 0.14)),
+    rgba(231, 243, 255, calc(var(--lg-surface-alpha-light) + 0.08))
+  );
+  --lg-popup-theme-bg: linear-gradient(
+    152deg,
+    rgba(236, 246, 255, 0.94),
+    rgba(218, 236, 255, 0.92)
+  );
+  --lg-modal-scrim: rgba(15, 31, 58, 0.34);
+  --lg-shell-backdrop:
+    radial-gradient(circle at 12% 10%, rgba(56, 189, 248, 0.24), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(99, 102, 241, 0.16), transparent 32%),
+    radial-gradient(circle at 72% 86%, rgba(16, 185, 129, 0.15), transparent 34%),
+    linear-gradient(148deg, #edf4fc 0%, #e4effb 50%, #f2f8ff 100%);
+}
+
+/* Sync root & app-shell base semantic variables to redesigned palettes */
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] {
+  --bg-app: #081224;
+  --bg-panel: rgba(18, 32, 56, 0.72);
+  --bg-panel-solid: #101e36;
+  --border-glass: rgba(196, 226, 255, 0.18);
+  --border-glass-focused: rgba(90, 168, 255, 0.56);
+  --primary-color: #6ab2ff;
+  --primary-glow: rgba(90, 168, 255, 0.28);
+  --accent-color: #38bdf8;
+  --accent-glow: rgba(56, 189, 248, 0.22);
+  --success-color: #3fe0a8;
+  --warning-color: #ffcf70;
+  --danger-color: #ff8e99;
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --desktop-fill: var(--lg-card-bg);
+  --desktop-control: var(--lg-control-bg);
+  --desktop-edge: var(--lg-border-color);
+  --desktop-highlight: var(--lg-specular);
+  background: var(--lg-shell-backdrop);
+  color: var(--lg-ink-primary);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] {
+  --bg-app: #ebf3fc;
+  --bg-panel: rgba(248, 252, 255, 0.84);
+  --bg-panel-solid: #f7fbff;
+  --border-glass: rgba(24, 62, 118, 0.14);
+  --border-glass-focused: rgba(27, 108, 229, 0.45);
+  --primary-color: #1b6ce5;
+  --primary-glow: rgba(27, 108, 229, 0.18);
+  --accent-color: #0284c7;
+  --accent-glow: rgba(2, 132, 199, 0.16);
+  --success-color: #058a62;
+  --warning-color: #c26d07;
+  --danger-color: #c92a3e;
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --desktop-fill: var(--lg-card-bg);
+  --desktop-control: var(--lg-control-bg);
+  --desktop-edge: var(--lg-border-color);
+  --desktop-highlight: var(--lg-specular);
+  background: var(--lg-shell-backdrop);
+  color: var(--lg-ink-primary);
+}
+
+/* Preserve Rust transparent shell so native guest WebView stays visible */
+:root[data-lg-ready='true'][data-brand='wisp-rs'],
+:root[data-lg-ready='true'][data-brand='wisp-rs'] :is(body, #root, .desktop-shell, .app-workspace, .browser-deck),
+:root[data-lg-ready='true'][data-brand='wisp-rs'] .mock-page-container:has(webview) {
+  background: transparent !important;
+}
+
+/* ==========================================================================
+   1. Top Chrome: App Header, Browser Tabs Bar (Android Pill Alignment), Toolbar
+   ========================================================================== */
+
+:root[data-lg-ready='true'] .desktop-shell .app-header {
+  background: var(--lg-chrome-bg);
+  border-bottom: 1px solid var(--lg-border-subtle);
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+  backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  transition: background 220ms ease, border-color 220ms ease, backdrop-filter 220ms ease;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .app-brand__title {
+  color: var(--lg-ink-primary);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .app-brand__tag {
+  background: var(--lg-accent-soft);
+  border-color: rgba(90, 168, 255, 0.34);
+  color: var(--lg-accent);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .app-brand__tag {
+  background: rgba(27, 108, 229, 0.11);
+  border-color: rgba(27, 108, 229, 0.24);
+  color: #1558c4;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .app-stream-status,
+:root[data-lg-ready='true'] .desktop-shell .theme-switch-btn {
+  background: var(--lg-control-bg);
+  border: 1px solid var(--lg-border-color);
+  color: var(--lg-ink-primary);
+  box-shadow: inset 0 1px 0 var(--lg-specular), 0 2px 8px rgba(10, 28, 56, 0.08);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .theme-switch-btn:hover {
+  background: var(--lg-control-hover-bg);
+  border-color: var(--lg-accent);
+  color: var(--lg-ink-primary);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .window-control {
+  color: var(--lg-ink-secondary) !important;
+  border-radius: 9px !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .window-control:hover {
+  background: var(--lg-accent-soft) !important;
+  color: var(--lg-ink-primary) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .window-control:last-child:hover {
+  background: #d9364f !important;
+  color: #ffffff !important;
+}
+
+/* Browser Tabs Bar — Android-aligned Capsule Pills with Liquid Glass Finish */
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar {
+  position: relative;
+  height: 44px !important;
+  min-height: 44px;
+  align-items: center !important;
+  padding: 4px 12px !important;
+  gap: 8px !important;
+  background: var(--lg-chrome-bg) !important;
+  border-bottom: 1px solid var(--lg-border-subtle) !important;
+  backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+  scrollbar-width: none;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar .browser-tab {
+  position: relative;
+  height: 32px !important;
+  min-height: 32px;
+  border-radius: 999px !important;
+  padding: 0 7px 0 13px !important;
+  background: var(--lg-control-bg) !important;
+  border: 1px solid var(--lg-border-subtle) !important;
+  color: var(--lg-ink-secondary) !important;
+  box-shadow:
+    inset 0 1px 0 var(--lg-specular),
+    0 2px 8px rgba(8, 24, 52, 0.08) !important;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform var(--lg-dock-duration) var(--lg-dock-timing) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar .browser-tab:hover {
+  background: var(--lg-control-hover-bg) !important;
+  border-color: rgba(90, 168, 255, 0.42) !important;
+  color: var(--lg-ink-primary) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar .browser-tab.active {
+  background: linear-gradient(
+    145deg,
+    rgba(90, 168, 255, 0.28),
+    rgba(56, 189, 248, 0.14)
+  ) !important;
+  border: 1px solid rgba(118, 186, 255, 0.62) !important;
+  color: var(--lg-ink-primary) !important;
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.28 + var(--lg-refraction-opacity) * 0.45)),
+    inset 0 -1px 0 rgba(56, 189, 248, calc(var(--lg-prism-opacity) * 0.42)),
+    0 4px 14px rgba(14, 62, 136, 0.20) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .browser-tabs-bar .browser-tab.active {
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.94),
+    rgba(202, 228, 255, 0.72)
+  ) !important;
+  border: 1px solid rgba(27, 108, 229, 0.45) !important;
+  color: #0e46a3 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 4px 14px rgba(27, 108, 229, 0.14) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar .browser-tab [role='button'] {
+  border-radius: 999px !important;
+  color: var(--lg-ink-muted) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar .browser-tab [role='button']:hover {
+  background: rgba(128, 160, 210, 0.22);
+  color: var(--lg-ink-primary) !important;
+}
+
+/* New tab "+" circular liquid-glass button */
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar > button:not(.browser-tab) {
+  border-radius: 999px !important;
+  width: 32px !important;
+  height: 32px !important;
+  flex: 0 0 32px;
+  background: var(--lg-control-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  color: var(--lg-ink-primary) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular), 0 2px 8px rgba(8, 24, 52, 0.10);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tabs-bar > button:not(.browser-tab):hover {
+  background: var(--lg-control-hover-bg) !important;
+  border-color: var(--lg-accent) !important;
+}
+
+/* Browser Toolbar & Pill Address Bar */
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar {
+  position: relative;
+  height: 48px !important;
+  min-height: 48px !important;
+  padding: 0 14px !important;
+  background: var(--lg-chrome-bg) !important;
+  border-bottom: 1px solid var(--lg-border-subtle) !important;
+  backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+  overflow: visible;
+}
+
+/* Prismatic refraction hairline along top chrome bottom */
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-top-chrome='true'] .desktop-shell .browser-toolbar::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: var(--lg-prism-gradient);
+  opacity: calc(var(--lg-prism-opacity) + 0.12);
+}
+
+/* Progressive Top Blur Feather (progressiveTopBlurEnabled) */
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-top-chrome='true'][data-lg-progressive-top='true'] .desktop-shell .browser-toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--lg-header-extent-px);
+  pointer-events: none;
+  z-index: 6;
+  background: linear-gradient(
+    180deg,
+    rgba(10, 20, 38, calc(var(--lg-chrome-alpha-dark) * 0.34)),
+    transparent
+  );
+  backdrop-filter: blur(calc(var(--lg-header-blur-px) * 0.35));
+  -webkit-backdrop-filter: blur(calc(var(--lg-header-blur-px) * 0.35));
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.35) 50%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.35) 50%, transparent 100%);
+}
+
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-top-chrome='true'][data-lg-progressive-top='true'] .desktop-shell[data-theme='light'] .browser-toolbar::after {
+  background: linear-gradient(
+    180deg,
+    rgba(235, 245, 255, calc(var(--lg-chrome-alpha-light) * 0.48)),
+    transparent
+  );
+}
+
+/* Disable top feather on Rust transparent host over real webview to keep native guest region crisp */
+:root[data-lg-ready='true'][data-brand='wisp-rs'] .desktop-shell .mock-page-container:has(webview) .browser-toolbar::after {
+  display: none;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar > button,
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar form > button {
+  border-radius: 999px !important;
+  min-width: 34px;
+  height: 34px;
+  background: var(--lg-control-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  color: var(--lg-ink-primary) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular), 0 2px 8px rgba(8, 24, 52, 0.08);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar form > button[type='submit'] {
+  padding: 0 14px !important;
+  background: var(--lg-accent-soft) !important;
+  border-color: rgba(90, 168, 255, 0.40) !important;
+  color: var(--lg-accent) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .browser-toolbar form > button[type='submit'] {
+  background: linear-gradient(135deg, rgba(27, 108, 229, 0.14), rgba(2, 132, 199, 0.10)) !important;
+  border-color: rgba(27, 108, 229, 0.34) !important;
+  color: #1352b8 !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar .browser-address {
+  height: 34px !important;
+  border-radius: 999px !important;
+  background: var(--lg-control-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular), 0 2px 10px rgba(8, 24, 52, 0.06);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar .browser-address:focus-within {
+  border-color: var(--lg-accent) !important;
+  box-shadow: 0 0 0 3px var(--primary-glow), inset 0 1px 0 var(--lg-specular);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar .browser-address input {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  min-height: 30px !important;
+  color: var(--lg-ink-primary) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-toolbar .badge {
+  border-radius: 999px;
+  border: 1px solid var(--lg-border-color);
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+}
+
+/* High-contrast badge palette for Light (清透冰瓷) & Dark (深海曜石) themes */
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .badge-primary {
+  color: #0e4db5;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(204, 228, 255, 0.65));
+  border-color: rgba(27, 108, 229, 0.34);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .badge-success {
+  color: #046c4e;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(167, 243, 208, 0.55));
+  border-color: rgba(5, 138, 98, 0.34);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .badge-warning {
+  color: #9a4a04;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(253, 230, 138, 0.60));
+  border-color: rgba(194, 109, 7, 0.34);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .badge-danger {
+  color: #b41d31;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(254, 202, 202, 0.60));
+  border-color: rgba(201, 42, 62, 0.34);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .badge-primary {
+  color: #cde8ff;
+  background: linear-gradient(135deg, rgba(90, 168, 255, 0.24), rgba(56, 189, 248, 0.14));
+  border-color: rgba(125, 211, 252, 0.36);
+}
+
+/* ==========================================================================
+   2. Floating Adaptive Dock Alignment
+   ========================================================================== */
+
+/* Restore dockAdaptive.css geometry that desktop.css overwrote due to load order */
+:root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock {
+  bottom: auto;
+  right: auto;
+  max-width: none;
+  transform: none;
+  box-sizing: border-box;
+  border-radius: 999px;
+  overflow: visible;
+  transition:
+    left var(--lg-dock-duration) var(--lg-dock-timing),
+    top var(--lg-dock-duration) var(--lg-dock-timing),
+    width var(--lg-dock-duration) var(--lg-dock-timing),
+    height var(--lg-dock-duration) var(--lg-dock-timing),
+    box-shadow 220ms ease,
+    border-color 220ms ease,
+    background 220ms ease;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock .mobile-tab {
+  flex-basis: 54px;
+  min-height: 44px;
+  font-size: 11px;
+  border-radius: 999px;
+  transition:
+    color 180ms ease,
+    transform 220ms var(--lg-dock-timing);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock[data-vertical='true'] .mobile-tab {
+  flex: 1 0 54px;
+  min-width: 44px;
+  min-height: 50px;
+  width: 100%;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock[data-vertical='false'] .mobile-tabs__optics {
+  left: 0;
+  top: -12px;
+  width: 100%;
+  height: calc(100% + 24px);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock[data-vertical='true'] .mobile-tabs__optics {
+  top: 0;
+  left: -12px;
+  width: calc(100% + 24px);
+  height: 100%;
+}
+
+/* CSS-fallback liquid glass dock appearance matching Android floating-glass screenshots */
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-dock='true'] .desktop-shell .mobile-tabs.adaptive-dock:not(:has([data-optics='gpu'])) {
+  background: linear-gradient(
+    148deg,
+    rgba(30, 52, 86, var(--lg-dock-alpha-dark)),
+    rgba(13, 25, 48, calc(var(--lg-dock-alpha-dark) + 0.14))
+  );
+  border: 1px solid rgba(196, 228, 255, calc(0.24 + var(--lg-refraction-opacity) * 0.28));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.22 + var(--lg-specular-opacity) * 0.32)),
+    inset 0 -1px 0 rgba(88, 178, 255, calc(var(--lg-prism-opacity) * 0.34)),
+    0 12px 34px rgba(4, 14, 34, 0.36),
+    0 0 0 1px rgba(56, 189, 248, calc(var(--lg-prism-opacity) * 0.18));
+  backdrop-filter: blur(var(--lg-dock-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-dock-blur-px)) saturate(var(--lg-saturate));
+}
+
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-dock='true'] .desktop-shell[data-theme='light'] .mobile-tabs.adaptive-dock:not(:has([data-optics='gpu'])) {
+  background: linear-gradient(
+    148deg,
+    rgba(255, 255, 255, calc(var(--lg-dock-alpha-light) + 0.12)),
+    rgba(220, 237, 255, var(--lg-dock-alpha-light))
+  );
+  border: 1px solid rgba(255, 255, 255, 0.94);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.98),
+    inset 0 -1px 0 rgba(56, 189, 248, calc(var(--lg-prism-opacity) * 0.28)),
+    0 10px 30px rgba(24, 58, 118, 0.16),
+    0 1px 4px rgba(24, 58, 118, 0.08);
+}
+
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-dock='true'] .desktop-shell .mobile-tabs.adaptive-dock .mobile-tabs__selection {
+  border-radius: 999px;
+  background: linear-gradient(
+    152deg,
+    rgba(130, 194, 255, calc(0.28 + var(--lg-refraction-opacity) * 0.20)),
+    rgba(72, 142, 248, calc(0.14 + var(--lg-prism-opacity) * 0.12))
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.40 + var(--lg-specular-opacity) * 0.35)),
+    inset 0 0 0 1px rgba(215, 236, 255, 0.32),
+    0 4px 12px rgba(6, 22, 48, 0.18);
+}
+
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-dock='true'] .desktop-shell[data-theme='light'] .mobile-tabs.adaptive-dock .mobile-tabs__selection {
+  background: linear-gradient(
+    152deg,
+    rgba(255, 255, 255, 0.88),
+    rgba(164, 208, 255, 0.42)
+  );
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.98),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.92),
+    0 4px 12px rgba(28, 72, 148, 0.14);
+}
+
+/* Fix dark-theme + bright-page white-on-white lens contrast */
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-backdrop-tone='light'] :is(.mobile-tab, .dock-answer) {
+  color: #1c3556;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.65);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-backdrop-tone='light'] .mobile-tab.is-active {
+  color: #0e4db5;
+}
+
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-backdrop-tone='dark'] :is(.mobile-tab, .dock-answer) {
+  color: #edf5ff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.58);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-backdrop-tone='dark'] .mobile-tab.is-active {
+  color: #8cc8ff;
+}
+
+/* Crucially wins over desktop.css's `.desktop-shell .mobile-tabs[data-backdrop-tone='dark'] .mobile-tab__lens { color: #fff }` */
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-scene-tone='light'] .mobile-tab__lens {
+  color: #075fc9;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.55);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='adaptive'] .desktop-shell .mobile-tabs.adaptive-dock[data-scene-tone='dark'] .mobile-tab__lens {
+  color: #f0f7ff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* Stable Readability Mode (固定主题色 — readabilityMode === 'stable') */
+:root[data-lg-ready='true'][data-lg-readability='stable'] .desktop-shell[data-theme='dark'] .mobile-tabs.adaptive-dock :is(.mobile-tab, .dock-answer) {
+  color: #eef5ff;
+  text-shadow: 0 1px 4px rgba(4, 10, 22, 0.80);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='stable'] .desktop-shell[data-theme='dark'] .mobile-tabs.adaptive-dock :is(.mobile-tab.is-active, .mobile-tab__lens) {
+  color: #82c4ff;
+  text-shadow: 0 1px 4px rgba(4, 10, 22, 0.85);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='stable'] .desktop-shell[data-theme='light'] .mobile-tabs.adaptive-dock :is(.mobile-tab, .dock-answer) {
+  color: #1a3354;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.82);
+}
+
+:root[data-lg-ready='true'][data-lg-readability='stable'] .desktop-shell[data-theme='light'] .mobile-tabs.adaptive-dock :is(.mobile-tab.is-active, .mobile-tab__lens) {
+  color: #0b4fb8;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.86);
+}
+
+/* Elastic dock hover micro-feedback */
+:root[data-lg-ready='true'][data-lg-dock-motion='elastic'] .desktop-shell .mobile-tabs.adaptive-dock .mobile-tab:not(:disabled):hover {
+  transform: scale(1.06);
+}
+
+:root[data-lg-ready='true'][data-lg-dock-motion='standard'] .desktop-shell .mobile-tabs.adaptive-dock .mobile-tab:not(:disabled):hover {
+  transform: none;
+}
+
+/* ==========================================================================
+   3. Desktop Sheet, Cards, Controls & Demo Page (Global Theme Adaptation)
+   ========================================================================== */
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet {
+  border-radius: 28px;
+  border: 1px solid var(--lg-border-color);
+  background: var(--lg-sheet-bg);
+  color: var(--lg-ink-primary);
+  box-shadow:
+    inset 0 1px 0 var(--lg-specular),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    var(--lg-shadow-elevated);
+  backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate));
+  transition:
+    opacity var(--lg-popup-duration) ease,
+    transform var(--lg-popup-duration) var(--lg-popup-timing),
+    visibility var(--lg-popup-duration),
+    background 220ms ease,
+    border-color 220ms ease;
+}
+
+/* Override desktop.css opaque #0d182b on dark .desktop-sheet */
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .desktop-sheet {
+  background: var(--lg-sheet-bg);
+  color: var(--lg-ink-primary);
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --desktop-fill: var(--lg-card-bg);
+  --desktop-control: var(--lg-control-bg);
+  --desktop-edge: var(--lg-border-color);
+  --desktop-highlight: var(--lg-specular);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .desktop-sheet {
+  background: var(--lg-sheet-bg);
+  color: var(--lg-ink-primary);
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --desktop-fill: var(--lg-card-bg);
+  --desktop-control: var(--lg-control-bg);
+  --desktop-edge: var(--lg-border-color);
+  --desktop-highlight: var(--lg-specular);
+}
+
+/* Prismatic top caustic highlight inside desktop sheet */
+:root[data-lg-ready='true'][data-lg-enabled='true'][data-lg-scene-sheets='true'] .desktop-shell .desktop-sheet::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  pointer-events: none;
+  z-index: 5;
+  background: var(--lg-prism-gradient);
+  opacity: calc(var(--lg-prism-opacity) + 0.16);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet__material img {
+  filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate));
+  opacity: calc(0.10 + (1 - var(--lg-progress)) * 0.20);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .desktop-sheet__material img {
+  opacity: calc(0.05 + (1 - var(--lg-progress)) * 0.08);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet__heading {
+  border-bottom: 1px solid var(--lg-border-subtle);
+  padding: 15px 22px 11px;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(
+  .glass-panel:not([data-lg-modal-card='true']),
+  .ai-section,
+  .knowledge-panel,
+  .kb-bento-card,
+  .kb-editor-panel,
+  .kb-question-card,
+  .usage-card,
+  .web-ai-inline,
+  .web-ai-step,
+  .web-ai-auto-controls,
+  .web-ai-preview article,
+  .tutorial-panel__hero,
+  .tutorial-panel details,
+  .tutorial-panel__note,
+  .kb-empty-state,
+  .kb-search-bar,
+  .kb-option,
+  .kb-analysis,
+  .kb-answer-line,
+  .answer-usage-order,
+  .dock-settings
+) {
+  background: var(--lg-card-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    inset 0 1px 0 var(--lg-specular),
+    var(--lg-shadow-soft);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(button, summary) {
+  border-radius: 14px !important;
+  border: 1px solid var(--lg-border-color) !important;
+  background: var(--lg-control-bg) !important;
+  color: var(--lg-ink-primary);
+  box-shadow: inset 0 1px 0 var(--lg-specular), 0 2px 8px rgba(8, 24, 52, 0.06) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(button, summary):hover:not(:disabled) {
+  background: var(--lg-control-hover-bg) !important;
+  border-color: rgba(90, 168, 255, 0.45) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(
+  button.is-active,
+  button[aria-selected='true'],
+  button[aria-pressed='true']
+) {
+  background: var(--lg-accent-soft) !important;
+  border-color: var(--lg-accent) !important;
+  color: var(--lg-ink-primary) !important;
+  font-weight: 700;
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .desktop-tool-content :is(
+  button.is-active,
+  button[aria-selected='true'],
+  button[aria-pressed='true']
+) {
+  background: linear-gradient(135deg, rgba(27, 108, 229, 0.16), rgba(2, 132, 199, 0.10)) !important;
+  border-color: rgba(27, 108, 229, 0.56) !important;
+  color: #0e46a3 !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(
+  .btn-primary,
+  .web-ai-primary,
+  .kb-action-button--primary
+) {
+  background: linear-gradient(135deg, #2b7df5, #1b5ed6 58%, #0284c7) !important;
+  border-color: rgba(147, 197, 253, 0.55) !important;
+  color: #ffffff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 8px 20px rgba(27, 108, 229, 0.28) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content :is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  textarea,
+  select
+) {
+  background: var(--lg-control-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  border-radius: 14px !important;
+  color: var(--lg-ink-primary) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content input::placeholder,
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content textarea::placeholder {
+  color: var(--lg-ink-muted) !important;
+  opacity: 1;
+}
+
+/* Demo / Mock Page harmonization for both Light and Dark themes */
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .mock-page-container:not(:has(webview)),
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .mock-page-body {
+  background: var(--lg-shell-backdrop);
+  color: var(--lg-ink-primary);
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --border-glass: rgba(196, 226, 255, 0.16);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='dark'] .mock-page-container:not(:has(webview)) .glass-panel {
+  background: var(--lg-card-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular), var(--lg-shadow-soft) !important;
+  color: var(--lg-ink-primary);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .mock-page-container:not(:has(webview)),
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .mock-page-body {
+  background: var(--lg-shell-backdrop);
+  color: var(--lg-ink-primary);
+  --text-primary: var(--lg-ink-primary);
+  --text-secondary: var(--lg-ink-secondary);
+  --text-muted: var(--lg-ink-muted);
+  --border-glass: rgba(24, 62, 118, 0.14);
+}
+
+:root[data-lg-ready='true'] .desktop-shell[data-theme='light'] .mock-page-container:not(:has(webview)) .glass-panel {
+  background: var(--lg-card-bg) !important;
+  border: 1px solid var(--lg-border-color) !important;
+  box-shadow: inset 0 1px 0 var(--lg-specular), var(--lg-shadow-soft) !important;
+}
+
+/* ==========================================================================
+   4. Footer Status Bar & Popups / Modals / Context Menus
+   ========================================================================== */
+
+:root[data-lg-ready='true'] .desktop-shell .app-footer {
+  background: var(--lg-chrome-bg);
+  border-top: 1px solid var(--lg-border-subtle);
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+  backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+}
+
+:root[data-lg-ready='true'] .desktop-shell .app-footer__inner {
+  color: var(--lg-ink-secondary);
+}
+
+/* Popups, Startup Notice Modal, API Key Help Modal, Context Menus, Select Menus */
+/* Lift modals rendered inside .desktop-sheet (e.g. Settings "获取 API Key")
+   out of sheet/side-panel containing blocks so fixed overlays span the full viewport
+   and the close button is never clipped behind AnnouncementBanner or covered by the Dock. */
+:root[data-lg-ready='true'] .desktop-shell .app-workspace[data-lg-has-modal='true'],
+:root[data-lg-ready='true'] .desktop-shell .app-workspace:has(.desktop-sheet [role='dialog']),
+:root[data-lg-ready='true'] .desktop-shell .app-workspace:has(.desktop-sheet [data-lg-modal-overlay='true']) {
+  z-index: 10000 !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet[data-lg-has-modal='true'],
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([role='dialog']),
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([data-lg-modal-overlay='true']) {
+  z-index: 10000 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet[data-lg-has-modal='true'] .desktop-tool-content,
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([role='dialog']) .desktop-tool-content,
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([data-lg-modal-overlay='true']) .desktop-tool-content {
+  z-index: 10000 !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet[data-lg-has-modal='true'] .side-panel-page,
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([role='dialog']) .side-panel-page,
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet:has([data-lg-modal-overlay='true']) .side-panel-page {
+  will-change: auto !important;
+  transform: none !important;
+  animation: none !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet .side-panel-page:has([role='dialog']),
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet .side-panel-page:has([data-lg-modal-overlay='true']),
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet .side-panel-page > :has([role='dialog']),
+:root[data-lg-ready='true'] .desktop-shell .desktop-sheet .side-panel-page > :has([data-lg-modal-overlay='true']) {
+  z-index: 10000 !important;
+}
+
+:root[data-lg-ready='true'] [data-lg-modal-overlay='true'] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  box-sizing: border-box !important;
+  background: var(--lg-modal-scrim) !important;
+  backdrop-filter: blur(calc(var(--lg-blur-px) * 0.45)) saturate(1.15);
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur-px) * 0.45)) saturate(1.15);
+  z-index: 10000 !important;
+}
+
+:root[data-lg-ready='true'] [data-lg-modal-card='true'],
+:root[data-lg-ready='true'] .desktop-shell .desktop-tool-content [data-lg-modal-card='true'] {
+  position: relative;
+  max-height: min(88vh, calc(100vh - 40px)) !important;
+  border-radius: 24px !important;
+  border: 1px solid var(--lg-border-color) !important;
+  background: var(--lg-popup-dock-bg) !important;
+  color: var(--lg-ink-primary) !important;
+  box-shadow:
+    inset 0 1px 0 var(--lg-specular),
+    var(--lg-shadow-elevated) !important;
+  backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate)) !important;
+  -webkit-backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate)) !important;
+  animation: lg-popup-in var(--lg-popup-duration) var(--lg-popup-timing) both !important;
+}
+
+:root[data-lg-ready='true'] [data-lg-modal-card='true'] .btn-icon {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
+:root[data-lg-ready='true'] [data-lg-modal-card='true'] h2,
+:root[data-lg-ready='true'] [data-lg-modal-card='true'] h3,
+:root[data-lg-ready='true'] [data-lg-modal-card='true'] pre {
+  color: var(--lg-ink-primary) !important;
+}
+
+:root[data-lg-ready='true'] [data-lg-modal-card='true'] p {
+  color: var(--lg-ink-secondary) !important;
+}
+
+:root[data-lg-ready='true'][data-lg-popup-palette='theme_frosted'] [data-lg-modal-card='true'],
+:root[data-lg-ready='true'][data-lg-popup-palette='theme_frosted'] .desktop-shell .desktop-tool-content [data-lg-modal-card='true'],
+:root[data-lg-ready='true'][data-lg-popup-palette='theme_frosted'] .desktop-shell .browser-tab-context-menu,
+:root[data-lg-ready='true'][data-lg-popup-palette='theme_frosted'] .desktop-shell .custom-select__menu {
+  background: var(--lg-popup-theme-bg) !important;
+  border-color: rgba(90, 168, 255, 0.36) !important;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tab-context-menu,
+:root[data-lg-ready='true'] .desktop-shell .custom-select__menu {
+  border-radius: 18px !important;
+  border: 1px solid var(--lg-border-color) !important;
+  background: var(--lg-popup-dock-bg) !important;
+  color: var(--lg-ink-primary);
+  box-shadow:
+    inset 0 1px 0 var(--lg-specular),
+    var(--lg-shadow-elevated) !important;
+  backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate)) !important;
+  -webkit-backdrop-filter: blur(var(--lg-blur-px)) saturate(var(--lg-saturate)) !important;
+  animation: lg-popup-in var(--lg-popup-duration) var(--lg-popup-timing) both;
+}
+
+:root[data-lg-ready='true'] .desktop-shell .browser-tab-context-item:not(:disabled):hover,
+:root[data-lg-ready='true'] .desktop-shell .custom-select__option:hover,
+:root[data-lg-ready='true'] .desktop-shell .custom-select__option.active {
+  background: var(--lg-accent-soft) !important;
+  color: var(--lg-ink-primary) !important;
+}
+
+@keyframes lg-popup-in {
+  from {
+    opacity: 0.65;
+    transform: translateY(8px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ==========================================================================
+   5. Master Toggle & Per-Scene Disabling (Scene Switches + Header Blur)
+   ========================================================================== */
+
+/* Master switch OFF or individual scene OFF */
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-top-chrome='false'], [data-lg-header-blur='false']) .desktop-shell :is(.app-header, .browser-tabs-bar, .browser-toolbar) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-top-chrome='false']) .desktop-shell[data-theme='dark'] :is(.app-header, .browser-tabs-bar, .browser-toolbar) {
+  background: #0d182b !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-top-chrome='false']) .desktop-shell[data-theme='light'] :is(.app-header, .browser-tabs-bar, .browser-toolbar) {
+  background: #f4f8fd !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-top-chrome='false']) .desktop-shell .browser-toolbar::before,
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-top-chrome='false'], [data-lg-progressive-top='false']) .desktop-shell .browser-toolbar::after {
+  display: none !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-dock='false']) .desktop-shell .mobile-tabs.adaptive-dock {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #101d34 !important;
+  border-color: rgba(186, 214, 248, 0.22) !important;
+  box-shadow: 0 10px 26px rgba(2, 10, 26, 0.34) !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-dock='false']) .desktop-shell[data-theme='light'] .mobile-tabs.adaptive-dock {
+  background: #f8fbff !important;
+  border-color: rgba(24, 62, 118, 0.18) !important;
+  box-shadow: 0 10px 24px rgba(15, 36, 74, 0.14) !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-dock='false']) .desktop-shell .mobile-tabs.adaptive-dock .mobile-tabs__optics {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-dock='false']) .desktop-shell .mobile-tabs.adaptive-dock .mobile-tabs__selection {
+  opacity: 1 !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-sheets='false']) .desktop-shell .desktop-sheet {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0f1c32 !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-sheets='false']) .desktop-shell[data-theme='light'] .desktop-sheet {
+  background: #f7fbff !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-sheets='false']) .desktop-shell .desktop-sheet::after,
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-sheets='false']) .desktop-shell .desktop-sheet__material {
+  display: none !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-popups='false']) [data-lg-modal-overlay='true'] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-popups='false']) :is([data-lg-modal-card='true'], .desktop-shell .desktop-tool-content [data-lg-modal-card='true'], .desktop-shell .browser-tab-context-menu, .desktop-shell .custom-select__menu) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #101e36 !important;
+}
+
+:root[data-lg-ready='true'][data-theme='light']:is([data-lg-enabled='false'], [data-lg-scene-popups='false']) :is([data-lg-modal-card='true'], .desktop-shell .desktop-tool-content [data-lg-modal-card='true'], .desktop-shell .browser-tab-context-menu, .desktop-shell .custom-select__menu),
+:root[data-lg-ready='true'][data-lg-theme='light']:is([data-lg-enabled='false'], [data-lg-scene-popups='false']) :is([data-lg-modal-card='true'], .desktop-shell .desktop-tool-content [data-lg-modal-card='true'], .desktop-shell .browser-tab-context-menu, .desktop-shell .custom-select__menu) {
+  background: #ffffff !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-footer='false']) .desktop-shell .app-footer {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0d182b !important;
+}
+
+:root[data-lg-ready='true']:is([data-lg-enabled='false'], [data-lg-scene-footer='false']) .desktop-shell[data-theme='light'] .app-footer {
+  background: #f4f8fd !important;
+}
+
+/* ==========================================================================
+   6. Liquid Glass Settings Panel (#studypilot-liquid-glass-settings)
+   ========================================================================== */
+
+.lg-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+}
+
+.lg-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lg-settings__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lg-settings__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.lg-settings__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.lg-settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lg-settings__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.lg-settings__value-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  background: var(--lg-accent-soft, rgba(90, 168, 255, 0.16));
+  color: var(--lg-accent, var(--primary-color));
+  border: 1px solid rgba(90, 168, 255, 0.30);
+}
+
+.lg-settings__segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lg-settings__segmented--presets {
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+}
+
+.lg-settings__segmented button {
+  min-height: 38px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.lg-settings__switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--lg-border-subtle, var(--border-glass));
+  background: rgba(130, 170, 225, 0.06);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.lg-settings__switch-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.lg-settings__switch-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+/* Live Preview Card */
+.lg-preview {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  min-height: 162px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--lg-border-color, var(--border-glass));
+  box-shadow: inset 0 1px 0 var(--lg-specular, rgba(255, 255, 255, 0.3)), var(--lg-shadow-soft);
+}
+
+.lg-preview[data-backdrop='aurora'] {
+  background:
+    radial-gradient(circle at 18% 22%, #38bdf8 0%, transparent 45%),
+    radial-gradient(circle at 82% 28%, #818cf8 0%, transparent 48%),
+    radial-gradient(circle at 52% 88%, #2dd4bf 0%, transparent 50%),
+    linear-gradient(135deg, #0d2247 0%, #1c3d72 52%, #134e5e 100%);
+}
+
+.lg-preview[data-backdrop='light-grid'] {
+  background:
+    linear-gradient(rgba(30, 64, 120, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 64, 120, 0.11) 1px, transparent 1px),
+    radial-gradient(circle at 22% 26%, rgba(56, 189, 248, 0.48), transparent 46%),
+    radial-gradient(circle at 82% 76%, rgba(251, 191, 36, 0.36), transparent 45%),
+    linear-gradient(135deg, #f6fbff 0%, #e7f2ff 52%, #ffffff 100%);
+  background-size: 20px 20px, 20px 20px, 100% 100%, 100% 100%, 100% 100%;
+}
+
+.lg-preview[data-backdrop='dark-nebula'] {
+  background:
+    radial-gradient(circle at 24% 24%, rgba(99, 102, 241, 0.65), transparent 46%),
+    radial-gradient(circle at 76% 68%, rgba(14, 165, 233, 0.55), transparent 46%),
+    radial-gradient(circle at 50% 50%, rgba(236, 72, 153, 0.32), transparent 52%),
+    linear-gradient(145deg, #050a18 0%, #0d1935 55%, #071122 100%);
+}
+
+.lg-preview[data-backdrop='warm-sunset'] {
+  background:
+    radial-gradient(circle at 20% 24%, #fb923c 0%, transparent 48%),
+    radial-gradient(circle at 80% 30%, #f43f5e 0%, transparent 48%),
+    radial-gradient(circle at 50% 88%, #facc15 0%, transparent 48%),
+    linear-gradient(135deg, #3b174a 0%, #9d244d 52%, #ea580c 100%);
+}
+
+.lg-preview__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--lg-chrome-bg);
+  border: 1px solid var(--lg-border-color);
+  backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-header-blur-px)) saturate(var(--lg-saturate));
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+  color: var(--lg-ink-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.lg-preview__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--lg-accent-soft);
+  border: 1px solid rgba(90, 168, 255, 0.38);
+  color: var(--lg-ink-primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.lg-preview__dock {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    148deg,
+    rgba(28, 48, 82, var(--lg-dock-alpha-dark)),
+    rgba(12, 24, 46, calc(var(--lg-dock-alpha-dark) + 0.12))
+  );
+  border: 1px solid rgba(212, 236, 255, calc(0.24 + var(--lg-refraction-opacity) * 0.32));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, calc(0.26 + var(--lg-specular-opacity) * 0.38)),
+    inset 0 -1px 0 rgba(56, 189, 248, calc(var(--lg-prism-opacity) * 0.42)),
+    0 10px 26px rgba(4, 14, 34, 0.30);
+  backdrop-filter: blur(var(--lg-dock-blur-px)) saturate(var(--lg-saturate));
+  -webkit-backdrop-filter: blur(var(--lg-dock-blur-px)) saturate(var(--lg-saturate));
+}
+
+:root[data-lg-ready='true'][data-theme='light'] .lg-preview__dock,
+:root[data-lg-ready='true'][data-lg-theme='light'] .lg-preview__dock {
+  background: linear-gradient(
+    148deg,
+    rgba(255, 255, 255, calc(var(--lg-dock-alpha-light) + 0.10)),
+    rgba(218, 236, 255, var(--lg-dock-alpha-light))
+  );
+  border-color: rgba(255, 255, 255, 0.94);
+}
+
+.lg-preview__dock-item {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--lg-ink-secondary);
+}
+
+.lg-preview__dock-item.is-active {
+  background: var(--lg-accent-soft);
+  border: 1px solid rgba(118, 186, 255, 0.52);
+  color: var(--lg-ink-primary);
+  box-shadow: inset 0 1px 0 var(--lg-specular);
+}
+
+.lg-preview[data-disabled='true'] :is(.lg-preview__topbar, .lg-preview__dock) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+.lg-preview__backdrops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lg-preview__backdrops button {
+  flex: 1 1 70px;
+  min-height: 30px !important;
+  padding: 4px 8px !important;
+  font-size: 0.68rem !important;
+  border-radius: 999px !important;
+}
+
+/* Progress & Advanced Sliders */
+.lg-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.lg-slider-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.lg-settings input[type='range'] {
+  width: 100%;
+  height: 22px;
+  accent-color: var(--lg-accent, #2b7df5);
+}
+
+/* Scene Switch Grid */
+.lg-scene-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 8px;
+}
+
+/* Collapsible Advanced Panel */
+.lg-advanced {
+  border-radius: 16px;
+  border: 1px solid var(--lg-border-subtle, var(--border-glass));
+  overflow: hidden;
+}
+
+.lg-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lg-advanced__body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Saved Presets & Import / Export */
+.lg-preset-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.lg-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lg-saved-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--lg-border-subtle, var(--border-glass));
+  background: rgba(130, 170, 225, 0.06);
+}
+
+.lg-saved-item__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lg-saved-item__name {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lg-saved-item__info {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.lg-saved-item__actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.lg-saved-item__actions button {
+  min-height: 32px !important;
+  padding: 4px 10px !important;
+  font-size: 0.72rem !important;
+}
+
+.lg-io-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lg-io-row > button,
+.lg-io-row > label {
+  flex: 1 1 130px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.lg-file-label {
+  position: relative;
+  cursor: pointer;
+  border-radius: 14px;
+  border: 1px solid var(--lg-border-color, var(--border-glass));
+  background: var(--lg-control-bg);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.lg-file-label input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.lg-status {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  min-height: 1.2em;
+}
+
+.lg-status[data-tone='error'] {
+  color: var(--danger-color);
+  font-weight: 700;
+}
+
+.lg-status[data-tone='success'] {
+  color: var(--success-color);
+  font-weight: 700;
+}
+
+.lg-settings[data-lg-master-off='true'] .lg-settings__subcontrols {
+  opacity: 0.72;
+}
+
+/* Reduced motion & Forced colors */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-lg-ready='true'] .desktop-shell .mobile-tabs.adaptive-dock,
+  :root[data-lg-ready='true'] .desktop-shell .desktop-sheet,
+  :root[data-lg-ready='true'] [data-lg-modal-card='true'],
+  :root[data-lg-ready='true'] .desktop-shell .browser-tab-context-menu,
+  :root[data-lg-ready='true'] .desktop-shell .custom-select__menu {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root[data-lg-ready='true'] .desktop-shell :is(
+    .app-header,
+    .browser-tabs-bar,
+    .browser-toolbar,
+    .desktop-sheet,
+    .app-footer,
+    [data-lg-modal-card='true']
+  ) {
+    background: Canvas !important;
+    border-color: CanvasText !important;
+    backdrop-filter: none !important;
+  }
+}

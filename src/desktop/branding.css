@@ -3,10 +3,11 @@
 :root[data-brand] .app-brand__title { font-family: 'Segoe UI',system-ui,sans-serif; font-size: 16px; letter-spacing: .12em; font-weight: 700; }
 :root[data-brand] .app-brand__tag { font-family: 'Segoe UI',system-ui,sans-serif; font-size: 10px; letter-spacing: .05em; }
 :root[data-brand='wisp-rs'] .app-window-titlebar { min-height: 46px; padding-block: 6px; user-select: none; cursor: default; border-radius: 0; }
-:root[data-brand='wisp-rs'] .app-header__meta { align-items: center; }
-:root[data-brand='wisp-rs'] .window-controls { gap: 0 !important; margin-left: 8px; align-self: stretch; }
-:root[data-brand='wisp-rs'] .window-control { min-width: 42px; min-height: 32px; border-radius: 8px !important; }
-:root[data-brand='wisp-rs'] .window-control:last-child:hover { background: #c72c41 !important; color: white !important; }
+:root[data-brand] .app-header__meta { align-items: center; }
+:root[data-brand] .window-controls { gap: 2px !important; margin-left: 8px; align-self: stretch; align-items: center; }
+:root[data-brand] .window-control { min-width: 38px; min-height: 30px; border-radius: 9px !important; transition: background 160ms ease, color 160ms ease; }
+:root[data-brand] .window-control:focus-visible { outline: 2px solid var(--lg-accent, #4e9aff); outline-offset: -2px; }
+:root[data-brand] .window-control:last-child:hover { background: #c72c41 !important; color: white !important; }
 :root[data-brand='wisp-rs'] .app-shell { border-radius: 0; }
 /* Native guests live below the transparent UI window. Layout containers must
    not paint an extra surface outside the floating dock's optical silhouette. */

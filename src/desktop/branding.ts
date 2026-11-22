@@ -14,6 +14,10 @@ export function installBranding() {
     if (label && label.textContent !== title) label.textContent = title;
     const tag = document.querySelector('.app-brand__tag');
     if (tag && tag.textContent !== (rust ? 'Rust Edition' : 'Study Workspace')) tag.textContent = rust ? 'Rust Edition' : 'Study Workspace';
+    const shell = document.querySelector<HTMLElement>('.desktop-shell');
+    if (shell?.dataset.theme && document.documentElement.dataset.lgTheme !== shell.dataset.theme) {
+      document.documentElement.dataset.lgTheme = shell.dataset.theme;
+    }
     const mark = document.querySelector('.app-brand__mark');
     if (mark && !mark.querySelector('img[data-wisp-mark]')) {
       const icon = document.createElement('img'); icon.src = new URL('../../public/wisp-icon.svg', import.meta.url).href;
