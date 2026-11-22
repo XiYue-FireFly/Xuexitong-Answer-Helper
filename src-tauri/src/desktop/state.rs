@@ -39,6 +39,7 @@ pub struct Evaluation {
 }
 #[derive(Default)]
 pub struct Registry {
+    pub popups: HashMap<String, u32>,
     pub next: u32,
     pub guests: HashMap<u32, Guest>,
     pub pending: HashMap<String, Evaluation>,
@@ -50,6 +51,7 @@ pub struct DesktopState {
     pub capture_gate: super::native::CaptureGate,
     pub ui_generation: AtomicU64,
     pub layout_generation: AtomicU64,
+    pub shutdown_started: std::sync::atomic::AtomicBool,
 }
 impl DesktopState {
     pub fn new(root: PathBuf) -> Result<Self, String> {
@@ -65,6 +67,7 @@ impl DesktopState {
             capture_gate: super::native::CaptureGate::new(),
             ui_generation: AtomicU64::new(0),
             layout_generation: AtomicU64::new(0),
+            shutdown_started: std::sync::atomic::AtomicBool::new(false),
         })
     }
     pub fn get(&self, id: u32) -> Result<Guest, String> {

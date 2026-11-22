@@ -485,22 +485,36 @@ fn receive_message(
             }
             // Main-frame Source is checked again against its actual current COM
             // document, rather than trusting just the URL captured with a message.
-            if let Target::Top(core) = &frame.target
-                && source_of(core).ok().as_ref() != Some(&source)
-            {
-                return (None, None);
-            }
-            let changed = if frame.document.ready && frame.document.source != source {
+            // Same-origin in-document URL updates (e.g. history.replaceState or
+            // hash changes during login boot) keep the same document generation
+            // and token, so compare with same_document_source instead of dropping
+            // the one-shot bridge-ready handshake.
+            let effective_source = if let Target::Top(core) = &frame.target {
+                let Ok(current_source) = source_of(core) else {
+                    mark_rejection_in_frame(frame, "top-source-read");
+                    return (None, None);
+                };
+                if !allowed_source(&current_source)
+                    || !same_document_source(&current_source, &source)
+                {
+                    mark_rejection_in_frame(frame, "top-source-mismatch");
+                    return (None, None);
+                }
+                current_source
+            } else {
+                source
+            };
+            let changed = if frame.document.ready && frame.document.source != effective_source {
                 let mut updated = frame.document.clone();
-                updated.source = source.clone();
+                updated.source = effective_source.clone();
                 Some(updated)
             } else {
                 None
             };
-            if source != frame.document.source {
+            if effective_source != frame.document.source {
                 frame.geometry_bound = false;
             }
-            frame.document.source = source;
+            frame.document.source = effective_source;
             if value["kind"] == "ready" {
                 if value["channel"] != "studypilot:bridge-ready"
                     || value["payload"]["protocolVersion"] != 1
@@ -551,6 +565,11 @@ fn parse_wire(raw: &str) -> Result<Value, &'static str> {
     }
 }
 
+fn mark_rejection_in_frame(frame: &mut Frame, reason: &'static str) {
+    let count = frame.rejected.entry(reason).or_default();
+    *count = count.saturating_add(1);
+}
+
 fn mark_rejection(guest: u32, frame_id: u64, reason: &'static str) {
     BINDERS.with(|binders| {
         if let Some(frame) = binders
@@ -558,8 +577,7 @@ fn mark_rejection(guest: u32, frame_id: u64, reason: &'static str) {
             .get_mut(&guest)
             .and_then(|binder| binder.frames.get_mut(&frame_id))
         {
-            let count = frame.rejected.entry(reason).or_default();
-            *count = count.saturating_add(1);
+            mark_rejection_in_frame(frame, reason);
         }
     });
 }
@@ -689,7 +707,7 @@ fn attach_frame(guest: u32, parent: u64, native_frame: ICoreWebView2Frame) -> Re
             save_token(guest, frame_id, "dom", token);
             native_frame.add_Destroyed(
                 &FrameDestroyedEventHandler::create(Box::new(move |_, _| {
-                    destroy_frame(guest, frame_id);
+                    destroy_frame(guest, frame_id, true);
                     Ok(())
                 })),
                 &mut token,
@@ -711,7 +729,7 @@ fn attach_frame(guest: u32, parent: u64, native_frame: ICoreWebView2Frame) -> Re
         Ok(())
     })();
     if let Err(error) = result {
-        destroy_frame(guest, frame_id);
+        destroy_frame(guest, frame_id, false);
         return Err(error.to_string());
     }
     Ok(())
@@ -846,13 +864,14 @@ pub fn install(
                                 .borrow_mut()
                                 .get_mut(&guest)
                                 .and_then(|binder| binder.frames.get_mut(&0))
-                                && frame.document.ready
                                 && frame.document.source != source
                                 && same_document_source(&frame.document.source, &source)
                             {
                                 frame.geometry_bound = false;
                                 frame.document.source = source;
-                                return Some(frame.document.clone());
+                                if frame.document.ready {
+                                    return Some(frame.document.clone());
+                                }
                             }
                             None
                         });
@@ -1011,7 +1030,19 @@ pub fn dispatch(
     )
 }
 
-fn detach(frame: Frame) {
+fn child_frame_destroyed(frame: &ICoreWebView2Frame2) -> bool {
+    let mut destroyed = windows::core::BOOL::default();
+    match unsafe { frame.IsDestroyed(&mut destroyed) } {
+        Ok(()) => destroyed.as_bool(),
+        Err(_) => true,
+    }
+}
+
+fn should_detach_child_subscriptions(callback_destroyed: bool, native_destroyed: bool) -> bool {
+    !callback_destroyed && !native_destroyed
+}
+
+fn detach(frame: Frame, callback_destroyed: bool) {
     let subscriptions = frame.subscriptions;
     unsafe {
         match frame.target {
@@ -1039,6 +1070,16 @@ fn detach(frame: Frame) {
                 }
             }
             Target::Child(frame) => {
+                // WebView2 automatically releases event handlers when a frame is
+                // destroyed, and calling ICoreWebView2Frame7::remove_FrameCreated
+                // on a destroyed frame (including inside FrameDestroyed) triggers
+                // a fatal STATUS_BREAKPOINT (0x80000003) CHECK in EmbeddedBrowserWebView.dll.
+                if !should_detach_child_subscriptions(
+                    callback_destroyed,
+                    child_frame_destroyed(&frame),
+                ) {
+                    return;
+                }
                 if let Some(token) = subscriptions.navigation {
                     let _ = frame.remove_NavigationStarting(token);
                 }
@@ -1091,12 +1132,12 @@ fn remove_descendants(guest: u32, parent: u64) {
     });
     for frame in removed {
         let document = frame.document.clone();
-        detach(frame);
+        detach(frame, false);
         notify(guest, BoundEvent::Destroyed(document));
     }
 }
 
-fn destroy_frame(guest: u32, frame_id: u64) {
+fn destroy_frame(guest: u32, frame_id: u64, callback_destroyed: bool) {
     remove_descendants(guest, frame_id);
     let removed = BINDERS.with(|binders| {
         binders
@@ -1106,7 +1147,7 @@ fn destroy_frame(guest: u32, frame_id: u64) {
     });
     if let Some(frame) = removed {
         let document = frame.document.clone();
-        detach(frame);
+        detach(frame, callback_destroyed);
         notify(guest, BoundEvent::Destroyed(document));
     }
 }
@@ -1116,7 +1157,7 @@ pub fn remove(guest: u32) {
     let removed = BINDERS.with(|binders| binders.borrow_mut().remove(&guest));
     if let Some(binder) = removed {
         for frame in binder.frames.into_values() {
-            detach(frame);
+            detach(frame, false);
         }
     }
 }
@@ -1286,5 +1327,13 @@ mod tests {
         assert!(block_leased_navigation(true, 0));
         assert!(!block_leased_navigation(false, 0));
         assert!(!block_leased_navigation(true, 7));
+    }
+
+    #[test]
+    fn child_frame_detach_skips_unsubscribe_when_frame_is_already_destroyed() {
+        assert!(should_detach_child_subscriptions(false, false));
+        assert!(!should_detach_child_subscriptions(true, false));
+        assert!(!should_detach_child_subscriptions(false, true));
+        assert!(!should_detach_child_subscriptions(true, true));
     }
 }

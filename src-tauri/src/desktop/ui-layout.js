@@ -1,5 +1,10 @@
 (() => {
   const selectors = ['.app-header', '.app-footer', '.browser-tabs-bar', '.browser-toolbar', '.adaptive-dock', '.browser-tab-context-menu'];
+  const modalSelector = '.desktop-dismiss,dialog[open],[role=dialog],[aria-modal="true"],[data-native-modal="true"]';
+  // A modal may get position:fixed from a stylesheet at any nesting depth.
+  const overlaySelector = 'body *';
+  const excludedOverlayClasses = ['workbench-drag-shield', 'mock-page-container', 'desktop-dissolve', 'answer-activity-effects'];
+  const DOCK_OPTICAL_BLEED = 12;
   const geometryProperty = /^(?:width|height|minWidth|maxWidth|minHeight|maxHeight|top|right|bottom|left|inset.*|transform|translate|scale|rotate|offset.*|margin.*|padding.*|border.*(?:Width|Radius)|gap|rowGap|columnGap|fontSize)$/;
   const watched = new Set();
   let frame = 0, version = 0, disposed = false, active = false;
@@ -23,8 +28,9 @@
     return Number(match[1]) * (match[2] === '%' ? extent / 100 : 1);
   }
 
-  function corners(element, rect, style) {
-    const width = element.offsetWidth || rect.width, height = element.offsetHeight || rect.height;
+  function corners(element, rect, style, useRectExtent = false) {
+    const width = useRectExtent ? rect.width : (element.offsetWidth || rect.width);
+    const height = useRectExtent ? rect.height : (element.offsetHeight || rect.height);
     const values = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
     const radii = values.map(value => {
       const parts = String(value || '0').trim().split(/\s+/);
@@ -37,6 +43,110 @@
       [height, radii[0][1] + radii[3][1]], [height, radii[1][1] + radii[2][1]],
     ]) if (sum > extent) factor = Math.min(factor, extent / sum);
     return radii.map(([x, y]) => [x * factor * rect.width / width, y * factor * rect.height / height]);
+  }
+
+  function viewportSize() {
+    const width = Number(window.innerWidth || document.documentElement?.clientWidth || 0);
+    const height = Number(window.innerHeight || document.documentElement?.clientHeight || 0);
+    return {
+      width: Number.isFinite(width) && width > 0 ? width : 0,
+      height: Number.isFinite(height) && height > 0 ? height : 0,
+    };
+  }
+
+  function isVisibleModal(element) {
+    if (!element) return false;
+    if (element.hidden || element.getAttribute?.('aria-hidden') === 'true') return false;
+    const style = typeof getComputedStyle === 'function' ? getComputedStyle(element) : null;
+    if (style?.display === 'none' || style?.visibility === 'hidden' || style?.visibility === 'collapse') return false;
+    const opacity = style?.opacity === undefined || style.opacity === '' ? 1 : Number(style.opacity);
+    if (!Number.isFinite(opacity) || opacity <= 0) return false;
+    // Legacy VM fixtures supply semantic sentinels without a DOM rectangle.
+    if (typeof element.getBoundingClientRect !== 'function') return true;
+    const rect = element.getBoundingClientRect();
+    return !!rect && rect.width > 0 && rect.height > 0;
+  }
+
+  function isVisibleFixedOverlay(element, viewport) {
+    if (!element || typeof element.getBoundingClientRect !== 'function') return false;
+    for (const name of excludedOverlayClasses) {
+      if (element.classList?.contains?.(name)) return false;
+    }
+    const style = typeof getComputedStyle === 'function' ? getComputedStyle(element) : null;
+    if (!style || style.position !== 'fixed' || style.pointerEvents === 'none' || !isVisibleModal(element)) return false;
+    const zIndex = Number(style.zIndex);
+    if (!Number.isFinite(zIndex) || zIndex < 100) return false;
+    const rect = element.getBoundingClientRect();
+    if (!(rect && rect.width > 0 && rect.height > 0)) return false;
+    if (!(viewport.width > 0 && viewport.height > 0)) return false;
+    const visibleWidth = Math.min(viewport.width, rect.x + rect.width) - Math.max(0, rect.x);
+    const visibleHeight = Math.min(viewport.height, rect.y + rect.height) - Math.max(0, rect.y);
+    return visibleWidth >= viewport.width * 0.7 && visibleHeight >= viewport.height * 0.7;
+  }
+
+  function hasBlockingModal() {
+    const explicit = document.querySelectorAll?.(modalSelector);
+    if (explicit?.length) {
+      if ([...explicit].some(isVisibleModal)) return true;
+    } else if (isVisibleModal(document.querySelector?.(modalSelector))) return true;
+    if (typeof document.querySelectorAll !== 'function') return false;
+    const viewport = viewportSize();
+    if (!(viewport.width > 0 && viewport.height > 0)) return false;
+    const seen = new Set();
+    for (const element of document.querySelectorAll(overlaySelector) || []) {
+      if (!element || seen.has(element)) continue;
+      seen.add(element);
+      if (isVisibleFixedOverlay(element, viewport)) return true;
+    }
+    return false;
+  }
+
+  function hasTruthyDataFlag(element, attrName) {
+    if (!element) return false;
+    const attrVal = typeof element.getAttribute === 'function' ? element.getAttribute(attrName) : undefined;
+    if (attrVal !== null && attrVal !== undefined) return attrVal !== 'false';
+    const dataKey = attrName.replace(/^data-/, '');
+    const dataVal = element.dataset?.[dataKey];
+    return dataVal !== undefined && dataVal !== 'false';
+  }
+
+  function isDockOpticalActive(element) {
+    if (!element || element.classList?.contains?.('is-collapsed')) return false;
+    if (hasTruthyDataFlag(element, 'data-dragging') || hasTruthyDataFlag(element, 'data-pressed')) return true;
+    const track = typeof element.querySelector === 'function'
+      ? element.querySelector('.mobile-tabs__track[data-dragging],.mobile-tabs__track[data-pressed]')
+      : null;
+    if (!track) return false;
+    return hasTruthyDataFlag(track, 'data-dragging') || hasTruthyDataFlag(track, 'data-pressed');
+  }
+
+  function isVerticalDock(element, rect) {
+    const verticalAttr = element.getAttribute?.('data-vertical') ?? element.dataset?.vertical;
+    if (verticalAttr === 'true') return true;
+    if (verticalAttr === 'false') return false;
+    const edge = element.getAttribute?.('data-edge') ?? element.dataset?.edge;
+    if (edge === 'left' || edge === 'right') return true;
+    if (edge === 'top' || edge === 'bottom') return false;
+    return rect.height > rect.width;
+  }
+
+  function expandDockOpticalRect(element, rect, viewport) {
+    const vertical = isVerticalDock(element, rect);
+    let left = vertical ? rect.x - DOCK_OPTICAL_BLEED : rect.x;
+    let right = vertical ? rect.x + rect.width + DOCK_OPTICAL_BLEED : rect.x + rect.width;
+    let top = vertical ? rect.y : rect.y - DOCK_OPTICAL_BLEED;
+    let bottom = vertical ? rect.y + rect.height : rect.y + rect.height + DOCK_OPTICAL_BLEED;
+    left = Math.max(0, left);
+    top = Math.max(0, top);
+    if (viewport.width > 0) right = Math.min(viewport.width, right);
+    if (viewport.height > 0) bottom = Math.min(viewport.height, bottom);
+    if (right <= left || bottom <= top) return null;
+    return {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    };
   }
 
   function moving(element) {
@@ -78,14 +188,19 @@
   function update() {
     frame = 0;
     if (disposed) return;
-    const elements = [...new Set(selectors.flatMap(selector => [...document.querySelectorAll(selector)]))];
+    const dockElements = new Set(document.querySelectorAll('.adaptive-dock') || []);
+    const elements = [...new Set(selectors.flatMap(selector => [...(document.querySelectorAll(selector) || [])]))];
     for (const element of [...watched]) if (!elements.includes(element)) { resize.unobserve(element); watched.delete(element); }
     for (const element of elements) if (!watched.has(element)) { watched.add(element); resize.observe(element); }
-    const blocked = !!document.querySelector('.desktop-dismiss,dialog[open],[role=dialog]');
+    const blocked = hasBlockingModal();
+    const viewport = viewportSize();
     const regions = elements.flatMap(element => {
       const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
       if (!(rect.width > 0 && rect.height > 0) || style.display === 'none' || style.visibility === 'hidden') return [];
-      return [{ x: rect.x, y: rect.y, width: rect.width, height: rect.height, radii: corners(element, rect, style) }];
+      const expanded = dockElements.has(element) && isDockOpticalActive(element);
+      const effectiveRect = expanded ? expandDockOpticalRect(element, rect, viewport) : rect;
+      if (!effectiveRect) return [];
+      return [{ x: effectiveRect.x, y: effectiveRect.y, width: effectiveRect.width, height: effectiveRect.height, radii: corners(element, effectiveRect, style, expanded) }];
     });
     const key = JSON.stringify({ blocked, regions });
     if (key === (active ? sending : acknowledged)) pending = null;
@@ -110,7 +225,7 @@
     if (disposed) return;
     mutations.observe(document.documentElement, {
       childList: true, subtree: true, attributes: true,
-      attributeFilter: ['class', 'open', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'data-collapsed', 'data-dock-edge', 'data-edge', 'data-compact'],
+      attributeFilter: ['class', 'open', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'aria-modal', 'role', 'data-collapsed', 'data-dock-edge', 'data-edge', 'data-compact', 'data-vertical', 'data-dragging', 'data-pressed', 'data-native-modal'],
     });
     for (const event of events) addEventListener(event, queue, true);
     addEventListener('pagehide', dispose, { once: true });

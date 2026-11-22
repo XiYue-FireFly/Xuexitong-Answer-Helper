@@ -1,3 +1,4 @@
+import { checkLoginNavigation } from './test-rust-login-navigation.mjs';
 import {spawn,execFileSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {mkdirSync,writeFileSync,mkdtempSync} from 'node:fs';
@@ -39,6 +40,7 @@ try{
  assert(ui);ui.setDefaultTimeout(20000);ui.on('pageerror',error=>errors.push(error.message));await ui.locator('.desktop-shell').waitFor();
  const nativeWindows=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/rust-host-native-input.ps1','-PayloadBase64',Buffer.from(JSON.stringify({action:'windows',processId:child.pid})).toString('base64')],{encoding:'utf8',windowsHide:true}));
  const windows=Array.isArray(nativeWindows)?nativeWindows:[nativeWindows];const rootWindow=windows.find(window=>window.title==='WISP RS'&&window.owner===0);assert(rootWindow);assert(rootWindow.y-rootWindow.outerY<=Math.ceil(rootWindow.dpi/96*8),'The Rust owner must not reserve native titlebar height');
+ assert.equal(windows.filter(w=>w.title==='WISP RS'&&w.visible).length,1,'The desktop and its controls must share one top-level window');
  assert.equal(await ui.locator('.app-window-titlebar').count(),1);assert.equal(await ui.locator('.app-brand__title').textContent(),'WISP RS');assert.equal(await ui.locator('.app-brand__mark img').count(),1);pass('WISP RS uses the willow mark and one frameless draggable titlebar');
  if(await ui.getByRole('button',{name:'我知道了',exact:true}).count())await ui.getByRole('button',{name:'我知道了',exact:true}).click();
  await ui.waitForFunction(()=>{const el=document.querySelector('webview[data-active-browser=true]');try{return el?.getWebContentsId()>0&&!el.isLoading()&&document.querySelector('.browser-address input')?.value===el.getURL();}catch{return false;}});
@@ -124,6 +126,8 @@ try{
  await ui.locator('webview[data-active-browser=true]').evaluate((el,target)=>el.executeJavaScript(`(()=>{const form=document.createElement('form');form.action=${JSON.stringify(target)};form.method='POST';form.target='_blank';const input=document.createElement('input');input.name='fixture';input.value='native-post-preserved';form.append(input);document.body.append(form);form.submit();return true})()`,true),url+'work/save');
  for(let i=0;i<40&&!postedBody;i++)await ui.waitForTimeout(100);assert.equal(postedBody,'fixture=native-post-preserved');
  await ui.waitForFunction(value=>[...document.querySelectorAll('webview')].some(el=>el.getURL?.()===value),url+'popup-result');pass('hidden native popup preserves POST body and forwards its final redirect');
+ await checkLoginNavigation(ui);
+ pass('login popup keeps its POST and session through callback, links, history and reload');
  await ui.getByRole('button',{name:'题库',exact:true}).click();await ui.waitForTimeout(600);await ui.screenshot({path:path.join(out,'original-ui.png')});
  const exported=createProfileEnvelope({database:{settings:{theme:'dark'},history:['retained'],knowledgeBase:[]},localStorage:{studypilot_settings_v3:JSON.stringify({theme:'dark'}),studypilot_dock_ui_v1:JSON.stringify({edge:'left',glass:'ultra',autoCollapse:true})},sourceVersion:'1.5.1'});
  const imported=await ui.evaluate(async envelope=>{const host=window.__RUST_HOST__;const staged=await host.invoke('profile:stage',envelope);const committed=await host.invoke('profile:commit',{token:staged.token});return {staged,committed};},exported);

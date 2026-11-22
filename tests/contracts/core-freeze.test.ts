@@ -132,7 +132,7 @@ describe('reviewed Rust host core freeze', () => {
       mkdirSync(output, { recursive: true });
       writeFileSync(path.join(output, 'mutation-result.json'), JSON.stringify({ mutation: 'First equality/comparison operator in original answer-matcher replaced in a temporary copy only', file: entry.path, rejectedCopy, originalWorkspace }, null, 2) + '\n');
     } finally { rmSync(directory, { recursive: true, force: true }); }
-  });
+  }, 15000); // Copies 115 files and verifies both AST dependency graphs on disk.
 
   it('accepts checkout CRLF conversion while rejecting deletion and new unreviewed business code', async () => {
     const { verifyCoreFreeze } = await loadVerifier();

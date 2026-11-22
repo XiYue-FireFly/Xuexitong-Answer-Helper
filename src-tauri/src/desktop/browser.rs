@@ -90,21 +90,23 @@ fn message(app: &AppHandle, id: u32, document: frames::BoundDocument, value: Val
         }
     }
 }
-pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, String> {
-    request.bounds.validate()?;
-    if request.instance_id.len() > 180 || !request.instance_id.starts_with("rust-guest-") {
-        return Err("Invalid browser instance".into());
-    }
-    let url = tauri::Url::parse(&request.url).map_err(|e| e.to_string())?;
-    if !matches!(url.scheme(), "http" | "https" | "about") {
-        return Err("网页地址协议不受支持。".into());
-    }
+pub(super) fn register(
+    app: &AppHandle,
+    request: CreateRequest,
+    label: Option<String>,
+) -> Result<Guest, String> {
     let state = app.state::<DesktopState>();
-    let guest = {
+    {
         let mut registry = state
             .registry
             .lock()
             .map_err(|_| "Browser registry unavailable")?;
+        if state
+            .shutdown_started
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("Browser is closing".into());
+        }
         registry.next = registry
             .next
             .checked_add(1)
@@ -112,7 +114,7 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
         let id = registry.next;
         let guest = Guest {
             instance: request.instance_id,
-            label: format!("site-{id}"),
+            label: label.unwrap_or_else(|| format!("site-{id}")),
             hook: format!("__sp_{}", Uuid::new_v4().simple()),
             snapshot: Snapshot {
                 guest_id: id,
@@ -129,8 +131,280 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
             page_ready: false,
         };
         registry.guests.insert(id, guest.clone());
-        guest
+        Ok(guest)
+    }
+}
+
+pub(super) fn page_load(
+    lifecycle: &AppHandle,
+    webview: &Webview,
+    id: u32,
+    event: PageLoadEvent,
+    url: &tauri::Url,
+) {
+    let state = lifecycle.state::<DesktopState>();
+    let started = matches!(event, PageLoadEvent::Started);
+    let current = {
+        let Ok(mut registry) = state.registry.lock() else {
+            return;
+        };
+        if started {
+            let tokens: Vec<_> = registry
+                .pending
+                .iter()
+                .filter(|(_, entry)| entry.guest == id)
+                .map(|(token, _)| token.clone())
+                .collect();
+            for token in tokens {
+                if let Some(entry) = registry.pending.remove(&token) {
+                    let _ = entry.sender.send(Err("网页文档已改变。".into()));
+                }
+            }
+        }
+        let Some(guest) = registry.guests.get_mut(&id) else {
+            return;
+        };
+        guest.page_ready = !started;
+        guest.snapshot.loading = started || !guest.bridge_ready;
+        guest.snapshot.url = url.to_string();
+        guest.clone()
     };
+    if started {
+        emit(
+            lifecycle,
+            &current,
+            "did-start-navigation",
+            json!({"isMainFrame":true}),
+        );
+        emit(lifecycle, &current, "did-start-loading", json!({}));
+    } else {
+        let _ = native::refresh_history(webview, id);
+        emit(
+            lifecycle,
+            &current,
+            "did-navigate",
+            json!({"isMainFrame":true}),
+        );
+        if current.bridge_ready {
+            emit(lifecycle, &current, "dom-ready", json!({}));
+            emit(lifecycle, &current, "did-stop-loading", json!({}));
+        }
+        let update = lifecycle.clone();
+        let label = current.label.clone();
+        let expected = current.snapshot.document_generation;
+        let _ =
+            webview.eval_with_callback("({title:document.title,url:location.href})", move |text| {
+                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                    let state = update.state::<DesktopState>();
+                    let Ok(mut registry) = state.registry.lock() else {
+                        return;
+                    };
+                    if let Some(guest) = registry.guests.values_mut().find(|guest| {
+                        guest.label == label && guest.snapshot.document_generation == expected
+                    }) {
+                        guest.snapshot.title = value["title"].as_str().unwrap_or("").into();
+                        let snapshot = guest.clone();
+                        drop(registry);
+                        emit(
+                            &update,
+                            &snapshot,
+                            "page-title-updated",
+                            json!({"title":snapshot.snapshot.title}),
+                        );
+                    }
+                }
+            });
+    }
+}
+
+pub(super) fn install_bridge(
+    app: &AppHandle,
+    core: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2,
+    id: u32,
+) -> Result<(), String> {
+    let events = app.clone();
+    frames::install(
+        core,
+        id,
+        PAGE_FACTORY,
+        Arc::new(move |event| match event {
+            frames::BoundEvent::Message { document, value } => {
+                message(&events, id, document, value)
+            }
+            frames::BoundEvent::BlockedNavigation { document, target } => {
+                let app = events.clone();
+                let state = app.state::<DesktopState>();
+                if let Ok(mut registry) = state.registry.lock()
+                    && let Some(guest) = registry.guests.get_mut(&id)
+                {
+                    guest.snapshot.url = document.source.clone();
+                }
+                let lease_stamp = super::media::source_lease_stamp(id);
+                let ui_generation = state
+                    .ui_generation
+                    .load(std::sync::atomic::Ordering::Acquire);
+                tauri::async_runtime::spawn(async move {
+                    let Ok(guest) = app.state::<DesktopState>().get(id) else {
+                        return;
+                    };
+                    if lease_stamp.is_empty()
+                        || super::media::source_lease_stamp(id) != lease_stamp
+                        || app
+                            .state::<DesktopState>()
+                            .ui_generation
+                            .load(std::sync::atomic::Ordering::Acquire)
+                            != ui_generation
+                    {
+                        return;
+                    }
+                    let template: Value = match serde_json::from_str(include_str!(
+                        "../../../dist-rust-navigation/navigation-intent-template.json"
+                    )) {
+                        Ok(value) => value,
+                        Err(_) => return,
+                    };
+                    let code = format!(
+                        "{}{}{}",
+                        template["head"].as_str().unwrap_or(""),
+                        json!(target),
+                        template["tail"].as_str().unwrap_or("")
+                    );
+                    if let Ok(result) = evaluate_document(&app, guest, document, code).await
+                        && result["value"]["value"] == true
+                        && super::media::source_lease_stamp(id) == lease_stamp
+                        && app
+                            .state::<DesktopState>()
+                            .ui_generation
+                            .load(std::sync::atomic::Ordering::Acquire)
+                            == ui_generation
+                    {
+                        let _ = app.emit_to("ui", "browser:open-tab", json!({"url":target}));
+                    }
+                });
+            }
+            frames::BoundEvent::Started(document) => {
+                if document.frame_id == 0 {
+                    super::media::invalidate_source(id);
+                }
+                super::frame_requests::invalidate(id, &document);
+                if document.frame_id == 0 {
+                    let state = events.state::<DesktopState>();
+                    let current = {
+                        let Ok(mut registry) = state.registry.lock() else {
+                            return;
+                        };
+                        let Some(guest) = registry.guests.get_mut(&id) else {
+                            return;
+                        };
+                        guest.snapshot.document_generation = document.generation;
+                        guest.snapshot.url = document.source;
+                        guest.hook = document.hook;
+                        guest.bridge_ready = false;
+                        guest.page_ready = false;
+                        guest.snapshot.loading = true;
+                        guest.clone()
+                    };
+                    emit(
+                        &events,
+                        &current,
+                        "did-start-navigation",
+                        json!({"isMainFrame":true}),
+                    );
+                    emit(&events, &current, "did-start-loading", json!({}));
+                }
+            }
+            frames::BoundEvent::Ready(document) => {
+                if let Ok(current) = events.state::<DesktopState>().get(id) {
+                    super::frame_requests::ready(&events, &current, document.clone());
+                }
+                if document.frame_id == 0 {
+                    let state = events.state::<DesktopState>();
+                    let current = {
+                        let Ok(mut registry) = state.registry.lock() else {
+                            return;
+                        };
+                        let Some(guest) = registry.guests.get_mut(&id) else {
+                            return;
+                        };
+                        guest.snapshot.document_generation = document.generation;
+                        guest.bridge_ready = true;
+                        guest.snapshot.loading = !guest.page_ready;
+                        guest.snapshot.url = document.source;
+                        guest.hook = document.hook;
+                        guest.clone()
+                    };
+                    if current.page_ready {
+                        emit(&events, &current, "dom-ready", json!({}));
+                        emit(&events, &current, "did-stop-loading", json!({}));
+                    }
+                }
+            }
+            frames::BoundEvent::LocationChanged(document) => {
+                super::frame_requests::invalidate(id, &document);
+                if let Ok(current) = events.state::<DesktopState>().get(id) {
+                    super::frame_requests::ready(&events, &current, document.clone());
+                }
+                if document.frame_id == 0 {
+                    let state = events.state::<DesktopState>();
+                    let current = {
+                        let Ok(mut registry) = state.registry.lock() else {
+                            return;
+                        };
+                        let Some(guest) = registry.guests.get_mut(&id) else {
+                            return;
+                        };
+                        guest.snapshot.url = document.source;
+                        guest.clone()
+                    };
+                    emit(
+                        &events,
+                        &current,
+                        "did-navigate-in-page",
+                        json!({"isMainFrame":true}),
+                    );
+                }
+            }
+            frames::BoundEvent::Destroyed(document) => {
+                super::frame_requests::invalidate(id, &document);
+                let state = events.state::<DesktopState>();
+                if let Ok(mut registry) = state.registry.lock() {
+                    let tokens: Vec<_> = registry
+                        .pending
+                        .iter()
+                        .filter(|(_, entry)| {
+                            entry.guest == id && entry.generation == document.generation
+                        })
+                        .map(|(key, _)| key.clone())
+                        .collect();
+                    for token in tokens {
+                        if let Some(entry) = registry.pending.remove(&token) {
+                            let _ = entry.sender.send(Err("网页框架已关闭。".into()));
+                        }
+                    }
+                }
+            }
+            frames::BoundEvent::Error { frame_id, message } => {
+                eprintln!("Browser frame {frame_id} bridge: {message}");
+            }
+        }),
+    )?;
+    Ok(())
+}
+
+pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, String> {
+    request.bounds.validate()?;
+    if request.instance_id.len() > 180 || !request.instance_id.starts_with("rust-guest-") {
+        return Err("Invalid browser instance".into());
+    }
+    let url = tauri::Url::parse(&request.url).map_err(|e| e.to_string())?;
+    if !matches!(url.scheme(), "http" | "https" | "about") {
+        return Err("网页地址协议不受支持。".into());
+    }
+    if let Some(key) = request.url.strip_prefix(super::popups::TAB_PREFIX) {
+        return super::popups::adopt(app, key, &request);
+    }
+    let state = app.state::<DesktopState>();
+    let guest = register(app, request, None)?;
     let id = guest.snapshot.guest_id;
     let lifecycle = app.clone();
     let navigate = app.clone();
@@ -161,82 +435,7 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
         })
         .on_new_window(move |url, features| super::popups::open(&popup, url, features, id))
         .on_page_load(move |webview, payload| {
-            let state = lifecycle.state::<DesktopState>();
-            let started = matches!(payload.event(), PageLoadEvent::Started);
-            let current = {
-                let Ok(mut registry) = state.registry.lock() else {
-                    return;
-                };
-                if started {
-                    let tokens: Vec<_> = registry
-                        .pending
-                        .iter()
-                        .filter(|(_, entry)| entry.guest == id)
-                        .map(|(token, _)| token.clone())
-                        .collect();
-                    for token in tokens {
-                        if let Some(entry) = registry.pending.remove(&token) {
-                            let _ = entry.sender.send(Err("网页文档已改变。".into()));
-                        }
-                    }
-                }
-                let Some(guest) = registry.guests.get_mut(&id) else {
-                    return;
-                };
-                guest.page_ready = !started;
-                guest.snapshot.loading = started || !guest.bridge_ready;
-                guest.snapshot.url = payload.url().to_string();
-                guest.clone()
-            };
-            if started {
-                emit(
-                    &lifecycle,
-                    &current,
-                    "did-start-navigation",
-                    json!({"isMainFrame":true}),
-                );
-                emit(&lifecycle, &current, "did-start-loading", json!({}));
-            } else {
-                let _ = native::refresh_history(&webview, id);
-                emit(
-                    &lifecycle,
-                    &current,
-                    "did-navigate",
-                    json!({"isMainFrame":true}),
-                );
-                if current.bridge_ready {
-                    emit(&lifecycle, &current, "dom-ready", json!({}));
-                    emit(&lifecycle, &current, "did-stop-loading", json!({}));
-                }
-                let update = lifecycle.clone();
-                let label = current.label.clone();
-                let expected = current.snapshot.document_generation;
-                let _ = webview.eval_with_callback(
-                    "({title:document.title,url:location.href})",
-                    move |text| {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            let state = update.state::<DesktopState>();
-                            let Ok(mut registry) = state.registry.lock() else {
-                                return;
-                            };
-                            if let Some(guest) = registry.guests.values_mut().find(|guest| {
-                                guest.label == label
-                                    && guest.snapshot.document_generation == expected
-                            }) {
-                                guest.snapshot.title = value["title"].as_str().unwrap_or("").into();
-                                let snapshot = guest.clone();
-                                drop(registry);
-                                emit(
-                                    &update,
-                                    &snapshot,
-                                    "page-title-updated",
-                                    json!({"title":snapshot.snapshot.title}),
-                                );
-                            }
-                        }
-                    },
-                );
-            }
+            page_load(&lifecycle, &webview, id, payload.event(), payload.url());
         }),
         tauri::LogicalPosition::new(guest.bounds.x, guest.bounds.y),
         tauri::LogicalSize::new(guest.bounds.width.max(1.0), guest.bounds.height.max(1.0)),
@@ -258,6 +457,7 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
         webview
             .with_webview(move |platform| {
                 let result = (|| -> Result<(), String> {
+                    super::raise_ui(&handler_app)?;
                     unsafe {
                         let core = platform
                             .controller()
@@ -266,144 +466,7 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
                         #[cfg(debug_assertions)]
                         super::qa::install(&core, platform.environment())
                             .map_err(|e| e.to_string())?;
-                        let events = handler_app.clone();
-                        frames::install(
-                            core,
-                            id,
-                            PAGE_FACTORY,
-                            Arc::new(move |event| match event {
-                                frames::BoundEvent::Message { document, value } => {
-                                    message(&events, id, document, value)
-                                }
-                            frames::BoundEvent::BlockedNavigation{document,target}=>{
-                                let app=events.clone();let state=app.state::<DesktopState>();if let Ok(mut registry)=state.registry.lock()&&let Some(guest)=registry.guests.get_mut(&id){guest.snapshot.url=document.source.clone();}
-                                let lease_stamp=super::media::source_lease_stamp(id);let ui_generation=state.ui_generation.load(std::sync::atomic::Ordering::Acquire);
-                                tauri::async_runtime::spawn(async move{
-                                    let Ok(guest)=app.state::<DesktopState>().get(id)else{return;};if lease_stamp.is_empty()||super::media::source_lease_stamp(id)!=lease_stamp||app.state::<DesktopState>().ui_generation.load(std::sync::atomic::Ordering::Acquire)!=ui_generation{return;}
-                                    let template:Value=match serde_json::from_str(include_str!("../../../dist-rust-navigation/navigation-intent-template.json")){Ok(value)=>value,Err(_)=>return};
-                                    let code=format!("{}{}{}",template["head"].as_str().unwrap_or(""),json!(target),template["tail"].as_str().unwrap_or(""));
-                                    if let Ok(result)=evaluate_document(&app,guest,document,code).await&&result["value"]["value"]==true&&super::media::source_lease_stamp(id)==lease_stamp&&app.state::<DesktopState>().ui_generation.load(std::sync::atomic::Ordering::Acquire)==ui_generation{let _=app.emit_to("ui","browser:open-tab",json!({"url":target}));}
-                                });
-                            }
-                                frames::BoundEvent::Started(document) => {
-                                    if document.frame_id == 0 {
-                                        super::media::invalidate_source(id);
-                                    }
-                                    super::frame_requests::invalidate(id, &document);
-                                    if document.frame_id == 0 {
-                                        let state = events.state::<DesktopState>();
-                                        let current = {
-                                            let Ok(mut registry) = state.registry.lock() else {
-                                                return;
-                                            };
-                                            let Some(guest) = registry.guests.get_mut(&id) else {
-                                                return;
-                                            };
-                                            guest.snapshot.document_generation =
-                                                document.generation;
-                                            guest.snapshot.url = document.source;
-                                            guest.hook = document.hook;
-                                            guest.bridge_ready = false;
-                                            guest.page_ready = false;
-                                            guest.snapshot.loading = true;
-                                            guest.clone()
-                                        };
-                                        emit(
-                                            &events,
-                                            &current,
-                                            "did-start-navigation",
-                                            json!({"isMainFrame":true}),
-                                        );
-                                        emit(&events, &current, "did-start-loading", json!({}));
-                                    }
-                                }
-                                frames::BoundEvent::Ready(document) => {
-                                    if let Ok(current) = events.state::<DesktopState>().get(id) {
-                                        super::frame_requests::ready(
-                                            &events,
-                                            &current,
-                                            document.clone(),
-                                        );
-                                    }
-                                    if document.frame_id == 0 {
-                                        let state = events.state::<DesktopState>();
-                                        let current = {
-                                            let Ok(mut registry) = state.registry.lock() else {
-                                                return;
-                                            };
-                                            let Some(guest) = registry.guests.get_mut(&id) else {
-                                                return;
-                                            };
-                                            guest.snapshot.document_generation =
-                                                document.generation;
-                                            guest.bridge_ready = true;
-                                            guest.snapshot.loading = !guest.page_ready;
-                                            guest.snapshot.url = document.source;
-                                            guest.hook = document.hook;
-                                            guest.clone()
-                                        };
-                                        if current.page_ready {
-                                            emit(&events, &current, "dom-ready", json!({}));
-                                            emit(&events, &current, "did-stop-loading", json!({}));
-                                        }
-                                    }
-                                }
-                                frames::BoundEvent::LocationChanged(document) => {
-                                    super::frame_requests::invalidate(id, &document);
-                                    if let Ok(current) = events.state::<DesktopState>().get(id) {
-                                        super::frame_requests::ready(
-                                            &events,
-                                            &current,
-                                            document.clone(),
-                                        );
-                                    }
-                                    if document.frame_id == 0 {
-                                        let state = events.state::<DesktopState>();
-                                        let current = {
-                                            let Ok(mut registry) = state.registry.lock() else {
-                                                return;
-                                            };
-                                            let Some(guest) = registry.guests.get_mut(&id) else {
-                                                return;
-                                            };
-                                            guest.snapshot.url = document.source;
-                                            guest.clone()
-                                        };
-                                        emit(
-                                            &events,
-                                            &current,
-                                            "did-navigate-in-page",
-                                            json!({"isMainFrame":true}),
-                                        );
-                                    }
-                                }
-                                frames::BoundEvent::Destroyed(document) => {
-                                    super::frame_requests::invalidate(id, &document);
-                                    let state = events.state::<DesktopState>();
-                                    if let Ok(mut registry) = state.registry.lock() {
-                                        let tokens: Vec<_> = registry
-                                            .pending
-                                            .iter()
-                                            .filter(|(_, entry)| {
-                                                entry.guest == id
-                                                    && entry.generation == document.generation
-                                            })
-                                            .map(|(key, _)| key.clone())
-                                            .collect();
-                                        for token in tokens {
-                                            if let Some(entry) = registry.pending.remove(&token) {
-                                                let _ = entry
-                                                    .sender
-                                                    .send(Err("网页框架已关闭。".into()));
-                                            }
-                                        }
-                                    }
-                                }
-                                frames::BoundEvent::Error { frame_id, message } => {
-                                    eprintln!("Browser frame {frame_id} bridge: {message}");
-                                }
-                            }),
-                        )?;
+                        install_bridge(&handler_app, core, id)?;
                     }
                     target_view.navigate(target).map_err(|e| e.to_string())?;
                     Ok(())
@@ -435,6 +498,50 @@ pub async fn create(app: &AppHandle, request: CreateRequest) -> Result<Value, St
     let snapshot = state.get(id)?.snapshot;
     serde_json::to_value(snapshot).map_err(|e| e.to_string())
 }
+
+pub(super) async fn persist_sessions(app: &AppHandle) -> Result<(), String> {
+    let guests: Vec<_> = app
+        .state::<DesktopState>()
+        .registry
+        .lock()
+        .map_err(|_| "Browser registry unavailable")?
+        .guests
+        .values()
+        .cloned()
+        .collect();
+    let mut first_error = None;
+    for guest in guests {
+        let Ok(view) = view(app, &guest) else {
+            continue;
+        };
+        if let Err(error) = native::persist_session_cookies(&view).await {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+pub(super) fn close_views(app: &AppHandle) -> Result<(), String> {
+    let guests: Vec<_> = app
+        .state::<DesktopState>()
+        .registry
+        .lock()
+        .map_err(|_| "Browser registry unavailable")?
+        .guests
+        .values()
+        .cloned()
+        .collect();
+    for guest in guests {
+        frames::remove(guest.snapshot.guest_id);
+        if let Some(window) = app.get_webview_window(&guest.label) {
+            let _ = window.destroy();
+        } else if let Some(view) = app.get_webview(&guest.label) {
+            let _ = view.close();
+        }
+    }
+    Ok(())
+}
+
 pub async fn evaluate(app: &AppHandle, guest: Guest, code: String) -> Result<Value, String> {
     let document = bound_document(app, &guest).await?;
     evaluate_document(app, guest, document, code).await
@@ -600,7 +707,7 @@ pub async fn action(app: &AppHandle, payload: Value) -> Result<Value, String> {
         _ => Err("Unknown browser action".into()),
     }
 }
-pub fn layout(app: &AppHandle, payload: Value) -> Result<Value, String> {
+pub async fn layout(app: &AppHandle, payload: Value) -> Result<Value, String> {
     let id = payload["guestId"].as_u64().ok_or("Missing guestId")? as u32;
     let state = app.state::<DesktopState>();
     let old = state.validate(
@@ -613,18 +720,29 @@ pub fn layout(app: &AppHandle, payload: Value) -> Result<Value, String> {
     bounds.validate()?;
     let active = payload["active"].as_bool().unwrap_or(false);
     let webview = view(app, &old)?;
-    webview
-        .set_bounds(tauri::Rect {
-            position: tauri::LogicalPosition::new(bounds.x, bounds.y).into(),
-            size: tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
-        })
-        .map_err(|e| e.to_string())?;
-    if active {
-        webview.show()
+    if let Some(window) = app.get_webview_window(&old.label) {
+        super::popups::layout(&window, bounds, active)?;
     } else {
-        webview.hide()
+        webview
+            .set_bounds(tauri::Rect {
+                position: tauri::LogicalPosition::new(bounds.x, bounds.y).into(),
+                size: tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
+            })
+            .map_err(|e| e.to_string())?;
+        if active {
+            webview.show()
+        } else {
+            webview.hide()
+        }
+        .map_err(|e| e.to_string())?;
+        if active {
+            let main = app.clone();
+            let (reply, receiver) = crate::pending::channel();
+            app.run_on_main_thread(move || crate::pending::send(&reply, super::raise_ui(&main)))
+                .map_err(|e| e.to_string())?;
+            crate::pending::receive(receiver).await?;
+        }
     }
-    .map_err(|e| e.to_string())?;
     if let Ok(mut registry) = state.registry.lock()
         && let Some(guest) = registry.guests.get_mut(&id)
     {
@@ -673,7 +791,11 @@ pub async fn destroy(app: &AppHandle, payload: Value) -> Result<Value, String> {
     })
     .map_err(|e| e.to_string())?;
     crate::pending::receive(receiver).await?;
-    webview.close().map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window(&guest.label) {
+        window.destroy().map_err(|e| e.to_string())?;
+    } else {
+        webview.close().map_err(|e| e.to_string())?;
+    }
     Ok(Value::Null)
 }
 

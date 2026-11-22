@@ -1,11 +1,10 @@
-#requires -Version 7.0
 [CmdletBinding()]
 param(
   [ValidateSet('Online','Offline','Both')][string]$RuntimeMode = 'Online'
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
-$taskVersion = '0.1.0'
+$taskVersion = (Get-Content -LiteralPath (Join-Path $taskRoot 'src-tauri/tauri.preview.conf.json') -Raw | ConvertFrom-Json).version
 $taskCli = '2.12.6'
 $taskTarget = 'x86_64-pc-windows-msvc'
 $taskOut = Join-Path $taskRoot "release/rust/windows-preview/$taskVersion"
@@ -50,7 +49,7 @@ function Get-PreviewSourceInventory {
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'src-tauri/capabilities') -File -Recurse
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'src-tauri/permissions') -File -Recurse
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'src/desktop-rust') -File -Recurse
-    Get-Item -LiteralPath (Join-Path $taskRoot 'src/desktop/branding.ts'),(Join-Path $taskRoot 'src/desktop/branding.css')
+    Get-Item -LiteralPath (Join-Path $taskRoot 'src/desktop/branding.ts'),(Join-Path $taskRoot 'src/desktop/branding.css'),(Join-Path $taskRoot 'src/desktop/liquidGlassStore.ts'),(Join-Path $taskRoot 'src/desktop/liquidGlassRuntime.ts'),(Join-Path $taskRoot 'src/desktop/liquidGlassSettingsUI.ts'),(Join-Path $taskRoot 'src/desktop/liquidGlassTheme.css')
     Get-Item -LiteralPath (Join-Path $taskRoot '.gitattributes')
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'public'),(Join-Path $taskRoot 'src-tauri/icons') -File -Recurse
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'rust-host-poc') -File -Recurse
@@ -58,8 +57,10 @@ function Get-PreviewSourceInventory {
     Get-Item -LiteralPath (Join-Path $taskRoot 'package.json'),(Join-Path $taskRoot 'src-tauri/Cargo.toml'),(Join-Path $taskRoot 'src-tauri/Cargo.lock'),(Join-Path $taskRoot 'src-tauri/build.rs'),(Join-Path $taskRoot 'src-tauri/tauri.conf.json'),(Join-Path $taskRoot 'src-tauri/tauri.preview.conf.json'),(Join-Path $taskRoot 'src-tauri/tauri.offline.conf.json'),(Join-Path $taskRoot 'build/rust-host-compat-plugin.ts'),(Join-Path $taskRoot 'vite.rust.config.ts'),(Join-Path $taskRoot 'rust-index.html')
     Get-ChildItem -LiteralPath (Join-Path $taskRoot 'scripts') -File | Where-Object { $_.Name -match 'rust|freeze-core' }
   )
+  $rootNormalized = (Resolve-Path -LiteralPath $taskRoot).Path.TrimEnd('\','/')
   @($taskFiles | Sort-Object FullName -Unique | ForEach-Object {
-    [ordered]@{ path=[IO.Path]::GetRelativePath($taskRoot,$_.FullName).Replace([char]92,[char]47); sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+    $rel = $_.FullName.Substring($rootNormalized.Length).TrimStart('\','/').Replace([char]92,[char]47)
+    [ordered]@{ path=$rel; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
   })
 }
 

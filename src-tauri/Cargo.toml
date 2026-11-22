@@ -1,6 +1,6 @@
 [package]
 name = "studypilot-rust-host-poc"
-version = "0.1.0"
+version = "0.2.0"
 description = "R1 Windows WebView2 composition and input proof of concept"
 edition = "2024"
 rust-version = "1.90"

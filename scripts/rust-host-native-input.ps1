@@ -28,6 +28,11 @@ public static class RustPocInput {
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd,uint flag);
   [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd,int index);
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hwnd,uint command);
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern int GetWindowRgn(IntPtr hwnd,IntPtr region);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateRectRgn(int left,int top,int right,int bottom);
+  [DllImport("gdi32.dll")] public static extern bool PtInRegion(IntPtr region,int x,int y);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr region);
   [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr value);
   [DllImport("user32.dll")] public static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
   [DllImport("user32.dll",SetLastError=true)] public static extern bool InitializeTouchInjection(uint count,uint feedback);
@@ -92,6 +97,28 @@ if ($taskPayload.action -in @('touch','type','toggle-ime')) {
 }
 switch ($taskPayload.action) {
   'windows' { $taskWindows | ConvertTo-Json -Depth 4 -Compress; break }
+  'overlay' {
+    $top = [RustPocInput]::GetTopWindow($taskWindow)
+    $overlay = $top
+    while ($overlay -ne [IntPtr]::Zero) {
+      $title = [Text.StringBuilder]::new(256)
+      [void][RustPocInput]::GetWindowText($overlay,$title,256)
+      if ($title.ToString() -eq 'WISP RS') { break }
+      $overlay = [RustPocInput]::GetWindow($overlay,2)
+    }
+    if ($overlay -eq [IntPtr]::Zero) { throw 'Desktop UI child is missing' }
+    $region = [RustPocInput]::CreateRectRgn(0,0,0,0)
+    try {
+      if ([RustPocInput]::GetWindowRgn($overlay,$region) -eq 0) { throw 'Desktop UI has no window region' }
+      $rect = [RustPocInput+Rect]::new()
+      [void][RustPocInput]::GetWindowRect($overlay,[ref]$rect)
+      $scale = $taskGuest.dpi / 96.0
+      $pointX = $taskGuest.x + [int][Math]::Round($taskPayload.x * $scale) - $rect.Left
+      $pointY = $taskGuest.y + [int][Math]::Round($taskPayload.y * $scale) - $rect.Top
+      @{ aboveGuests = ($top -eq $overlay); includesPoint = [RustPocInput]::PtInRegion($region,$pointX,$pointY) } | ConvertTo-Json -Compress
+    } finally { [void][RustPocInput]::DeleteObject($region) }
+    break
+  }
   'click' {
     $taskX=[int]$taskPayload.x; $taskY=[int]$taskPayload.y
     if ($taskX -lt $taskGuest.x -or $taskY -lt $taskGuest.y -or $taskX -ge ($taskGuest.x+$taskGuest.width) -or $taskY -ge ($taskGuest.y+$taskGuest.height)) { throw 'Native click outside POC viewport refused.' }

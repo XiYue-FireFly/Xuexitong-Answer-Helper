@@ -18,6 +18,37 @@ use tauri::{
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+const GLASS_CAPTURE_BLEED_CSS_PX: f64 = 24.0;
+
+/// Expand a UI-space glass capture region by optical bleed on all four sides
+/// (matching Electron `glass-region.ts` `bleed = 24` and Android `gutter = 24 * density`),
+/// translated into guest-local CSS coordinates and safely clamped to `guest_bounds`.
+fn glass_capture_local_region(
+    region: CssRect,
+    guest_bounds: CssRect,
+    bleed: f64,
+) -> Result<CssRect, String> {
+    let region = region.validate()?;
+    let guest_bounds = guest_bounds.validate()?;
+    if !bleed.is_finite() || bleed < 0.0 {
+        return Err("Invalid glass capture bleed".into());
+    }
+    let left = (region.x - guest_bounds.x - bleed).max(0.0);
+    let top = (region.y - guest_bounds.y - bleed).max(0.0);
+    let right = (region.x - guest_bounds.x + region.width + bleed).min(guest_bounds.width);
+    let bottom = (region.y - guest_bounds.y + region.height + bleed).min(guest_bounds.height);
+    if right <= left || bottom <= top {
+        return Err("Capture region does not intersect the guest".into());
+    }
+    CssRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    }
+    .validate()
+}
+
 fn local_ui(url: &tauri::Url) -> bool {
     url.path() == "/rust-index.html"
         && url.host_str() == Some("tauri.localhost")
@@ -40,17 +71,18 @@ fn sync_ui(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     };
     if owner.is_minimized().map_err(|e| e.to_string())? {
-        ui.hide().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    let position = owner.inner_position().map_err(|e| e.to_string())?;
     let size = owner.inner_size().map_err(|e| e.to_string())?;
+    if size.width == 0 || size.height == 0 {
+        return Ok(());
+    }
     unsafe {
         windows::Win32::UI::WindowsAndMessaging::SetWindowPos(
             ui.hwnd().map_err(|e| e.to_string())?,
             None,
-            position.x,
-            position.y,
+            0,
+            0,
             size.width as i32,
             size.height as i32,
             windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
@@ -59,6 +91,67 @@ fn sync_ui(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Keep the shaped UI above its site siblings, without changing geometry or focus.
+fn raise_ui(app: &AppHandle) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetTopWindow, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    };
+    let owner = app
+        .get_window("desktop")
+        .ok_or("Desktop window unavailable")?;
+    let ui = app.get_webview_window("ui").ok_or("UI unavailable")?;
+    let owner = owner.hwnd().map_err(|e| e.to_string())?;
+    let ui = ui.hwnd().map_err(|e| e.to_string())?;
+    unsafe {
+        if GetTopWindow(Some(owner)).ok() != Some(ui) {
+            SetWindowPos(
+                ui,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn shutdown(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    if state
+        .shutdown_started
+        .swap(true, std::sync::atomic::Ordering::AcqRel)
+    {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if !matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                browser::persist_sessions(&app)
+            )
+            .await,
+            Ok(Ok(()))
+        ) {
+            eprintln!("Website session could not be saved during shutdown");
+        }
+        let closing = app.clone();
+        if app
+            .run_on_main_thread(move || {
+                let _ = browser::close_views(&closing);
+                closing.exit(0);
+            })
+            .is_err()
+        {
+            app.exit(0);
+        }
+    });
 }
 #[tauri::command]
 async fn desktop_host(
@@ -125,7 +218,7 @@ async fn desktop_host(
             let probe=native::script(&browser::view(&app,&guest)?,"({hooks:Object.getOwnPropertyNames(window).filter(name=>name.startsWith('__sp_')),transport:typeof window.chrome?.webview?.postMessage})".into()).await?;
             Ok(json!({"frames":frames,"probe":probe}))
         }
-        "browser:update-layout" => browser::layout(&app, payload),
+        "browser:update-layout" => browser::layout(&app, payload).await,
         "browser:destroy" => browser::destroy(&app, payload).await,
         "ui:layout-context" => Ok(
             json!({"documentGeneration":state.ui_generation.load(std::sync::atomic::Ordering::Acquire)}),
@@ -231,7 +324,7 @@ async fn desktop_host(
             Ok(Value::Null)
         }
         "window:close" => {
-            app.exit(0);
+            shutdown(&app);
             Ok(Value::Null)
         }
         "window:set-titlebar-theme" => {
@@ -382,9 +475,8 @@ async fn desktop_host(
             }
             let region: CssRect =
                 serde_json::from_value(payload["region"].clone()).map_err(|e| e.to_string())?;
-            let mut local = region;
-            local.x -= guest.bounds.x;
-            local.y -= guest.bounds.y;
+            let local =
+                glass_capture_local_region(region, guest.bounds, GLASS_CAPTURE_BLEED_CSS_PX)?;
             let png = native::png(&browser::view(&app, &guest)?).await?;
             if state.get(id)?.snapshot.document_generation != guest.snapshot.document_generation {
                 return Ok(json!({}));
@@ -508,7 +600,8 @@ pub fn run() -> tauri::Result<()> {
             let owner = window.hwnd()?;
             WebviewWindowBuilder::new(app, "ui", tauri::WebviewUrl::App("rust-index.html".into()))
                 .title("WISP RS")
-                .owner_raw(owner)
+                .parent_raw(owner)
+                .resizable(false)
                 .transparent(true)
                 .decorations(false)
                 .shadow(false)
@@ -538,9 +631,11 @@ pub fn run() -> tauri::Result<()> {
             }
             if window.label() == "desktop" {
                 match event {
-                    WindowEvent::Moved(_)
-                    | WindowEvent::Resized(_)
-                    | WindowEvent::ScaleFactorChanged { .. } => {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        shutdown(window.app_handle());
+                    }
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                         let _ = sync_ui(window.app_handle());
                     }
                     WindowEvent::Destroyed => window.app_handle().exit(0),
@@ -549,4 +644,196 @@ pub fn run() -> tauri::Result<()> {
             }
         })
         .run(tauri::generate_context!())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GLASS_CAPTURE_BLEED_CSS_PX, glass_capture_local_region};
+    use crate::geometry::{CssRect, crop_rect};
+
+    fn sample_guest_bounds() -> CssRect {
+        CssRect {
+            x: 0.0,
+            y: 98.0,
+            width: 1280.0,
+            height: 752.0,
+        }
+    }
+
+    #[test]
+    fn glass_capture_expands_middle_region_by_24px_bleed_on_all_sides() -> Result<(), String> {
+        let guest = sample_guest_bounds();
+        let region = CssRect {
+            x: 340.0,
+            y: 690.0,
+            width: 600.0,
+            height: 56.0,
+        };
+        let local = glass_capture_local_region(region, guest, GLASS_CAPTURE_BLEED_CSS_PX)?;
+        assert_eq!(
+            local,
+            CssRect {
+                x: 316.0,
+                y: 568.0,
+                width: 648.0,
+                height: 104.0,
+            }
+        );
+        let viewport = CssRect {
+            x: 0.0,
+            y: 0.0,
+            width: guest.width,
+            height: guest.height,
+        };
+        let (pixels, bounds) = crop_rect(local, viewport, (1280, 752))?;
+        assert_eq!(pixels, [316, 568, 648, 104]);
+        assert_eq!(bounds, local);
+        Ok(())
+    }
+
+    #[test]
+    fn glass_capture_clamps_safely_at_all_four_edges_without_negative_or_zero_bounds()
+    -> Result<(), String> {
+        let guest = sample_guest_bounds();
+        let viewport = CssRect {
+            x: 0.0,
+            y: 0.0,
+            width: guest.width,
+            height: guest.height,
+        };
+
+        // Top-left edge
+        let top_left = glass_capture_local_region(
+            CssRect {
+                x: 4.0,
+                y: 104.0,
+                width: 62.0,
+                height: 300.0,
+            },
+            guest,
+            GLASS_CAPTURE_BLEED_CSS_PX,
+        )?;
+        assert_eq!(top_left.x, 0.0);
+        assert_eq!(top_left.y, 0.0);
+        assert_eq!(top_left.width, 90.0);
+        assert_eq!(top_left.height, 330.0);
+        let (tl_px, tl_bounds) = crop_rect(top_left, viewport, (1280, 752))?;
+        assert!(tl_px[2] > 0 && tl_px[3] > 0);
+        assert!(tl_bounds.x >= 0.0 && tl_bounds.y >= 0.0);
+
+        // Bottom-right edge
+        let bottom_right = glass_capture_local_region(
+            CssRect {
+                x: 1210.0,
+                y: 780.0,
+                width: 62.0,
+                height: 62.0,
+            },
+            guest,
+            GLASS_CAPTURE_BLEED_CSS_PX,
+        )?;
+        assert_eq!(bottom_right.x, 1186.0);
+        assert_eq!(bottom_right.y, 658.0);
+        assert_eq!(bottom_right.x + bottom_right.width, guest.width);
+        assert_eq!(bottom_right.y + bottom_right.height, guest.height);
+        let (br_px, br_bounds) = crop_rect(bottom_right, viewport, (1280, 752))?;
+        assert_eq!(br_px, [1186, 658, 94, 94]);
+        assert!(br_bounds.width > 0.0 && br_bounds.height > 0.0);
+
+        // Near-full viewport region touching all four edges
+        let full = glass_capture_local_region(
+            CssRect {
+                x: 8.0,
+                y: 106.0,
+                width: 1264.0,
+                height: 736.0,
+            },
+            guest,
+            GLASS_CAPTURE_BLEED_CSS_PX,
+        )?;
+        assert_eq!(
+            full,
+            CssRect {
+                x: 0.0,
+                y: 0.0,
+                width: guest.width,
+                height: guest.height,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn glass_capture_uses_css_bleed_with_offset_guest_and_scaled_bitmap() -> Result<(), String> {
+        let guest = CssRect {
+            x: 100.0,
+            y: 200.0,
+            width: 600.0,
+            height: 400.0,
+        };
+        let local = glass_capture_local_region(
+            CssRect {
+                x: 150.0,
+                y: 250.0,
+                width: 100.0,
+                height: 80.0,
+            },
+            guest,
+            GLASS_CAPTURE_BLEED_CSS_PX,
+        )?;
+        assert_eq!(
+            local,
+            CssRect {
+                x: 26.0,
+                y: 26.0,
+                width: 148.0,
+                height: 128.0
+            }
+        );
+        let (pixels, bounds) = crop_rect(
+            local,
+            CssRect {
+                x: 0.0,
+                y: 0.0,
+                width: guest.width,
+                height: guest.height,
+            },
+            (1200, 800),
+        )?;
+        assert_eq!(pixels, [52, 52, 296, 256]);
+        assert_eq!(bounds, local);
+        assert_eq!((bounds.x + guest.x, bounds.y + guest.y), (126.0, 226.0));
+        Ok(())
+    }
+
+    #[test]
+    fn glass_capture_rejects_non_intersecting_or_invalid_regions() {
+        let guest = sample_guest_bounds();
+        assert!(
+            glass_capture_local_region(
+                CssRect {
+                    x: 1400.0,
+                    y: 200.0,
+                    width: 60.0,
+                    height: 60.0,
+                },
+                guest,
+                GLASS_CAPTURE_BLEED_CSS_PX,
+            )
+            .is_err()
+        );
+        assert!(
+            glass_capture_local_region(
+                CssRect {
+                    x: 100.0,
+                    y: 200.0,
+                    width: 0.0,
+                    height: 60.0,
+                },
+                guest,
+                GLASS_CAPTURE_BLEED_CSS_PX,
+            )
+            .is_err()
+        );
+    }
 }

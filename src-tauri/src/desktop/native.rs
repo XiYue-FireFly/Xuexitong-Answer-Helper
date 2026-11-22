@@ -12,12 +12,40 @@ use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, oneshot},
     time::Instant,
 };
-use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
-use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CapturePreviewCompletedHandler};
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, ICoreWebView2_2,
+};
+use webview2_com::{
+    CallDevToolsProtocolMethodCompletedHandler, CapturePreviewCompletedHandler,
+    GetCookiesCompletedHandler,
+};
 use windows::Win32::{Foundation::HGLOBAL, System::Com::StructuredStorage::CreateStreamOnHGlobal};
-use windows::core::HSTRING;
+use windows::core::{BOOL, HSTRING, Interface};
 
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
+const SESSION_COOKIE_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+fn is_learning_site(url: &tauri::Url) -> bool {
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .is_some_and(|host| host == "chaoxing.com" || host.ends_with(".chaoxing.com"))
+}
+
+fn is_session_site(url: &tauri::Url) -> bool {
+    #[cfg(debug_assertions)]
+    if url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && std::env::var_os("STUDYPILOT_RUST_PREVIEW_DATA").is_some()
+        && std::env::var("STUDYPILOT_RUST_SESSION_FIXTURE_ORIGIN")
+            .ok()
+            .as_deref()
+            == Some(url.origin().ascii_serialization().as_str())
+    {
+        return true;
+    }
+    is_learning_site(url)
+}
 
 /// FIFO asynchronous admission shared by live glass and image capture. The
 /// permit belongs to the native callback, rather than its awaiting consumer.
@@ -118,6 +146,76 @@ pub async fn cdp(view: &Webview, method: &str, params: Value) -> Result<(), Stri
     })
     .map_err(|e| e.to_string())?;
     pending::receive(receiver).await
+}
+
+/// Convert session cookies for the current guest origin into native persistent
+/// WebView2 cookies during an orderly application shutdown. Cookie values stay
+/// inside WebView2 and are never returned to Rust callers or written to logs.
+pub(super) async fn persist_session_cookies(view: &Webview) -> Result<(), String> {
+    let mut url = view.url().map_err(|_| "Could not resolve guest URL")?;
+    if !is_session_site(&url) || !url.username().is_empty() || url.password().is_some() {
+        return Ok(());
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    let uri = HSTRING::from(url.as_str());
+    let expiration = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs_f64()
+        + SESSION_COOKIE_TTL.as_secs_f64();
+    let operation = pending::Operation::new();
+    let dispatch = operation.clone();
+    let (reply, receiver) = pending::channel();
+    view.with_webview(move |platform| {
+        let failure = Arc::clone(&reply);
+        let result = (|| -> Result<(), String> {
+            dispatch.check()?;
+            unsafe {
+                let core = platform
+                    .controller()
+                    .CoreWebView2()
+                    .and_then(|core| core.cast::<ICoreWebView2_2>())
+                    .map_err(|e| e.to_string())?;
+                let manager = core.CookieManager().map_err(|e| e.to_string())?;
+                let callback_manager = manager.clone();
+                let callback = GetCookiesCompletedHandler::create(Box::new(move |status, list| {
+                    let result = (|| -> Result<(), String> {
+                        dispatch.check()?;
+                        status.map_err(|e| e.to_string())?;
+                        let Some(list) = list else {
+                            return Ok(());
+                        };
+                        let mut count = 0;
+                        list.Count(&mut count).map_err(|e| e.to_string())?;
+                        for index in 0..count {
+                            let cookie = list.GetValueAtIndex(index).map_err(|e| e.to_string())?;
+                            let mut session = BOOL::default();
+                            cookie.IsSession(&mut session).map_err(|e| e.to_string())?;
+                            if session.as_bool() {
+                                cookie
+                                    .SetExpires(expiration)
+                                    .and_then(|()| callback_manager.AddOrUpdateCookie(&cookie))
+                                    .map_err(|e| e.to_string())?;
+                            }
+                        }
+                        Ok(())
+                    })();
+                    pending::send(&reply, result);
+                    Ok(())
+                }));
+                manager
+                    .GetCookies(&uri, &callback)
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            pending::send(&failure, Err(error));
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    pending::receive_guarded(receiver, operation).await
 }
 pub async fn key_event(view: &Webview, id: u32, generation: u64, down: bool) -> Result<(), String> {
     let operation = crate::pending::Operation::new();
